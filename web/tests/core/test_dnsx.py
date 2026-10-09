@@ -24,3 +24,14 @@ class DnsxTest(SimpleTestCase):
         self.assertEqual(out['alias.example.com'], {'a': [], 'aaaa': [], 'cname': ['app.example.com']})
         self.assertEqual(out['bad.example.com'], {'a': [], 'aaaa': [], 'cname': []})
         self.assertEqual(set(out), {'app.example.com', 'alias.example.com', 'bad.example.com'})
+
+    def test_non_list_values_are_ignored(self):
+        out = dnsx.parse(['{"host":"n.example.com","a":5,"cname":"x"}'])
+        self.assertEqual(out['n.example.com'], {'a': [], 'aaaa': [], 'cname': []})
+
+    def test_ips_are_canonical_and_family_checked(self):
+        line = ('{"host":"v.example.com","a":["::1","1.2.3.4"],'
+                '"aaaa":["2606:2800:0220:0001::1","10.0.0.1","fe80::1%eth0"]}')
+        out = dnsx.parse([line])
+        self.assertEqual(out['v.example.com']['a'], ['1.2.3.4'])
+        self.assertEqual(out['v.example.com']['aaaa'], ['2606:2800:220:1::1'])

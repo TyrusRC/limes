@@ -9,12 +9,18 @@ def build_argv(hosts_file, output_file):
     return ['dnsx', '-l', hosts_file, '-a', '-aaaa', '-cname', '-resp', '-json', '-silent', '-o', output_file]
 
 
-def _valid_ip(value):
+def _canonical_ip(value, version):
+    if not isinstance(value, str) or '%' in value:
+        return None
     try:
-        ipaddress.ip_address(value)
-        return True
+        ip = ipaddress.ip_address(value)
     except ValueError:
-        return False
+        return None
+    return str(ip) if ip.version == version else None
+
+
+def _as_list(value):
+    return value if isinstance(value, list) else []
 
 
 def parse(lines):
@@ -30,11 +36,12 @@ def parse(lines):
         if not host:
             continue
         entry = out.setdefault(host, {'a': [], 'aaaa': [], 'cname': []})
-        for key in ('a', 'aaaa'):
-            for v in rec.get(key) or []:
-                if isinstance(v, str) and _valid_ip(v) and v not in entry[key]:
-                    entry[key].append(v)
-        for v in rec.get('cname') or []:
+        for key, version in (('a', 4), ('aaaa', 6)):
+            for v in _as_list(rec.get(key)):
+                ip = _canonical_ip(v, version)
+                if ip and ip not in entry[key]:
+                    entry[key].append(ip)
+        for v in _as_list(rec.get('cname')):
             c = normalize_host(v) if isinstance(v, str) else ''
             if c and c not in entry['cname']:
                 entry['cname'].append(c)
