@@ -37,9 +37,13 @@ def resolve_root(project, root_asset, results_dir, run=commands.run):
         count = 0
         for name, record in records.items():
             asset = assets.get(name)
-            if asset is not None:
+            if asset is None:
+                continue
+            try:
                 inventory.record_resolution(asset, record)
                 count += 1
+            except Exception:
+                logger.exception(f'Recording resolution failed for {name}')
         return count
     except Exception:
         logger.exception('Resolution failed')
