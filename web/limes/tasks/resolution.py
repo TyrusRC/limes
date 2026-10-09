@@ -5,6 +5,7 @@ import os
 from limes import commands
 from limes.pipeline import dnsx
 from limes.tasks import inventory
+from startScan.inventory_migrate import normalize_host
 from startScan.models import Asset
 
 logger = logging.getLogger(__name__)
@@ -48,3 +49,14 @@ def resolve_root(project, root_asset, results_dir, run=commands.run):
     except Exception:
         logger.exception('Resolution failed')
         return 0
+
+
+def resolve_domain(domain, results_dir):
+    """Resolve a scan's root domain inventory; 0 when the domain has no project or root asset."""
+    project = domain.project
+    root = (Asset.objects.filter(project=project, kind='root_domain', value=normalize_host(domain.name)).first()
+            if project else None)
+    if not project or not root:
+        logger.warning('Resolve: no project/root asset for this scan, skipping')
+        return 0
+    return resolve_root(project, root, results_dir)
