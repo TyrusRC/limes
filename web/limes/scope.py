@@ -47,7 +47,11 @@ def is_reserved_network(net):
 
 def target_host(target):
     """Host of a URL, host:port, [v6]:port or bare host; None when there is none."""
-    t = (target or '').strip()
+    raw = target or ''
+    # Parsers disagree on backslashes/whitespace/control chars (WHATWG vs urlsplit): refuse.
+    if any(c == '\\' or c.isspace() or ord(c) < 32 or ord(c) == 127 for c in raw):
+        return None
+    t = raw.strip()
     if not t:
         return None
     if parse_ip(t) is not None:  # bare IPv6 (no brackets) can't go through urlsplit
@@ -88,7 +92,10 @@ def _refusal(host, assets, attack, allow_co_brand):
         return None
     if not assets:
         return 'not in inventory'
-    if any(a.is_active_scan_allowed and (allow_co_brand or a.scope_tier != 'co_brand') for a in assets):
+    # Every same-value asset must be scannable; 'dependency' (observed, not decided) never vetoes.
+    decided = [a for a in assets if a.scope_tier != 'dependency']
+    if decided and all(a.is_active_scan_allowed and (allow_co_brand or a.scope_tier != 'co_brand')
+                       for a in decided):
         return None
     return 'scope tier ' + '/'.join(sorted({a.scope_tier for a in assets})) + ' is not actively scannable'
 
