@@ -67,6 +67,12 @@ class AssetListApiTest(TestCase):
         secret = Asset.objects.get(value='secret.y.com')
         self.assertEqual(self.c.get(f'/api/listDatatableAsset/{secret.id}/', {'project': 'p1'}).status_code, 404)
 
+    def test_retrieve_includes_enrichment(self):
+        self.root.enrichment = {'ripestat': {'asn': '13335', 'prefix': None, 'holder': 'X', 'fetched_at': 't'}}
+        self.root.save()
+        r = self.c.get(f'/api/listDatatableAsset/{self.root.id}/', {'project': 'p1'})
+        self.assertEqual(r.json()['enrichment']['ripestat']['asn'], '13335')
+
     def test_no_n_plus_one(self):
         # session + user + asset(+parent join, vuln count) + 3 prefetches
         with self.assertNumQueries(6):

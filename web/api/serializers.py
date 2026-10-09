@@ -764,4 +764,4 @@ class AssetSerializer(serializers.ModelSerializer):
                   'first_seen', 'last_seen', 'missed_count', 'http_status', 'page_title', 'webserver',
                   'content_type', 'content_length', 'response_time', 'cname', 'is_cdn', 'cdn_name',
                   'screenshot_path', 'sources', 'decision_reason', 'technologies', 'ip_addresses',
-                  'tags', 'vuln_count']
+                  'tags', 'vuln_count', 'enrichment']
