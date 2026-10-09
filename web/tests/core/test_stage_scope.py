@@ -103,3 +103,32 @@ class StageScopeTest(TestCase):
         with mock.patch.object(stages, 'stream_command') as sc:
             stages.port_scan(hosts=['own.x.com'], ctx=dict(self.ctx))
         sc.assert_not_called()
+
+    def test_subdomain_discovery_resolves_even_with_starting_point_path(self):
+        ctx = dict(self.ctx, starting_point_path='/app')
+        with mock.patch.object(stages.resolution, 'resolve_domain') as rd:
+            stages.subdomain_discovery(host='x.com', ctx=ctx)
+        rd.assert_called_once()
+        self.assertEqual(rd.call_args[0][0], self.domain)
+        self.assertEqual(rd.call_args[0][1], self.dir)
+
+    def test_initiate_scan_resolves_before_probing_root(self):
+        from limes.tasks import control
+        eng = EngineType.objects.create(engine_name='e2', yaml_configuration='{}')
+        calls = []
+        patches = {
+            'send_scan_notif': mock.patch.object(control, 'send_scan_notif'),
+            'save_imported_subdomains': mock.patch.object(control, 'save_imported_subdomains'),
+            'save_subdomain': mock.patch.object(control, 'save_subdomain', return_value=(mock.MagicMock(), True)),
+            'save_endpoint': mock.patch.object(control, 'save_endpoint', side_effect=lambda *a, **k: calls.append('probe') or (None, False)),
+            'resolve_domain': mock.patch.object(control.resolution, 'resolve_domain', side_effect=lambda *a, **k: calls.append('resolve') or 0),
+            'build_workflow': mock.patch.object(control, 'build_workflow', return_value=mock.MagicMock(tasks=[])),
+            'chain': mock.patch.object(control, 'chain'),
+        }
+        for p in patches.values():
+            p.start()
+            self.addCleanup(p.stop)
+        res = control.initiate_scan(domain_id=self.domain.id, engine_id=eng.id, scan_history_id=self.scan.id,
+                                    results_dir=self.dir)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(calls, ['resolve', 'probe'])

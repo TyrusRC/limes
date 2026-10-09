@@ -1,4 +1,5 @@
 from limes.tasks.base import *
+from limes.tasks import resolution
 from limes.tasks.notifications import send_scan_notif
 from limes.tasks.persistence import save_endpoint, save_imported_subdomains, save_subdomain
 from limes.tasks.stages import code_audit, fetch_url, port_scan, screenshot, subdomain_discovery, vulnerability_scan
@@ -154,6 +155,8 @@ def initiate_scan(
 
 		# If enable_http_crawl is set, create an initial root HTTP endpoint so that
 		# HTTP crawling can start somewhere
+		# Resolve first: the contact guard refuses unresolved hosts, so the root probe needs it.
+		resolution.resolve_domain(domain, scan.results_dir)
 		http_url = f'{domain.name}{starting_point_path}' if starting_point_path else domain.name
 		endpoint, _ = save_endpoint(
 			http_url,

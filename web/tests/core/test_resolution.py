@@ -121,3 +121,30 @@ class PerHostContainmentTest(ResolveRootTest):
         self.assertEqual(n, 1)
         self.assertIn('example.com', cm.output[0])
         self.assertEqual(list(self.app.ip_addresses.values_list('address', flat=True)), ['93.184.216.34'])
+
+
+class ResolveDomainTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+
+    def domain(self, project):
+        from targetApp.models import Domain
+        return Domain.objects.create(name='Example.COM', project=project, insert_date=timezone.now())
+
+    def test_no_project_returns_zero_with_warning(self):
+        with mock.patch.object(resolution, 'resolve_root') as rr, \
+                self.assertLogs('limes.tasks.resolution', level='WARNING'):
+            self.assertEqual(resolution.resolve_domain(self.domain(None), '/d'), 0)
+        rr.assert_not_called()
+
+    def test_no_root_asset_returns_zero_with_warning(self):
+        with mock.patch.object(resolution, 'resolve_root') as rr, \
+                self.assertLogs('limes.tasks.resolution', level='WARNING'):
+            self.assertEqual(resolution.resolve_domain(self.domain(self.p), '/d'), 0)
+        rr.assert_not_called()
+
+    def test_delegates_to_resolve_root(self):
+        root = Asset.objects.create(project=self.p, kind='root_domain', value='example.com', scope_tier='owned_root')
+        with mock.patch.object(resolution, 'resolve_root', return_value=4) as rr:
+            self.assertEqual(resolution.resolve_domain(self.domain(self.p), '/d'), 4)
+        rr.assert_called_once_with(self.p, root, '/d')

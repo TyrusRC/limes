@@ -2,8 +2,6 @@ from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
 from limes.tasks import resolution
-from startScan.inventory_migrate import normalize_host
-from startScan.models import Asset
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
 from limes.tasks.runner import run_command, stream_command
@@ -43,6 +41,9 @@ def subdomain_discovery(
 	"""
 	if not host:
 		host = self.subdomain.name if self.subdomain else self.domain.name
+
+	# Resolve before anything else (even the early return below): the contact guard refuses unresolved hosts.
+	resolution.resolve_domain(self.domain, self.results_dir)
 
 	if self.starting_point_path:
 		logger.warning(f'Ignoring subdomains scan as an URL path filter was passed ({self.starting_point_path}).')
@@ -169,13 +170,8 @@ def subdomain_discovery(
 			subdomains.append(subdomain)
 			urls.append(subdomain.name)
 
-	# Resolve before any probe: the contact guard refuses unresolved hosts.
-	project = self.domain.project if self.domain else None
-	root = Asset.objects.filter(project=project, kind='root_domain', value=normalize_host(self.domain.name)).first() if project else None
-	if project and root:
-		resolution.resolve_root(project, root, self.results_dir)
-	else:
-		logger.warning('Resolve: no project/root asset for this scan, skipping')
+	# Resolve again: this run's newly discovered hosts have no answer yet (the call above only covers known ones).
+	resolution.resolve_domain(self.domain, self.results_dir)
 
 	# Bulk crawl subdomains
 	if enable_http_crawl:
