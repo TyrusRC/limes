@@ -132,3 +132,14 @@ class StageScopeTest(TestCase):
                                     results_dir=self.dir)
         self.assertTrue(res.get('success'), res)
         self.assertEqual(calls, ['resolve', 'probe'])
+
+    def test_refusals_are_written_to_scope_refused_file(self):
+        with mock.patch.object(stages, 'stream_command', return_value=iter([])), \
+                self.assertLogs(stages.logger, level='WARNING') as cm:
+            stages.port_scan(hosts=['own.x.com', 'priv.x.com', 'dep.x.com'], ctx=dict(self.ctx))
+        with open(os.path.join(self.dir, 'scope_refused.txt')) as f:
+            lines = [l.split('\t') for l in f.read().splitlines()]
+        self.assertEqual(sorted(l[1] for l in lines), ['dep.x.com', 'priv.x.com'])
+        self.assertTrue(all(l[0] == 'port_scan' for l in lines))
+        self.assertIn('10.0.0.9', dict((l[1], l[2]) for l in lines)['priv.x.com'])
+        self.assertEqual(len([m for m in cm.output if 'Scope' in m]), 1)  # one aggregated warning

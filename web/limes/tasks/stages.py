@@ -13,9 +13,17 @@ def _in_scope(task, targets, level, allow_co_brand=True):
 		allowed, refused = scope.may_contact(project, targets)
 	else:
 		allowed, refused = scope.may_attack(project, targets, allow_co_brand=allow_co_brand)
-	for target, reason in refused:
-		logger.warning(f'Scope: refusing {target}: {reason}')
 	if refused:
+		by_reason = {}
+		for _, reason in refused:
+			by_reason[reason] = by_reason.get(reason, 0) + 1
+		logger.warning(f'Scope: refused {len(refused)} target(s) in {task.task_name}: {by_reason}; '
+			f'first: {[t for t, _ in refused[:10]]}')
+		try:
+			with open(os.path.join(task.results_dir, 'scope_refused.txt'), 'a') as f:
+				f.writelines(f'{task.task_name}\t{t}\t{r}\n' for t, r in refused)
+		except OSError as e:
+			logger.warning(f'Scope: could not write scope_refused.txt: {e}')
 		task.notify(fields={'Refused (scope)': len(refused)})
 	return allowed
 
