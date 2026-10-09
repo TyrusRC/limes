@@ -63,6 +63,8 @@ def run_crtsh(project, root, get=http.get_json):
     done = set()
     # Domains already in the inventory (candidate, rejected, ...) get evidence but never use up
     # the cap, so a large co-tenancy set surfaces over successive runs.
+    # NOTE: evidence writes for known domains are bounded only by certificates x SHARED_CERT_LIMIT;
+    # upgrade path: skip the write when that (source, evidence) pair is already recorded.
     known = set(Asset.objects.filter(project=project, kind='root_domain').values_list('value', flat=True))
     for cert in certs:
         regs = {r for r in (domains.registrable(n) for n in cert['names']) if r}
