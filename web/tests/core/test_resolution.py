@@ -103,3 +103,21 @@ class StaleIpReplacementTest(ResolveRootTest):
         resolution.resolve_root(self.p, self.root, self.dir,
                                 run=self.runner_with('{"host":"example.com","a":["93.184.216.35"]}'))
         self.assertEqual(list(self.app.ip_addresses.values_list('address', flat=True)), ['93.184.216.34'])
+
+
+class PerHostContainmentTest(ResolveRootTest):
+    def test_one_bad_host_does_not_stop_the_rest(self):
+        real = resolution.inventory.record_resolution
+        def flaky(asset, record):
+            if asset.value == 'example.com':
+                raise RuntimeError('boom')
+            return real(asset, record)
+        run = lambda argv, **kw: (open(argv[argv.index('-o') + 1], 'w').write(
+            '{"host":"example.com","a":["93.184.216.35"]}\n{"host":"app.example.com","a":["93.184.216.34"]}\n'),
+            SimpleNamespace(return_code=0))[1]
+        with mock.patch('limes.tasks.inventory.record_resolution', side_effect=flaky), \
+                self.assertLogs('limes.tasks.resolution', level='ERROR') as cm:
+            n = resolution.resolve_root(self.p, self.root, self.dir, run=run)
+        self.assertEqual(n, 1)
+        self.assertIn('example.com', cm.output[0])
+        self.assertEqual(list(self.app.ip_addresses.values_list('address', flat=True)), ['93.184.216.34'])
