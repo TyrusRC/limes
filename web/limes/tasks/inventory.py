@@ -54,7 +54,7 @@ def upsert_hostname_asset(project, name, parent=None, source='discovery',
     if parent is not None and asset.parent_id is None:
         asset.parent = parent
     _append_source(asset, source, evidence)
-    asset.save()
+    asset.save(update_fields=['sources', 'parent'])
     asset.mark_missing_or_seen(True)   # never changes scope_tier -> no promotion
     return asset
 
