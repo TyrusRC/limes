@@ -51,11 +51,18 @@ def resolve_root(project, root_asset, results_dir, run=commands.run):
         return 0
 
 
+def root_for_domain(domain):
+    """(project, root asset) for a scan's Domain; either may be None."""
+    project = getattr(domain, 'project', None)
+    if not project:
+        return None, None
+    root = Asset.objects.filter(project=project, kind='root_domain', value=normalize_host(domain.name)).first()
+    return project, root
+
+
 def resolve_domain(domain, results_dir):
     """Resolve a scan's root domain inventory; 0 when the domain has no project or root asset."""
-    project = domain.project
-    root = (Asset.objects.filter(project=project, kind='root_domain', value=normalize_host(domain.name)).first()
-            if project else None)
+    project, root = root_for_domain(domain)
     if not project or not root:
         logger.warning('Resolve: no project/root asset for this scan, skipping')
         return 0
