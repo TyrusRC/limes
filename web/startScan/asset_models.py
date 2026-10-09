@@ -8,7 +8,8 @@ from startScan.models import IpAddress, Technology
 
 ASSET_KINDS = [('root_domain', 'root_domain'), ('hostname', 'hostname'), ('ip', 'ip'), ('cidr', 'cidr')]
 SCOPE_TIERS = [('owned_root', 'owned_root'), ('owned_host', 'owned_host'),
-               ('co_brand', 'co_brand'), ('candidate', 'candidate'), ('rejected', 'rejected')]
+               ('co_brand', 'co_brand'), ('candidate', 'candidate'), ('rejected', 'rejected'),
+               ('dependency', 'dependency')]  # infrastructure we rely on, never scanned by IP
 ASSET_STATES = [('active', 'active'), ('missing', 'missing'), ('stale', 'stale'), ('retired', 'retired')]
 MISSING_THRESHOLD = 3
 SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]

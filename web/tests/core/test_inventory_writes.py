@@ -55,13 +55,6 @@ class InventoryHelpersTest(TestCase):
         self.assertEqual(a.webserver, 'old')
         self.assertEqual(a.http_status, 200); self.assertEqual(a.page_title, 'T')
 
-    def test_is_active_scan_allowed_for(self):
-        inv.upsert_hostname_asset(self.p, 'own.example.com', parent=self.root)  # owned_host
-        Asset.objects.create(project=self.p, kind='hostname', value='cb.example.com', scope_tier='co_brand')
-        self.assertTrue(inv.is_active_scan_allowed_for(self.p, 'hostname', 'own.example.com'))
-        self.assertFalse(inv.is_active_scan_allowed_for(self.p, 'hostname', 'cb.example.com'))
-        self.assertFalse(inv.is_active_scan_allowed_for(self.p, 'hostname', 'missing.example.com'))
-
     def test_finalize_lifecycle_marks_unseen_missing(self):
         from startScan.asset_models import ScanRun
         a = inv.upsert_hostname_asset(self.p, 'stale.example.com', parent=self.root)

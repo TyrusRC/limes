@@ -2,7 +2,10 @@
 NOT the migration back-fill (that is startScan/inventory_migrate.py, apps.get_model).
 Keyed by (project, kind, value); value normalized via normalize_host so live and
 migrated rows share identity."""
+import ipaddress
+
 from django.utils import timezone
+from limes import scope
 from startScan.models import Asset
 from startScan.inventory_migrate import normalize_host
 
@@ -56,12 +59,36 @@ def upsert_hostname_asset(project, name, parent=None, source='discovery',
     return asset
 
 
+def owned_ip_space(project):
+    """Networks a person (or an owned root's import) declared ours: owned ip/cidr assets."""
+    nets = []
+    for value in Asset.objects.filter(project=project, kind__in=('ip', 'cidr'),
+                                      scope_tier__in=('owned_root', 'owned_host')).values_list('value', flat=True):
+        try:
+            nets.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return nets
+
+
+def _new_ip_tier(project, address):
+    ip = scope.parse_ip(address)
+    if ip is None or scope.is_reserved_ip(ip):
+        return 'dependency'
+    if any(ip.version == n.version and ip in n for n in owned_ip_space(project)):
+        return 'owned_host'
+    return 'dependency'
+
+
 def upsert_ip_asset(project, address, source='probe', evidence=''):
     if not address:
         return None
-    asset, _ = Asset.objects.get_or_create(
+    asset, created = Asset.objects.get_or_create(
         project=project, kind='ip', value=address,
-        defaults={'scope_tier': 'owned_host'})
+        defaults={'scope_tier': 'dependency'})
+    if created:
+        # DNS/probe evidence never promotes: owned only inside declared owned space.
+        asset.scope_tier = _new_ip_tier(project, address)
     _append_source(asset, source, evidence)
     asset.save()
     asset.mark_missing_or_seen(True)
@@ -93,11 +120,6 @@ def mirror_subdomain_state(subdomain, project):
     for tech in subdomain.technologies.all():
         asset.technologies.add(tech)
     return asset
-
-
-def is_active_scan_allowed_for(project, kind, value):
-    asset = Asset.objects.filter(project=project, kind=kind, value=normalize_host(value)).first()
-    return bool(asset and asset.is_active_scan_allowed)
 
 
 def finalize_lifecycle(run):

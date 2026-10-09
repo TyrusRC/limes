@@ -40,7 +40,7 @@ function asset_post(url, body) {
 
 function asset_actions(row) {
 	var id = Number(row.id), html = '';
-	if (row.scope_tier === 'candidate') {
+	if (row.scope_tier === 'candidate' || row.scope_tier === 'dependency') {
 		html += '<button class="btn btn-xs btn-soft-success me-1" onclick="confirm_asset(' + id + ')">Confirm</button>';
 		html += '<button class="btn btn-xs btn-soft-danger me-1" onclick="reject_asset(' + id + ')">Reject</button>';
 	}
