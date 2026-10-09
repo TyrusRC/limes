@@ -158,7 +158,8 @@ def initiate_scan(
 		# If enable_http_crawl is set, create an initial root HTTP endpoint so that
 		# HTTP crawling can start somewhere
 		# Resolve first: the contact guard refuses unresolved hosts, so the root probe needs it.
-		resolution.resolve_domain(domain, scan.results_dir)
+		# Root only: this runs under the short orchestration time limit; discovery resolves the rest.
+		resolution.resolve_domain(domain, scan.results_dir, root_only=True)
 		http_url = f'{domain.name}{starting_point_path}' if starting_point_path else domain.name
 		endpoint, _ = save_endpoint(
 			http_url,

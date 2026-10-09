@@ -121,7 +121,7 @@ class StageScopeTest(TestCase):
             'save_imported_subdomains': mock.patch.object(control, 'save_imported_subdomains'),
             'save_subdomain': mock.patch.object(control, 'save_subdomain', return_value=(mock.MagicMock(), True)),
             'save_endpoint': mock.patch.object(control, 'save_endpoint', side_effect=lambda *a, **k: calls.append('probe') or (None, False)),
-            'resolve_domain': mock.patch.object(control.resolution, 'resolve_domain', side_effect=lambda *a, **k: calls.append('resolve') or 0),
+            'resolve_domain': mock.patch.object(control.resolution, 'resolve_domain', side_effect=lambda *a, **k: calls.append('resolve' if k.get('root_only') else 'resolve-all') or 0),
             'build_workflow': mock.patch.object(control, 'build_workflow', return_value=mock.MagicMock(tasks=[])),
             'chain': mock.patch.object(control, 'chain'),
         }
