@@ -241,6 +241,8 @@ def passive_intel(self, ctx={}, description=None):
 	)
 	counts, failed = {}, []
 	for name, step in steps:
+		if name == 'resolve' and counts.get('hostnames') == 0:
+			continue  # crt.sh found nothing new to resolve
 		try:
 			for k, v in step().items():
 				counts[k] = counts.get(k, 0) + v

@@ -46,24 +46,32 @@ def _store(asset, key, data, now):
 def run_crtsh(project, root, get=http.get_json):
     status, rows = get(crtsh.build_url(root.value), provider='crtsh')
     certs = crtsh.parse(rows) if status == 200 else []
-    owned = _owned_registrables(project)
-    hostnames = candidates = capped = seen = 0
+    owned = inventory.owned_root_values(project)
+    # distinct in-root names -> first certificate that listed them
+    names = {}
     for cert in certs:
         for name in cert['names']:
-            if seen >= MAX_NAMES_PER_ROOT:
-                break
-            if name.endswith('.' + root.value):
-                inventory.upsert_hostname_asset(project, name, parent=root, source='crtsh',
-                                                evidence=f'cert:{cert["id"]}')
-                hostnames += 1
-                seen += 1
+            if name.endswith('.' + root.value) and name not in names and len(names) < MAX_NAMES_PER_ROOT:
+                names[name] = cert['id']
+    existing = set(Asset.objects.filter(project=project, kind='hostname', parent=root)
+                   .values_list('value', flat=True))
+    hostnames = 0
+    for name, cert_id in names.items():
+        inventory.upsert_hostname_asset(project, name, parent=root, source='crtsh', evidence=f'cert:{cert_id}')
+        hostnames += name not in existing
+    candidates = capped = 0
+    done = set()
+    for cert in certs:
         regs = {r for r in (domains.registrable(n) for n in cert['names']) if r}
         if len(regs) > SHARED_CERT_LIMIT:
             continue
         in_root = next((n for n in cert['names'] if n == root.value or n.endswith('.' + root.value)), None)
         if not in_root:
             continue
-        for reg in sorted(regs - owned):
+        for reg in sorted(regs - done):
+            if any(reg == r or reg.endswith('.' + r) for r in owned):
+                continue
+            done.add(reg)
             if candidates >= MAX_CANDIDATES_PER_ROOT:
                 capped += 1
                 continue
