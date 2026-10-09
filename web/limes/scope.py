@@ -47,12 +47,11 @@ def is_reserved_network(net):
 
 def target_host(target):
     """Host of a URL, host:port, [v6]:port or bare host; None when there is none."""
-    raw = target or ''
-    # Parsers disagree on backslashes/whitespace/control chars (WHATWG vs urlsplit): refuse.
-    if any(c == '\\' or c.isspace() or ord(c) < 32 or ord(c) == 127 for c in raw):
-        return None
-    t = raw.strip()
+    t = (target or '').strip()
     if not t:
+        return None
+    # Parsers disagree on backslashes/whitespace/control chars (WHATWG vs urlsplit): refuse.
+    if any(c == '\\' or c.isspace() or ord(c) < 32 or ord(c) == 127 for c in t):
         return None
     if parse_ip(t) is not None:  # bare IPv6 (no brackets) can't go through urlsplit
         return str(ipaddress.ip_address(t)).lower()

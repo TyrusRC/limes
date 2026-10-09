@@ -38,6 +38,8 @@ class TargetHostTest(SimpleTestCase):
             'http://[::ffff:10.0.0.1]/': '::ffff:10.0.0.1',
             '[2606:4700::1]:443': '2606:4700::1',
             '2606:4700::1': '2606:4700::1',
+            'ok.x.com\t': 'ok.x.com',
+            '  ok.x.com\n': 'ok.x.com',
             '::ffff:10.0.0.1': '::ffff:10.0.0.1',
         }
         for raw, host in cases.items():
@@ -45,7 +47,7 @@ class TargetHostTest(SimpleTestCase):
 
     def test_empty_or_broken(self):
         for raw in ('', '   ', None, 'http://[::1', 'http://10.0.0.1\\@ok.x.com/', 'http://ok.x.com /',
-                    'ok.x.com\t', 'ok\x00.x.com'):
+                    'ok.x\tcom', 'ok\x00.x.com'):
             self.assertIsNone(scope.target_host(raw), raw)
 
 
