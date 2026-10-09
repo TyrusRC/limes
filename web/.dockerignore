@@ -1,0 +1,7 @@
+# Build context is ./web (COPY . /usr/src/app): keep host secrets and runtime output out of the image
+secret
+*.log
+**/__pycache__
+*.py[cod]
+staticfiles/
+.dockerignore
