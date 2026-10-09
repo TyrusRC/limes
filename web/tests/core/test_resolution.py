@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+from unittest import mock
 from types import SimpleNamespace
 
 from django.test import TestCase
@@ -25,6 +26,7 @@ class ResolveRootTest(TestCase):
 
     def fake_run(self, rc=0, write=True):
         def run(argv, **kw):
+            self.kw = kw
             self.argvs.append(argv)
             with open(argv[argv.index('-l') + 1]) as f:
                 self.hosts = f.read().split()
@@ -35,6 +37,7 @@ class ResolveRootTest(TestCase):
 
     def test_records_ips_as_dependencies_and_cname(self):
         n = resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
+        self.assertEqual(self.kw.get('timeout'), 1800)
         self.assertEqual(n, 1)                                   # only app.example.com is in inventory
         self.assertEqual(sorted(self.hosts), ['app.example.com', 'example.com'])
         self.app.refresh_from_db()
@@ -56,7 +59,19 @@ class ResolveRootTest(TestCase):
     def test_runner_exception_is_contained(self):
         def boom(argv, **kw):
             raise OSError('dnsx missing')
-        self.assertEqual(resolution.resolve_root(self.p, self.root, self.dir, run=boom), 0)
+        with self.assertLogs('limes.tasks.resolution', level='ERROR'):
+            self.assertEqual(resolution.resolve_root(self.p, self.root, self.dir, run=boom), 0)
+
+    def test_record_failure_is_contained(self):
+        with mock.patch('limes.tasks.inventory.record_resolution', side_effect=RuntimeError('db')):
+            with self.assertLogs('limes.tasks.resolution', level='ERROR'):
+                n = resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
+        self.assertEqual(n, 0)
+
+    def test_existing_ip_asset_keeps_its_tier(self):
+        Asset.objects.create(project=self.p, kind='ip', value='93.184.216.34', scope_tier='owned_host')
+        resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
+        self.assertEqual(Asset.objects.get(project=self.p, kind='ip', value='93.184.216.34').scope_tier, 'owned_host')
 
     def test_duplicate_legacy_ip_rows_do_not_crash(self):
         IpAddress.objects.create(address='93.184.216.34')
