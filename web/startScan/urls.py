@@ -22,6 +22,7 @@ urlpatterns = [
         'create_report/<int:id>',
         views.create_report,
         name='create_report'),
+    path('<slug:slug>/assets', views.assets, name='assets'),
     path(
         '<slug:slug>/all/subdomains',
         views.all_subdomains,

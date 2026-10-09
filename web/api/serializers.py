@@ -749,3 +749,19 @@ class VulnerabilitySerializer(serializers.ModelSerializer):
 		model = Vulnerability
 		fields = '__all__'
 		depth = 2
+
+
+class AssetSerializer(serializers.ModelSerializer):
+    parent_value = serializers.CharField(source='parent.value', read_only=True, default=None)
+    technologies = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+    ip_addresses = serializers.SlugRelatedField(many=True, read_only=True, slug_field='address')
+    tags = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+    vuln_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = Asset
+        fields = ['id', 'kind', 'value', 'parent', 'parent_value', 'scope_tier', 'active_authorized', 'state',
+                  'first_seen', 'last_seen', 'missed_count', 'http_status', 'page_title', 'webserver',
+                  'content_type', 'content_length', 'response_time', 'cname', 'is_cdn', 'cdn_name',
+                  'screenshot_path', 'sources', 'decision_reason', 'technologies', 'ip_addresses',
+                  'tags', 'vuln_count']
