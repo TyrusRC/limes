@@ -1,0 +1,5 @@
+{"host":"App.Example.com","a":["93.184.216.34","93.184.216.34"],"aaaa":["2606:2800:220:1::1"],"cname":["Edge.CDN.net."]}
+{"host":"alias.example.com","cname":["app.example.com"]}
+not json at all
+{"host":"bad.example.com","a":["not-an-ip", 7]}
+{"a":["1.2.3.4"]}
