@@ -168,5 +168,5 @@ def upsert_candidate(project, kind, value, source, evidence):
     asset, _ = Asset.objects.get_or_create(project=project, kind=kind, value=value,
                                            defaults={'scope_tier': 'candidate'})
     _append_source(asset, source, evidence)
-    asset.save()
+    asset.save(update_fields=['sources'])
     return asset

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest import mock
 
 from django.test import TestCase
 from django.utils import timezone
@@ -23,6 +24,13 @@ class CandidateTest(TestCase):
             a = inventory.upsert_candidate(self.p, 'root_domain', value, 'crtsh', 'cert:2')
             self.assertEqual(a.scope_tier, tier)
             self.assertEqual(a.sources[-1]['source'], 'crtsh')
+
+    def test_existing_asset_save_only_touches_sources(self):
+        # A concurrent Confirm/Reject must not be overwritten with a stale tier.
+        Asset.objects.create(project=self.p, kind='root_domain', value='own.com', scope_tier='owned_root')
+        with mock.patch.object(Asset, 'save', autospec=True, side_effect=Asset.save) as save:
+            inventory.upsert_candidate(self.p, 'root_domain', 'own.com', 'crtsh', 'cert:3')
+        self.assertEqual(save.call_args.kwargs.get('update_fields'), ['sources'])
 
     def test_owned_root_values(self):
         Asset.objects.create(project=self.p, kind='root_domain', value='own.com', scope_tier='owned_root')
