@@ -30,6 +30,18 @@ Limes is then served at `https://<host>` (nginx on 443).
 | `make test` | Run the core test suite in containers |
 | `sudo ./update.sh` | Pull, rebuild and restart |
 
+## Passive providers
+
+Scans query three free, keyless sources; none of them contacts your targets:
+
+| Provider | Used for |
+|---|---|
+| crt.sh | Hostnames under owned roots; other domains sharing your certificates become review candidates |
+| Shodan InternetDB | Open ports, CPEs, vulnerability IDs and tags per IP; hostnames on owned IPs become candidates |
+| RIPEstat | ASN, prefix and holder per IP |
+
+Shodan InternetDB is free for non-commercial use; check Shodan's terms before commercial deployment.
+
 ## Security
 
 Report vulnerabilities privately; see [.github/SECURITY.md](.github/SECURITY.md).

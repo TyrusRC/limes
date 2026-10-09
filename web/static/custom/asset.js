@@ -92,6 +92,29 @@ function asset_parent_chain(asset) {
 	return step(asset);
 }
 
+function asset_intel_html(e) {
+	e = e || {};
+	var rows = [], idb = e.internetdb, ripe = e.ripestat;
+	if (idb) {
+		if (idb.no_data) {
+			rows.push('<tr><td>InternetDB</td><td class="text-muted">No data</td><td>' + asset_esc(idb.fetched_at) + '</td></tr>');
+		} else {
+			rows.push('<tr><td>Open ports</td><td>' + asset_esc((idb.ports || []).join(', ')) + '</td><td>' + asset_esc(idb.fetched_at) + '</td></tr>');
+			rows.push('<tr><td>CPEs</td><td>' + asset_esc((idb.cpes || []).join(', ')) + '</td><td></td></tr>');
+			rows.push('<tr><td>Vulnerabilities</td><td>' + asset_esc((idb.vulns || []).join(', ')) + '</td><td></td></tr>');
+			rows.push('<tr><td>Tags</td><td>' + asset_esc((idb.tags || []).join(', ')) + '</td><td></td></tr>');
+		}
+	}
+	if (ripe) {
+		rows.push('<tr><td>ASN / prefix</td><td>' + asset_esc((ripe.asn ? 'AS' + ripe.asn : '') + (ripe.prefix ? ' ' + ripe.prefix : '')) +
+			'</td><td>' + asset_esc(ripe.fetched_at) + '</td></tr>');
+		rows.push('<tr><td>Holder</td><td>' + asset_esc(ripe.holder) + '</td><td></td></tr>');
+	}
+	if (!rows.length) return '';
+	return '<h5>Intel</h5><table class="table table-sm"><thead><tr><th></th><th>Value</th><th>Fetched</th></tr></thead><tbody>' +
+		rows.join('') + '</tbody></table>';
+}
+
 function get_asset_modal(id) {
 	asset_fetch(id).then(asset_parent_chain).then(function(chain) {
 		var a = chain[0];
@@ -109,7 +132,7 @@ function get_asset_modal(id) {
 			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
 			'<h5>Why is this mine</h5><p>' + path + '</p>' +
 			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
-			sources + '</tbody></table>'
+			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
 		);
 		$('#modal-footer').html(asset_actions(a));
 		$('#modal_dialog').modal('show');
