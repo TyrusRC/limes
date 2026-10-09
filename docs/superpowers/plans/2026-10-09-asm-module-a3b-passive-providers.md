@@ -872,7 +872,7 @@ def passive_intel(self, ctx={}, description=None):
 		return {}
 	steps = (
 		('crtsh', lambda: intel.run_crtsh(project, root)),
-		# hostnames crt.sh added must be resolved before later (guarded) stages
+		# hostnames crt.sh added are resolved so the scope guard and per-IP enrichment see them
 		('resolve', lambda: {'resolved': resolution.resolve_root(project, root, self.results_dir)}),
 		('internetdb', lambda: intel.run_internetdb(project, root)),
 		('ripestat', lambda: intel.run_ripestat(project, root)),
