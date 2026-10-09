@@ -119,6 +119,12 @@ class AddAssetsApiTest(TestCase):
         self._post(self.admin, **body)
         self.assertEqual(Asset.objects.filter(project=self.p, value='c.x.com').count(), 1)
 
+    def test_readding_a_dependency_ip_promotes_it(self):
+        Asset.objects.create(project=self.p, kind='ip', value='8.8.8.8', scope_tier='dependency')
+        msg = self._post(self.admin, project='p1', entries=['8.8.8.8'], tier='owned_host').json()['message']
+        self.assertEqual((msg['added'], msg['existing']), (1, 0))
+        self.assertEqual(Asset.objects.get(project=self.p, value='8.8.8.8').scope_tier, 'owned_host')
+
     def test_entries_list_and_unknown_project(self):
         self.assertEqual(self._post(self.admin, project='p1', entries=['d.x.com']).json()['message']['added'], 1)
         r = self._post(self.admin, project='nope', entries=['e.x.com'])

@@ -713,7 +713,7 @@ class AddAssets(APIView):
 					skipped += 1
 					warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
 					continue
-				promote = created or asset.scope_tier == 'candidate'
+				promote = created or asset.scope_tier in ('candidate', 'dependency')
 				if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
 					existing += 1
 					continue
