@@ -208,6 +208,10 @@ def detail_scan(request, id, slug):
     return render(request, 'startScan/detail_scan.html', ctx)
 
 
+def assets(request, slug):
+    return render(request, 'startScan/assets.html', {'assets_active': 'active'})
+
+
 def all_subdomains(request, slug):
     subdomains = Subdomain.objects.filter(target_domain__project__slug=slug)
     scan_engines = EngineType.objects.order_by('engine_name').all()

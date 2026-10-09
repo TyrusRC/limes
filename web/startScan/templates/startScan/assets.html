@@ -1,0 +1,99 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}
+Assets
+{% endblock title %}
+
+{% block main_content %}
+<div class="row justify-content-center">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="header-title mb-0">Assets</h4>
+          <button type="button" class="btn btn-primary btn-sm" onclick="show_add_asset_modal()">Add assets</button>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-3">
+            <select id="f_kind" class="form-select form-select-sm">
+              <option value="">All kinds</option>
+              <option>root_domain</option><option>hostname</option><option>ip</option><option>cidr</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <select id="f_scope_tier" class="form-select form-select-sm">
+              <option value="">All scope tiers</option>
+              <option>owned_root</option><option>owned_host</option><option>co_brand</option><option>candidate</option><option>rejected</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <select id="f_state" class="form-select form-select-sm">
+              <option value="">All states</option>
+              <option>active</option><option>missing</option><option>stale</option><option>retired</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <input type="text" id="f_tag" class="form-control form-control-sm" placeholder="Tag">
+          </div>
+        </div>
+        <div class="table-responsive">
+        <table id="asset_results" class="table table-hover table-striped w-100" data-project="{{ current_project.slug }}">
+          <thead>
+            <tr>
+              <th>Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
+              <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'custom/asset.js' %}"></script>
+<script type="text/javascript">
+$(document).ready(function() {
+  var project = "{{ current_project.slug }}";
+  var esc = $.fn.dataTable.render.text().display;
+  var join = function(d) { return esc((d || []).join(', ')); };
+  function assetUrl() {
+    var u = '/api/listDatatableAsset/?project=' + encodeURIComponent(project) + '&format=datatables';
+    ['kind', 'scope_tier', 'state', 'tag'].forEach(function(k) {
+      var v = document.getElementById('f_' + k).value;
+      if (v) u += '&' + k + '=' + encodeURIComponent(v);
+    });
+    return u;
+  }
+  // NOTE: column order must match AssetDatatableViewSet.filter_queryset colmap (0..4, 8).
+  var table = $('#asset_results').DataTable({
+    serverSide: true,
+    processing: true,
+    stripeClasses: [],
+    ajax: { url: assetUrl() },
+    columns: [
+      {data: 'value', render: function(d, t, row) {
+        return '<a href="#" onclick="get_asset_modal(' + Number(row.id) + ');return false;">' + esc(d) + '</a>';
+      }},
+      {data: 'kind', render: esc}, {data: 'scope_tier', render: esc}, {data: 'state', render: esc},
+      {data: 'http_status', defaultContent: ''},
+      {data: 'page_title', render: function(d) { return esc(d || ''); }},
+      {data: 'technologies', orderable: false, render: join},
+      {data: 'ip_addresses', orderable: false, render: join},
+      {data: 'last_seen', render: esc},
+      {data: 'tags', orderable: false, render: join},
+      {data: 'id', orderable: false, searchable: false, render: function(d, t, row) { return asset_actions(row); }}
+    ],
+    order: [[8, 'desc']]
+  });
+  ['kind', 'scope_tier', 'state', 'tag'].forEach(function(k) {
+    document.getElementById('f_' + k).addEventListener('change', function() {
+      table.ajax.url(assetUrl()).load();
+    });
+  });
+});
+</script>
+{% endblock page_level_script %}

@@ -31,6 +31,7 @@
               <a href="{% url 'subscan_history' current_project.slug %}" class="dropdown-item">Sub Scan History</a>
               <a href="{% url 'scheduled_scan_view' current_project.slug %}" class="dropdown-item">Scheduled Scan</a>
               <div class="dropdown-divider"></div>
+              <a href="{% url 'assets' current_project.slug %}" class="dropdown-item">Assets</a>
               <a href="{% url 'all_subdomains' current_project.slug %}" class="dropdown-item">All Subdomains</a>
               <a href="{% url 'all_endpoints' current_project.slug %}" class="dropdown-item">All Endpoints</a>
             </div>

@@ -6,6 +6,7 @@ import validators
 import requests
 
 from ipaddress import IPv4Network
+from django.db import transaction
 from django.db.models import CharField, Count, F, Q, Value
 from django.utils import timezone
 from django.template.defaultfilters import slugify
@@ -662,6 +663,171 @@ class ToggleSubdomainImportantStatus(APIView):
 		response = {'status': True}
 
 		return Response(response)
+
+
+class AddAssets(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+	MAX_ENTRIES = 5000
+
+	def post(self, request):
+		from api.asset_add import classify_asset_entry
+		from dashboard.stats import invalidate
+		data = request.data
+		if not isinstance(data, dict):
+			return Response({'status': False, 'message': 'expected a JSON object'})
+		project = Project.objects.filter(slug=data.get('project')).first()
+		if not project:
+			return Response({'status': False, 'message': 'unknown project'})
+		raw = data.get('entries') or data.get('text') or []
+		if isinstance(raw, str):
+			raw = [l for l in raw.replace(',', '\n').splitlines() if l.strip()]
+		if not isinstance(raw, list):
+			return Response({'status': False, 'message': 'entries must be a list or text'})
+		if len(raw) > self.MAX_ENTRIES:
+			return Response({'status': False, 'message': f'too many entries (max {self.MAX_ENTRIES} per request)'})
+		tier = data.get('tier', 'owned_host')
+		if tier not in ('owned_root', 'owned_host', 'co_brand'):
+			tier = 'owned_host'
+		reason = str(data.get('reason') or '')[:5000]
+		set_authorized = tier == 'co_brand' and 'active_authorized' in data
+		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
+		added, existing, skipped, warnings = 0, 0, 0, []
+		with transaction.atomic():
+			for entry in raw:
+				if not isinstance(entry, str):
+					skipped += 1
+					warnings.append('entry must be a string')
+					continue
+				c = classify_asset_entry(entry)
+				if c['error']:
+					skipped += 1
+					warnings.append(c['error'])
+					continue
+				asset, created = Asset.objects.get_or_create(
+					project=project, kind=c['kind'], value=c['value'],
+					defaults={'scope_tier': tier, 'state': 'active'})
+				# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
+				# those are explicit decisions made through Confirm/Reject.
+				if not created and asset.scope_tier == 'rejected':
+					skipped += 1
+					warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+					continue
+				promote = created or asset.scope_tier == 'candidate'
+				if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
+					existing += 1
+					continue
+				if promote:
+					asset.scope_tier = tier
+					asset.state = 'active'
+				if set_authorized:
+					asset.active_authorized = authorized
+				asset.added_by = request.user
+				if reason:
+					asset.decision_reason = reason
+				asset.save()
+				added += 1
+		invalidate(project.id)
+		return Response({'status': True, 'message': {
+			'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}})
+
+
+def _load_asset(request):
+	"""The asset must belong to the project named in the request: ids alone must not cross projects."""
+	if not isinstance(request.data, dict):
+		return None
+	project = request.data.get('project')
+	if not project:
+		return None
+	try:
+		return Asset.objects.filter(id=int(request.data.get('asset_id')), project__slug=project).first()
+	except (TypeError, ValueError, OverflowError):
+		return None
+
+
+class ConfirmAsset(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+
+	def post(self, request):
+		from dashboard.stats import invalidate
+		data = request.data
+		asset = _load_asset(request)
+		if not asset:
+			return Response({'status': False, 'message': 'asset not found'})
+		tier = data.get('tier', 'owned_host')
+		if tier not in ('owned_root', 'owned_host', 'co_brand'):
+			tier = 'owned_host'
+		asset.scope_tier = tier
+		if tier == 'co_brand' and 'active_authorized' in data:
+			asset.active_authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
+		asset.state = 'active'
+		asset.added_by = request.user
+		asset.decision_reason = str(data.get('reason') or '')[:5000]
+		asset.save()
+		invalidate(asset.project_id)
+		return Response({'status': True, 'message': 'confirmed'})
+
+
+class RejectAsset(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+
+	def post(self, request):
+		from dashboard.stats import invalidate
+		asset = _load_asset(request)
+		if not asset:
+			return Response({'status': False, 'message': 'asset not found'})
+		asset.scope_tier = 'rejected'
+		asset.added_by = request.user
+		asset.decision_reason = str(request.data.get('reason') or '')[:5000]
+		asset.save()
+		invalidate(asset.project_id)
+		return Response({'status': True, 'message': 'rejected'})
+
+
+class RescanAsset(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_INITATE_SCANS_SUBSCANS
+
+	def post(self, request):
+		asset = _load_asset(request)
+		if not asset:
+			return Response({'status': False, 'message': 'asset not found'})
+		if asset.kind != 'root_domain' or not asset.is_active_scan_allowed:
+			return Response({'status': False, 'message': 'Per-asset rescan is not supported yet (owned root domains only in A2).'})
+		domain = Domain.objects.filter(project=asset.project, name=asset.value).first()
+		if not domain:
+			return Response({'status': False, 'message': 'no Domain record for this root; add it as a target first.'})
+		# The Assets page sends no engine: reuse the target's last engine, else the first built-in one.
+		engine_id = request.data.get('engine_id')
+		if engine_id in (None, ''):
+			last = ScanHistory.objects.filter(domain=domain, scan_type__isnull=False).order_by('-start_scan_date').first()
+			engine = last.scan_type if last else EngineType.objects.filter(default_engine=True).order_by('id').first()
+		else:
+			try:
+				engine = EngineType.objects.filter(id=int(engine_id)).first()
+			except (TypeError, ValueError, OverflowError):
+				engine = None
+		if not engine:
+			return Response({'status': False, 'message': 'unknown scan engine; pick an engine or set a default one.'})
+		engine_id = engine.id
+		scan_history_id = create_scan_object(
+			host_id=domain.id, engine_id=engine_id, initiated_by_id=request.user.id)
+		# Mirrors startScan.views.start_scan_ui, plus scan_mode='asm'.
+		kwargs = {
+			'scan_history_id': scan_history_id,
+			'domain_id': domain.id,
+			'engine_id': engine_id,
+			'scan_type': LIVE_SCAN,
+			'results_dir': '/usr/src/scan_results',
+			'imported_subdomains': [],
+			'out_of_scope_subdomains': [],
+			'initiated_by_id': request.user.id,
+			'scan_mode': 'asm',
+		}
+		initiate_scan.apply_async(kwargs=kwargs)
+		return Response({'status': True, 'message': f'ASM scan started for {asset.value}'})
 
 
 class AddTarget(APIView):
@@ -2500,3 +2666,46 @@ class VulnerabilityViewSet(viewsets.ModelViewSet):
 					print(e)
 
 		return qs
+
+
+class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
+	queryset = Asset.objects.none()
+	serializer_class = AssetSerializer
+
+	def get_queryset(self):
+		params = self.request.query_params
+		project = params.get('project')
+		if not project:
+			return Asset.objects.none()
+		qs = (
+			Asset.objects.filter(project__slug=project)
+			.select_related('parent')
+			.prefetch_related('technologies', 'ip_addresses', 'tags')
+			.annotate(vuln_count=Count('vulnerabilities', distinct=True))
+		)
+		for field in ('kind', 'scope_tier', 'state'):
+			value = params.get(field)
+			if value:
+				qs = qs.filter(**{field: value})
+		tag = params.get('tag')
+		if tag:
+			qs = qs.filter(tags__name=tag)
+		return qs
+
+	def filter_queryset(self, qs):
+		search = self.request.GET.get('search[value]', '').strip()
+		if search:
+			qs = qs.filter(
+				Q(value__icontains=search) | Q(page_title__icontains=search) | Q(webserver__icontains=search))
+		col = self.request.GET.get('order[0][column]')
+		direction = self.request.GET.get('order[0][dir]', 'asc')
+		# No checkbox column in A2: DataTables column index -> model field.
+		colmap = {'0': 'value', '1': 'kind', '2': 'scope_tier', '3': 'state',
+				  '4': 'http_status', '8': 'last_seen'}
+		field = colmap.get(col, 'value')
+		return qs.order_by(('-' if direction == 'desc' else '') + field, 'id')
+
+	def paginate_queryset(self, queryset, view=None):
+		if 'no_page' in self.request.query_params:
+			return None
+		return self.paginator.paginate_queryset(queryset, self.request, view=self)

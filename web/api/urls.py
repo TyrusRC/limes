@@ -7,6 +7,7 @@ from .views import *
 app_name = 'api'
 router = routers.DefaultRouter()
 router.register(r'listDatatableSubdomain', SubdomainDatatableViewSet)
+router.register(r'listDatatableAsset', AssetDatatableViewSet, basename='asset')
 router.register(r'listTargets', ListTargetsDatatableViewSet)
 router.register(r'listSubdomains', SubdomainsViewSet)
 router.register(r'listEndpoints', EndPointViewSet)
@@ -22,6 +23,13 @@ router.register(r'notifications', InAppNotificationManagerViewSet, basename='not
 
 urlpatterns = [
     url('^', include(router.urls)),
+    path(
+        'add/assets/',
+        AddAssets.as_view(),
+        name='add_assets'),
+    path('action/asset/confirm/', ConfirmAsset.as_view(), name='confirm_asset'),
+    path('action/asset/reject/', RejectAsset.as_view(), name='reject_asset'),
+    path('action/asset/rescan/', RescanAsset.as_view(), name='rescan_asset'),
     path(
         'add/target/',
         AddTarget.as_view(),
