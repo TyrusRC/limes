@@ -32,6 +32,13 @@ class CandidateTest(TestCase):
             inventory.upsert_candidate(self.p, 'root_domain', 'own.com', 'crtsh', 'cert:3')
         self.assertEqual(save.call_args.kwargs.get('update_fields'), ['sources'])
 
+    def test_existing_hostname_save_only_touches_sources_and_parent(self):
+        # crt.sh upserts hostnames in bulk; a concurrent Confirm/Reject must not be reverted.
+        Asset.objects.create(project=self.p, kind='hostname', value='a.own.com', scope_tier='owned_host')
+        with mock.patch.object(Asset, 'save', autospec=True, side_effect=Asset.save) as save:
+            inventory.upsert_hostname_asset(self.p, 'a.own.com', source='crtsh', evidence='cert:4')
+        self.assertEqual(save.call_args_list[0].kwargs.get('update_fields'), ['sources', 'parent'])
+
     def test_owned_root_values(self):
         Asset.objects.create(project=self.p, kind='root_domain', value='own.com', scope_tier='owned_root')
         Asset.objects.create(project=self.p, kind='root_domain', value='cand.com', scope_tier='candidate')
