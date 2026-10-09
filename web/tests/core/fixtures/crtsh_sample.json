@@ -1,0 +1,7 @@
+[
+  {"id": 101, "common_name": "example.com", "name_value": "example.com\nwww.example.com\n*.example.com"},
+  {"id": 102, "common_name": "api.example.com", "name_value": "api.example.com\nshop.example-brand.net\n*.example-brand.net\nexample.org"},
+  {"id": "bad", "name_value": "x.example.com"},
+  "not a dict",
+  {"id": 103, "name_value": "not a domain\nWWW.Example.COM."}
+]

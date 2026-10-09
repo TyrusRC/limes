@@ -1,0 +1,1 @@
+{"cpes": ["cpe:/a:nginx:nginx:1.18.0"], "hostnames": ["Mail.Partner-Co.com.", "www.example.com", 7], "ip": "203.0.114.7", "ports": [443, 80, 80, "x"], "tags": ["cloud"], "vulns": ["CVE-2021-23017"]}
