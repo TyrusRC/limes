@@ -61,6 +61,9 @@ def run_crtsh(project, root, get=http.get_json):
         hostnames += name not in existing
     candidates = capped = 0
     done = set()
+    # Domains already in the inventory (candidate, rejected, ...) get evidence but never use up
+    # the cap, so a large co-tenancy set surfaces over successive runs.
+    known = set(Asset.objects.filter(project=project, kind='root_domain').values_list('value', flat=True))
     for cert in certs:
         regs = {r for r in (domains.registrable(n) for n in cert['names']) if r}
         if len(regs) > SHARED_CERT_LIMIT:
@@ -72,12 +75,13 @@ def run_crtsh(project, root, get=http.get_json):
             if _is_owned(reg, owned):
                 continue
             done.add(reg)
-            if candidates >= MAX_CANDIDATES_PER_ROOT:
+            is_new = reg not in known
+            if is_new and candidates >= MAX_CANDIDATES_PER_ROOT:
                 capped += 1
                 continue
             inventory.upsert_candidate(project, 'root_domain', reg, 'crtsh',
                                        f'cert:{cert["id"]} ({in_root}) shared with {root.value}')
-            candidates += 1
+            candidates += is_new
     return {'hostnames': hostnames, 'candidates': candidates, 'candidates_capped': capped}
 
 
