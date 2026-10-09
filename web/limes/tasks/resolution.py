@@ -12,6 +12,7 @@ from startScan.models import Asset
 
 logger = logging.getLogger(__name__)
 DNSX_TIMEOUT = 30 * 60
+DNSX_ROOT_ONLY_TIMEOUT = 2 * 60  # one name; must fit initiate_scan's 15-minute limit
 
 
 def resolve_root(project, root_asset, results_dir, run=commands.run, root_only=False):
@@ -32,7 +33,8 @@ def resolve_root(project, root_asset, results_dir, run=commands.run, root_only=F
             os.remove(out_file)  # never re-read a previous run's answers
         with open(hosts_file, 'w') as f:
             f.write('\n'.join(assets) + '\n')
-        res = run(dnsx.build_argv(hosts_file, out_file), timeout=DNSX_TIMEOUT)
+        res = run(dnsx.build_argv(hosts_file, out_file),
+                  timeout=DNSX_ROOT_ONLY_TIMEOUT if root_only else DNSX_TIMEOUT)
         if res is None or res.return_code != 0:
             logger.warning(f'dnsx exited with {getattr(res, "return_code", None)}')
         if not os.path.isfile(out_file):

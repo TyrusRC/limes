@@ -71,6 +71,7 @@ class ResolveRootTest(TestCase):
     def test_root_only_resolves_just_the_root(self):
         resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run(), root_only=True)
         self.assertEqual(self.hosts, ['example.com'])
+        self.assertEqual(self.kw.get('timeout'), 120)  # one name: must fit the start-up time limit
 
     def test_soft_time_limit_is_not_swallowed(self):
         from celery.exceptions import SoftTimeLimitExceeded
