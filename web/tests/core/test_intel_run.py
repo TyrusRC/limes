@@ -51,7 +51,7 @@ class IntelRunTest(TestCase):
         self.assertEqual(Asset.objects.get(value='api.example.com').parent, self.root)
         self.assertEqual(self.tier('example-brand.net'), 'candidate')
         self.assertEqual(self.tier('example.org'), 'candidate')
-        self.assertIn('cert:102 shared with example.com', Asset.objects.get(value='example.org').sources[0]['evidence'])
+        self.assertIn('cert:102 (api.example.com) shared with example.com', Asset.objects.get(value='example.org').sources[0]['evidence'])
         self.assertFalse(Asset.objects.filter(kind='hostname', value='example.com').exists())
         self.assertEqual(out['candidates'], 2)
 
@@ -72,9 +72,21 @@ class IntelRunTest(TestCase):
         intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, [{'id': 9, 'name_value': names}])))
         self.assertFalse(Asset.objects.filter(scope_tier='candidate').exists())
 
+    def test_candidates_are_capped_per_run(self):
+        rows = [{'id': i, 'name_value': f'h{i}.example.com\nco{i}.net'} for i in range(1, 151)]
+        out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(Asset.objects.filter(scope_tier='candidate').count(), 100)
+        self.assertEqual((out['candidates'], out['candidates_capped']), (100, 50))
+
+    def test_cert_without_in_root_name_contributes_no_candidates(self):
+        rows = [{'id': 5, 'name_value': 'other.net\nco.org'}]
+        out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertFalse(Asset.objects.filter(scope_tier='candidate').exists())
+        self.assertEqual(out['candidates'], 0)
+
     def test_crtsh_failure_is_harmless(self):
         self.assertEqual(intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(None, None))),
-                         {'hostnames': 0, 'candidates': 0})
+                         {'hostnames': 0, 'candidates': 0, 'candidates_capped': 0})
 
     # InternetDB
     def test_internetdb_enriches_and_suggests_only_from_owned_ips(self):

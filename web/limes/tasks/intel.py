@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 SHARED_CERT_LIMIT = 20      # certificates listing more registrable domains are not ownership evidence
 MAX_NAMES_PER_ROOT = 10000  # NOTE: ceiling per root per run; upgrade path: paginate/stream crt.sh
+# NOTE: ceiling of new co-tenant candidates per root per run. Co-tenant SANs are influenced by whoever
+# controls a name under the root; a large legitimate set is surfaced over several runs.
+MAX_CANDIDATES_PER_ROOT = 100
 FRESH_FOR = timedelta(hours=24)
 
 
@@ -43,7 +46,7 @@ def run_crtsh(project, root, get=http.get_json):
     status, rows = get(crtsh.build_url(root.value), provider='crtsh')
     certs = crtsh.parse(rows) if status == 200 else []
     owned = _owned_registrables(project)
-    hostnames = candidates = seen = 0
+    hostnames = candidates = capped = seen = 0
     for cert in certs:
         for name in cert['names']:
             if seen >= MAX_NAMES_PER_ROOT:
@@ -56,11 +59,17 @@ def run_crtsh(project, root, get=http.get_json):
         regs = {r for r in (domains.registrable(n) for n in cert['names']) if r}
         if len(regs) > SHARED_CERT_LIMIT:
             continue
+        in_root = next((n for n in cert['names'] if n == root.value or n.endswith('.' + root.value)), None)
+        if not in_root:
+            continue
         for reg in sorted(regs - owned):
+            if candidates >= MAX_CANDIDATES_PER_ROOT:
+                capped += 1
+                continue
             inventory.upsert_candidate(project, 'root_domain', reg, 'crtsh',
-                                       f'cert:{cert["id"]} shared with {root.value}')
+                                       f'cert:{cert["id"]} ({in_root}) shared with {root.value}')
             candidates += 1
-    return {'hostnames': hostnames, 'candidates': candidates}
+    return {'hostnames': hostnames, 'candidates': candidates, 'candidates_capped': capped}
 
 
 def run_internetdb(project, root, get=http.get_json, now=None):
