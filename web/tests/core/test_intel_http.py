@@ -29,8 +29,8 @@ class Session:
     def __init__(self, *items):
         self.items, self.calls = list(items), []
 
-    def get(self, url, timeout=None, headers=None):
-        self.calls.append((url, timeout, headers))
+    def get(self, url, timeout=None, headers=None, allow_redirects=None):
+        self.calls.append((url, timeout, headers, allow_redirects))
         item = self.items.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -76,6 +76,16 @@ class GetJsonTest(SimpleTestCase):
     def test_404_is_returned_not_retried(self):
         s = Session(Resp(404, {'detail': 'No information available'}))
         self.assertEqual(self.get(s), (404, {'detail': 'No information available'}))
+        self.assertEqual(len(s.calls), 1)
+
+    def test_redirects_are_not_followed(self):
+        s = Session(Resp(200, {}))
+        self.get(s)
+        self.assertIs(s.calls[0][3], False)
+
+    def test_redirect_returned_as_status_not_retried(self):
+        s = Session(Resp(301, bad_json=True))
+        self.assertEqual(self.get(s), (301, None))
         self.assertEqual(len(s.calls), 1)
 
     def test_bad_json_returns_none_body(self):

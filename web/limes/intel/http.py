@@ -25,7 +25,7 @@ def get_json(url, *, provider, session=requests, clock=time.monotonic, sleep=tim
             sleep(wait)
         _last[provider] = clock()
         try:
-            resp = session.get(url, timeout=TIMEOUT, headers=HEADERS)
+            resp = session.get(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=False)
         except requests.RequestException as e:
             logger.warning(f'{provider}: request failed: {e}')
         else:
