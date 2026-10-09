@@ -1,3 +1,4 @@
+from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
@@ -223,13 +224,17 @@ def passive_intel(self, ctx={}, description=None):
 
 	Contacts only those third-party APIs, never a target, so it needs no scope guard.
 	"""
-	project, root = resolution.root_for_domain(self.domain) if self.domain else (None, None)
+	try:
+		project, root = resolution.root_for_domain(self.domain) if self.domain else (None, None)
+	except Exception:
+		logger.exception('Passive intel: root lookup failed, skipping')
+		return {}
 	if not project or not root or root.scope_tier != 'owned_root':
 		logger.warning('Passive intel: no owned root for this scan, skipping')
 		return {}
 	steps = (
 		('crtsh', lambda: intel.run_crtsh(project, root)),
-		# hostnames crt.sh added must be resolved before later (guarded) stages
+		# hostnames crt.sh added are resolved so the scope guard and per-IP enrichment see them
 		('resolve', lambda: {'resolved': resolution.resolve_root(project, root, self.results_dir)}),
 		('internetdb', lambda: intel.run_internetdb(project, root)),
 		('ripestat', lambda: intel.run_ripestat(project, root)),
@@ -239,12 +244,19 @@ def passive_intel(self, ctx={}, description=None):
 		try:
 			for k, v in step().items():
 				counts[k] = counts.get(k, 0) + v
+		except SoftTimeLimitExceeded:
+			logger.warning(f'Passive intel: soft time limit hit in {name}, skipping remaining steps')
+			failed.append(name)
+			break
 		except Exception:
 			logger.exception(f'Passive intel: {name} failed')
 			failed.append(name)
 	if failed:
 		counts['failed'] = ', '.join(failed)
-	self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
+	try:
+		self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
+	except Exception:
+		logger.exception('Passive intel: notify failed')
 	return counts
 
 
