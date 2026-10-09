@@ -1,0 +1,8 @@
+example.com
+www.example.com
+api.example.com
+mail.example.com
+WWW.Example.com
+api.example.com
+notexample.com
+example.com.evil.com

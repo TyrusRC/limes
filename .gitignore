@@ -1,0 +1,18 @@
+# Local environment and generated secrets (scripts/gen_env.py, make certs)
+.env
+secrets/
+
+# Local research, never published
+reports/
+research_notes/
+
+# Runtime output
+*.log
+web/staticfiles/
+scan_results/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
