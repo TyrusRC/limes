@@ -41,6 +41,7 @@ class Asset(models.Model):
     missed_count = models.IntegerField(default=0)
 
     sources = models.JSONField(default=list, blank=True)
+    enrichment = models.JSONField(default=dict, blank=True)
     added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     decision_reason = models.TextField(blank=True, default='')
 

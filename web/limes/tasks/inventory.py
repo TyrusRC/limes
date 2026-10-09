@@ -153,3 +153,20 @@ def record_resolution(asset, record):
     asset.ip_addresses.set(rows)
     asset.last_resolved_at = timezone.now()
     asset.save(update_fields=['cname', 'last_resolved_at'])
+
+
+def owned_root_values(project):
+    return set(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
+               .values_list('value', flat=True))
+
+
+def upsert_candidate(project, kind, value, source, evidence):
+    """New assets start as candidates; an existing asset keeps its tier (rejected is never re-suggested)."""
+    value = normalize_host(value)
+    if not value:
+        return None
+    asset, _ = Asset.objects.get_or_create(project=project, kind=kind, value=value,
+                                           defaults={'scope_tier': 'candidate'})
+    _append_source(asset, source, evidence)
+    asset.save()
+    return asset
