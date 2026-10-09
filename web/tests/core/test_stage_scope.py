@@ -83,3 +83,23 @@ class StageScopeTest(TestCase):
         with mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
             stages.fetch_url(urls=['https://own.x.com/', 'https://dep.x.com/'], ctx=dict(self.ctx))
         self.assertEqual(self.read('input_endpoints_fetch_url.txt'), ['https://own.x.com/'])
+
+    def test_fetch_url_filters_crawled_output_before_artifact_collection(self):
+        def fake_run(argv, output_path=None, **kw):
+            if output_path:
+                with open(output_path, 'w') as f:
+                    f.write('https://own.x.com/a.js\nhttps://dep.x.com/b.js\n')
+            return SimpleNamespace(return_code=0, output='')
+        with mock.patch.object(stages.commands, 'run', side_effect=fake_run), \
+                mock.patch.object(stages.crawl, 'collect_code_artifacts', return_value=([], {})) as cca:
+            stages.fetch_url(urls=['https://own.x.com/'], ctx=dict(self.ctx))
+        cca.assert_called_once()
+        self.assertEqual(sorted(cca.call_args[0][1]), ['https://own.x.com/', 'https://own.x.com/a.js'])
+
+    def test_no_project_means_nothing_is_attacked(self):
+        orphan = Domain.objects.create(name='y.com', project=None, insert_date=timezone.now())
+        self.scan.domain = orphan
+        self.scan.save()
+        with mock.patch.object(stages, 'stream_command') as sc:
+            stages.port_scan(hosts=['own.x.com'], ctx=dict(self.ctx))
+        sc.assert_not_called()
