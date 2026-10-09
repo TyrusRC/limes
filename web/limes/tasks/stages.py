@@ -645,6 +645,8 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 	try:
 		with open(self.output_path) as f:
 			crawled = [l.strip() for l in f if l.strip()]
+		# collect_code_artifacts fetches every .js/.map and probes .git per origin
+		crawled = _in_scope(self, crawled, 'attack')
 		art_header_argv, art_tmps = identity.render_header_args(ident)
 		try:
 			_, art_map = crawl.collect_code_artifacts(
@@ -875,7 +877,7 @@ def http_crawl(
 	if self.excluded_paths:
 		urls = exclude_urls_by_patterns(self.excluded_paths, urls)
 
-	urls = _in_scope(self, urls, 'contact')
+	urls = _in_scope(self, urls or [], 'contact')
 	if urls:
 		with open(input_path, 'w') as f:
 			f.write('\n'.join(urls))

@@ -3,6 +3,8 @@
 NOTE: checks the IPs recorded by the latest resolution; a tool resolving later
 can get a different answer (DNS rebinding). Upgrade path: pin tools to the
 resolved IPs (naabu -host <ip>, httpx host-to-IP pinning).
+Tools that follow redirects (httpx -fr, curl -L) can also reach hosts the guard
+never saw. Upgrade path: disable cross-host redirects or re-check redirect targets.
 """
 import ipaddress
 from urllib.parse import urlsplit
