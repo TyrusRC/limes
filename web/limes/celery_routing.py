@@ -6,6 +6,7 @@ SOFT_MARGIN = 120
 TASK_PLAN = {
     # discovery 2 h
     'subdomain_discovery': (SCAN, 2 * HOUR),
+    'passive_intel': (SCAN, 1 * HOUR),
     # port scan 2 h
     'port_scan': (SCAN, 2 * HOUR), 'nmap': (SCAN, 2 * HOUR),
     # crawl / probe 2 h

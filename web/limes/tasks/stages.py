@@ -1,7 +1,7 @@
 from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
-from limes.tasks import resolution
+from limes.tasks import intel, resolution
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
 from limes.tasks.runner import run_command, stream_command
@@ -215,6 +215,37 @@ def subdomain_discovery(
 			self.notify(fields={'Interesting subdomains': subdomains_str})
 
 	return SubdomainSerializer(subdomains, many=True).data
+
+
+@app.task(name='passive_intel', base=LimesTask, bind=True)
+def passive_intel(self, ctx={}, description=None):
+	"""Passive providers (crt.sh, Shodan InternetDB, RIPEstat) for the scan's owned root.
+
+	Contacts only those third-party APIs, never a target, so it needs no scope guard.
+	"""
+	project, root = resolution.root_for_domain(self.domain) if self.domain else (None, None)
+	if not project or not root or root.scope_tier != 'owned_root':
+		logger.warning('Passive intel: no owned root for this scan, skipping')
+		return {}
+	steps = (
+		('crtsh', lambda: intel.run_crtsh(project, root)),
+		# hostnames crt.sh added must be resolved before later (guarded) stages
+		('resolve', lambda: {'resolved': resolution.resolve_root(project, root, self.results_dir)}),
+		('internetdb', lambda: intel.run_internetdb(project, root)),
+		('ripestat', lambda: intel.run_ripestat(project, root)),
+	)
+	counts, failed = {}, []
+	for name, step in steps:
+		try:
+			for k, v in step().items():
+				counts[k] = counts.get(k, 0) + v
+		except Exception:
+			logger.exception(f'Passive intel: {name} failed')
+			failed.append(name)
+	if failed:
+		counts['failed'] = ', '.join(failed)
+	self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
+	return counts
 
 
 @app.task(name='screenshot', base=LimesTask, bind=True)
