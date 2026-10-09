@@ -44,7 +44,8 @@ class TargetHostTest(SimpleTestCase):
             self.assertEqual(scope.target_host(raw), host, raw)
 
     def test_empty_or_broken(self):
-        for raw in ('', '   ', None, 'http://[::1'):
+        for raw in ('', '   ', None, 'http://[::1', 'http://10.0.0.1\\@ok.x.com/', 'http://ok.x.com /',
+                    'ok.x.com\t', 'ok\x00.x.com'):
             self.assertIsNone(scope.target_host(raw), raw)
 
 
@@ -96,3 +97,23 @@ class GuardTest(TestCase):
             allowed, refused = scope.may_contact(self.p, ['ok.x.com'])
         self.assertEqual(allowed, [])
         self.assertIn('scope check failed', refused[0][1])
+
+    def test_mixed_kind_same_value_all_must_be_scannable(self):
+        a = self.host('example.com', tier='owned_root', ips=['8.8.8.8'])
+        a.kind = 'root_domain'
+        a.save()
+        self.host('example.com', tier='rejected')
+        self.assertEqual(scope.may_attack(self.p, ['example.com'])[0], [])
+
+    def test_dependency_never_vetoes_but_never_grants(self):
+        for tier, kind in (('owned_root', 'root_domain'), ('dependency', 'ip')):
+            Asset.objects.create(project=self.p, kind=kind, value='203.0.114.10', scope_tier=tier)
+        Asset.objects.create(project=self.p, kind='ip', value='9.9.9.9', scope_tier='dependency')
+        Asset.objects.create(project=self.p, kind='ip', value='8.8.4.4', scope_tier='rejected')
+        allowed, _ = scope.may_attack(self.p, ['203.0.114.10', '9.9.9.9', '8.8.4.4'])
+        self.assertEqual(allowed, ['203.0.114.10'])
+
+    def test_contact_refuses_loopback_literal_and_backslash_confusion(self):
+        self.host('ok.x.com', ips=['8.8.8.8'])
+        allowed, _ = scope.may_contact(self.p, ['127.0.0.1', 'http://10.0.0.1\\@ok.x.com/'])
+        self.assertEqual(allowed, [])
