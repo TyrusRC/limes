@@ -108,11 +108,15 @@ def _check(project, targets, attack, allow_co_brand):
     allowed, refused = [], []
     try:
         hosts = {t: target_host(t) for t in targets}
-        assets = _assets_by_value(project, {h for h in hosts.values() if h})
+        keys = {}
+        for h in {h for h in hosts.values() if h}:
+            p = parse_ip(h)
+            keys[h] = str(p) if p else h
+        # Query the canonical key and the raw host: stored values may be non-canonical.
+        assets = _assets_by_value(project, set(keys.values()) | set(keys))
         for t in targets:
             h = hosts[t]
-            p = parse_ip(h) if h else None
-            reason = _refusal(h, assets.get(str(p) if p else h, []), attack, allow_co_brand)
+            reason = _refusal(h, (assets.get(keys[h]) or assets.get(h) or []) if h else [], attack, allow_co_brand)
             if reason:
                 refused.append((t, reason))
             else:
