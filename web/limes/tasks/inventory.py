@@ -132,3 +132,17 @@ def finalize_lifecycle(run):
     for asset in qs.iterator(chunk_size=2000):
         asset.mark_missing_or_seen(False); n += 1
     return n
+
+
+def record_resolution(asset, record):
+    """Write one host's dnsx answer: CNAME, IP assets (via upsert_ip_asset), host->IP links."""
+    from startScan.models import IpAddress
+    if record.get('cname'):
+        asset.cname = record['cname'][0]
+    for address in list(record.get('a', [])) + list(record.get('aaaa', [])):
+        upsert_ip_asset(asset.project, address, source='dns', evidence=f'host:{asset.value}')
+        # address is not unique on the legacy table: reuse the oldest row
+        ip = IpAddress.objects.filter(address=address).order_by('id').first() or IpAddress.objects.create(address=address)
+        asset.ip_addresses.add(ip)
+    asset.last_resolved_at = timezone.now()
+    asset.save(update_fields=['cname', 'last_resolved_at'])
