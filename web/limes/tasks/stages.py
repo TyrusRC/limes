@@ -1,11 +1,26 @@
 from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
+from limes import scope
 from limes.tasks import resolution
 from startScan.inventory_migrate import normalize_host
 from startScan.models import Asset
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
 from limes.tasks.runner import run_command, stream_command
+
+def _in_scope(task, targets, level, allow_co_brand=True):
+	"""Drop targets the scope guard refuses (fails closed) and report them."""
+	project = task.domain.project if task.domain else None
+	if level == 'contact':
+		allowed, refused = scope.may_contact(project, targets)
+	else:
+		allowed, refused = scope.may_attack(project, targets, allow_co_brand=allow_co_brand)
+	for target, reason in refused:
+		logger.warning(f'Scope: refusing {target}: {reason}')
+	if refused:
+		task.notify(fields={'Refused (scope)': len(refused)})
+	return allowed
+
 
 #------------------------- #
 # Tracked Limes tasks    #
@@ -219,13 +234,19 @@ def screenshot(self, ctx={}, description=None):
 	strict = True if intensity == 'normal' else False
 
 	# Get URLs to take screenshot of
-	get_http_urls(
+	urls = get_http_urls(
 		is_alive=enable_http_crawl,
 		strict=strict,
 		write_filepath=alive_endpoints_file,
 		get_only_default_urls=True,
 		ctx=ctx
-	)
+	) or []
+	urls = _in_scope(self, urls, 'contact')
+	if not urls:
+		logger.warning('Screenshot: no in-scope URLs, skipping')
+		return []
+	with open(alive_endpoints_file, 'w') as f:
+		f.write('\n'.join(urls))
 
 	# Send start notif
 	notification = Notification.objects.first()
@@ -316,14 +337,14 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 	nmap_script = ','.join(return_iterable(nmap_script))
 	nmap_script_args = config.get(NMAP_SCRIPT_ARGS)
 
-	if hosts:
-		with open(input_file, 'w') as f:
-			f.write('\n'.join(hosts))
-	else:
-		hosts = get_subdomains(
-			write_filepath=input_file,
-			exclude_subdomains=exclude_subdomains,
-			ctx=ctx)
+	if not hosts:
+		hosts = get_subdomains(exclude_subdomains=exclude_subdomains, ctx=ctx)
+	hosts = _in_scope(self, hosts, 'attack', allow_co_brand=False)
+	if not hosts:
+		logger.warning('Port scan: no in-scope hosts, skipping')
+		return {}
+	with open(input_file, 'w') as f:
+		f.write('\n'.join(hosts))
 
 	# Build cmd
 	cmd = 'naabu -json -exclude-cdn'
@@ -480,6 +501,9 @@ def nmap(
 		max_rate (int): Max rate.
 		description (str, optional): Task description shown in UI.
 	"""
+	if not host or not _in_scope(self, [host], 'attack', allow_co_brand=False):
+		logger.warning(f'nmap: {host or input_file} refused by scope guard')
+		return
 	notif = Notification.objects.first()
 	ports_str = ','.join(str(port) for port in ports)
 	self.filename = self.filename.replace('.txt', '.xml')
@@ -577,6 +601,13 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 			get_only_default_urls=True,
 			ctx=ctx
 		)
+
+	urls = _in_scope(self, urls or [], 'attack')
+	if not urls:
+		logger.warning('Fetch URL: no in-scope URLs, skipping')
+		return []
+	with open(input_path, 'w') as f:
+		f.write('\n'.join(urls))
 
 	# Domain regex
 	host = self.domain.name if self.domain else urlparse(urls[0]).netloc
@@ -700,7 +731,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 			if self.engine and getattr(self.engine, 'profile', None) else profiles.resolve_profile('normal'))
 
 	# Gather crawled, alive HTTP URLs discovered for this scan
-	target_urls = get_http_urls(is_alive=True, ctx=ctx)
+	target_urls = _in_scope(self, get_http_urls(is_alive=True, ctx=ctx) or [], 'attack')
 	if not target_urls:
 		logger.warning('No alive HTTP URLs to scan, skipping DAST stage')
 		return 0
@@ -843,6 +874,11 @@ def http_crawl(
 	# exclude urls by pattern
 	if self.excluded_paths:
 		urls = exclude_urls_by_patterns(self.excluded_paths, urls)
+
+	urls = _in_scope(self, urls, 'contact')
+	if urls:
+		with open(input_path, 'w') as f:
+			f.write('\n'.join(urls))
 
 	# If no URLs found, skip it
 	if not urls:
