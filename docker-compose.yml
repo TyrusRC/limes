@@ -1,0 +1,192 @@
+x-app: &app
+  build:
+    context: ./web
+  image: limes:local
+  restart: unless-stopped
+  env_file: .env
+  environment: &app-env
+    DEBUG: "0"
+    CELERY_BROKER: redis://redis:6379/0
+    CACHE_URL: redis://redis:6379/1
+    POSTGRES_HOST: pgbouncer
+    POSTGRES_PORT: "6432"
+  volumes: &app-volumes
+    - wordlist:/usr/src/wordlist
+    - scan_results:/usr/src/scan_results
+    - nuclei_templates:/root/nuclei-templates
+    - tool_config:/root/.config
+  networks: [limes_network]
+  depends_on: &app-deps
+    migrate:
+      condition: service_completed_successfully
+    pgbouncer:
+      condition: service_started
+    redis:
+      condition: service_healthy
+
+x-worker-health: &worker-health
+  interval: 60s
+  timeout: 30s
+  retries: 3
+  start_period: 60s
+
+services:
+  db:
+    image: "postgres:12.3-alpine"
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    command: ["postgres", "-c", "max_connections=${PG_MAX_CONNECTIONS:-100}"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    networks: [limes_network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: "redis:7.2-alpine"
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "${REDIS_MAXMEMORY:-512mb}", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [limes_network]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 10
+
+  pgbouncer:
+    image: "edoburu/pgbouncer:${PGBOUNCER_TAG:?set PGBOUNCER_TAG in .env}"
+    restart: unless-stopped
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_NAME=${POSTGRES_DB}
+      - POOL_MODE=transaction
+      - DEFAULT_POOL_SIZE=${DB_POOL_SIZE:-40}
+      - MAX_CLIENT_CONN=1000
+      - AUTH_TYPE=md5
+      - LISTEN_PORT=6432
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [limes_network]
+
+  migrate:
+    <<: *app
+    restart: "no"
+    entrypoint: /usr/src/app/migrate-entrypoint.sh
+    environment:
+      <<: *app-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    volumes:
+      - static_volume:/usr/src/app/staticfiles/
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    entrypoint: /usr/src/app/entrypoint.sh
+    mem_limit: ${WEB_MEM:-2g}
+    environment:
+      <<: *app-env
+      DOMAIN_NAME: ${DOMAIN_NAME}
+    volumes:
+      - scan_results:/usr/src/scan_results
+      - static_volume:/usr/src/app/staticfiles/
+    networks:
+      limes_network:
+        aliases: [limes]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  worker-scan:
+    <<: *app
+    entrypoint: ["/usr/src/app/celery-entrypoint.sh", "scan"]
+    mem_limit: ${WORKER_SCAN_MEM:-8g}
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD-SHELL", "celery -A limes.celery inspect ping -d scan@$${HOSTNAME} -t 20"]
+
+  worker-io:
+    <<: *app
+    entrypoint: ["/usr/src/app/celery-entrypoint.sh", "io"]
+    mem_limit: ${WORKER_IO_MEM:-2g}
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD-SHELL", "celery -A limes.celery inspect ping -d io@$${HOSTNAME} -t 20"]
+
+  worker-orch:
+    <<: *app
+    entrypoint: ["/usr/src/app/celery-entrypoint.sh", "orchestrate"]
+    mem_limit: ${WORKER_ORCH_MEM:-1g}
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD-SHELL", "celery -A limes.celery inspect ping -d orchestrate@$${HOSTNAME} -t 20"]
+
+  beat:
+    <<: *app
+    entrypoint: /usr/src/app/beat-entrypoint.sh
+    mem_limit: 512m
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - 8082:8082/tcp
+      - 443:443/tcp
+    depends_on:
+      web:
+        condition: service_healthy
+    secrets:
+      - source: proxy.ca
+        target: /etc/nginx/certs/limes_chain.pem
+      - source: proxy.cert
+        target: /etc/nginx/certs/limes.pem
+      - source: proxy.key
+        target: /etc/nginx/certs/limes_rsa.key
+    volumes:
+      - ./config/nginx/limes.conf:/etc/nginx/conf.d/limes.conf:ro
+      - static_volume:/usr/src/app/staticfiles/
+      - scan_results:/usr/src/scan_results
+    networks: [limes_network]
+
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [limes_network]
+
+networks:
+  limes_network:
+
+volumes:
+  tool_config:
+  postgres_data:
+  redis_data:
+  nuclei_templates:
+  wordlist:
+  scan_results:
+  static_volume:
+  ollama_data:
+
+secrets:
+  proxy.ca:
+    file: ./secrets/certs/limes_chain.pem
+  proxy.key:
+    file: ./secrets/certs/limes_rsa.key
+  proxy.cert:
+    file: ./secrets/certs/limes.pem

@@ -1,0 +1,112 @@
+"""ASM inventory write layer. Live-ORM upserts of Asset/ScanRun/ScanJob.
+NOT the migration back-fill (that is startScan/inventory_migrate.py, apps.get_model).
+Keyed by (project, kind, value); value normalized via normalize_host so live and
+migrated rows share identity."""
+from django.utils import timezone
+from startScan.models import Asset
+from startScan.inventory_migrate import normalize_host
+
+STATE_FIELDS = ('http_status', 'page_title', 'webserver', 'content_type',
+                'content_length', 'response_time', 'cname', 'is_cdn',
+                'cdn_name', 'screenshot_path')
+
+STAGE_BY_TASK = {
+    'subdomain_discovery': 'discovery', 'http_crawl': 'probe', 'screenshot': 'probe',
+    'port_scan': 'ports', 'fetch_url': 'crawl',
+    'vulnerability_scan': 'dast', 'code_audit': 'code',
+}
+
+
+def _append_source(asset, source, evidence, confidence=0.5):
+    srcs = asset.sources or []
+    if not any(s.get('source') == source and s.get('evidence') == evidence for s in srcs):
+        srcs.append({'source': source, 'evidence': evidence,
+                     'confidence': confidence, 'seen_at': timezone.now().isoformat()})
+        asset.sources = srcs
+    return asset
+
+
+def upsert_root_asset(project, name, request_headers=None):
+    value = normalize_host(name)
+    if not value:
+        return None
+    asset, _ = Asset.objects.get_or_create(
+        project=project, kind='root_domain', value=value,
+        defaults={'scope_tier': 'owned_root'})
+    if request_headers and not asset.request_headers:
+        asset.request_headers = request_headers
+        asset.save(update_fields=['request_headers'])
+    asset.mark_missing_or_seen(True)
+    return asset
+
+
+def upsert_hostname_asset(project, name, parent=None, source='discovery',
+                          evidence='', scope_tier='owned_host'):
+    value = normalize_host(name)
+    if not value:
+        return None
+    asset, _ = Asset.objects.get_or_create(
+        project=project, kind='hostname', value=value,
+        defaults={'scope_tier': scope_tier, 'parent': parent})
+    if parent is not None and asset.parent_id is None:
+        asset.parent = parent
+    _append_source(asset, source, evidence)
+    asset.save()
+    asset.mark_missing_or_seen(True)   # never changes scope_tier -> no promotion
+    return asset
+
+
+def upsert_ip_asset(project, address, source='probe', evidence=''):
+    if not address:
+        return None
+    asset, _ = Asset.objects.get_or_create(
+        project=project, kind='ip', value=address,
+        defaults={'scope_tier': 'owned_host'})
+    _append_source(asset, source, evidence)
+    asset.save()
+    asset.mark_missing_or_seen(True)
+    return asset
+
+
+def update_host_state(asset, **fields):
+    changed = []
+    for k in STATE_FIELDS:
+        if k in fields and fields[k] is not None:
+            setattr(asset, k, fields[k]); changed.append(k)
+    if changed:
+        asset.save(update_fields=changed)
+
+
+def mirror_subdomain_state(subdomain, project):
+    """Mirror a Subdomain's current probe/screenshot state + technologies onto its hostname Asset."""
+    if not project:
+        return None
+    asset = upsert_hostname_asset(project, subdomain.name, source='probe',
+                                  evidence='httpx')
+    if not asset:
+        return None
+    update_host_state(asset, http_status=subdomain.http_status, page_title=subdomain.page_title,
+                      webserver=subdomain.webserver, content_type=subdomain.content_type,
+                      content_length=subdomain.content_length, response_time=subdomain.response_time,
+                      cname=subdomain.cname, is_cdn=subdomain.is_cdn, cdn_name=subdomain.cdn_name,
+                      screenshot_path=subdomain.screenshot_path)
+    for tech in subdomain.technologies.all():
+        asset.technologies.add(tech)
+    return asset
+
+
+def is_active_scan_allowed_for(project, kind, value):
+    asset = Asset.objects.filter(project=project, kind=kind, value=normalize_host(value)).first()
+    return bool(asset and asset.is_active_scan_allowed)
+
+
+def finalize_lifecycle(run):
+    # NOTE: scans active hostname Assets under one root (.iterator, bounded per root);
+    # upgrade path if a root grows very large: a single conditional bulk update.
+    n = 0
+    qs = Asset.objects.filter(project=run.project, kind='hostname', parent=run.root_asset,
+                              state='active', last_seen__lt=run.start_scan_date,
+                              scope_tier__in=('owned_root', 'owned_host'))
+    for asset in qs.iterator(chunk_size=2000):
+        asset.mark_missing_or_seen(False); n += 1
+    return n

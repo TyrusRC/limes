@@ -1,0 +1,9 @@
+services:
+  labtarget:
+    image: nginx:1.27-alpine
+    networks:
+      limes_network:
+        aliases:
+          - lab.limes.test
+networks:
+  limes_network:

@@ -1,0 +1,20 @@
+from dashboard.models import *
+from django.conf import settings
+
+
+def projects(request):
+    projects = Project.objects.all()
+    try:
+        slug = request.resolver_match.kwargs.get('slug')
+        project = Project.objects.get(slug=slug)
+    except Exception:
+        project = None
+    return {
+        'projects': projects,
+        'current_project': project
+    }
+
+def version_context(request):
+    return {
+        'LIMES_CURRENT_VERSION': settings.LIMES_CURRENT_VERSION
+    }
