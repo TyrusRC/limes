@@ -37,6 +37,7 @@ class Asset(models.Model):
     state = models.CharField(max_length=20, choices=ASSET_STATES, default='active')
     first_seen = models.DateTimeField(default=timezone.now)
     last_seen = models.DateTimeField(default=timezone.now)
+    last_resolved_at = models.DateTimeField(null=True, blank=True)
     missed_count = models.IntegerField(default=0)
 
     sources = models.JSONField(default=list, blank=True)
