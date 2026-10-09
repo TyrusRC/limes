@@ -122,6 +122,24 @@ class IntelRunTest(TestCase):
         self.own_ip.refresh_from_db()
         self.assertNotIn('internetdb', self.own_ip.enrichment)
 
+    def test_internetdb_aborts_after_three_consecutive_failures(self):
+        for i in range(3):
+            Asset.objects.create(project=self.p, kind='ip', value=f'198.51.100.{i}', scope_tier='dependency')
+            self.cdn_host.ip_addresses.add(IpAddress.objects.create(address=f'198.51.100.{i}'))
+        fake = Fake(internetdb=(None, None))
+        out = intel.run_internetdb(self.p, self.root, get=fake)
+        self.assertEqual(len(fake.calls), 3)
+        self.assertEqual(out['internetdb_aborted'], 1)
+
+    def test_ripestat_aborts_after_three_consecutive_failures(self):
+        for i in range(3):
+            Asset.objects.create(project=self.p, kind='ip', value=f'198.51.100.{i}', scope_tier='dependency')
+            self.cdn_host.ip_addresses.add(IpAddress.objects.create(address=f'198.51.100.{i}'))
+        fake = Fake(ripestat=(None, None))
+        out = intel.run_ripestat(self.p, self.root, get=fake)
+        self.assertEqual(len(fake.calls), 3)
+        self.assertEqual(out['ripestat_aborted'], 1)
+
     # RIPEstat
     def test_ripestat_enrichment_and_holder_cached_per_asn(self):
         def ripe(url):

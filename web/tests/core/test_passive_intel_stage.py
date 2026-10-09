@@ -1,6 +1,8 @@
 import tempfile
 from unittest import mock
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from django.test import TestCase
 from django.utils import timezone
 
@@ -72,3 +74,15 @@ class PassiveIntelStageTest(TestCase):
         for mode in ('asm', 'full'):
             names = _names(control.build_workflow({}, mode))
             self.assertEqual(names[:2], ['subdomain_discovery', 'passive_intel'], mode)
+
+    def test_soft_time_limit_stops_later_steps_and_returns(self):
+        m = self.patched(run_crtsh=mock.patch('limes.tasks.intel.run_crtsh', side_effect=SoftTimeLimitExceeded()))
+        out = stages.passive_intel(ctx=dict(self.ctx))
+        for name in ('resolve_root', 'run_internetdb', 'run_ripestat'):
+            m[name].assert_not_called()
+        self.assertEqual(out['failed'], 'crtsh')
+
+    def test_root_lookup_error_never_raises(self):
+        self.patched()
+        with mock.patch('limes.tasks.resolution.root_for_domain', side_effect=RuntimeError('db')):
+            self.assertEqual(stages.passive_intel(ctx=dict(self.ctx)), {})

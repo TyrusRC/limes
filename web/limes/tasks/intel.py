@@ -16,6 +16,7 @@ MAX_NAMES_PER_ROOT = 10000  # NOTE: ceiling per root per run; upgrade path: pagi
 # NOTE: ceiling of new co-tenant candidates per root per run. Co-tenant SANs are influenced by whoever
 # controls a name under the root; a large legitimate set is surfaced over several runs.
 MAX_CANDIDATES_PER_ROOT = 100
+MAX_CONSECUTIVE_FAILURES = 3  # provider unreachable: stop calling it for the rest of the run
 FRESH_FOR = timedelta(hours=24)
 
 
@@ -75,11 +76,16 @@ def run_crtsh(project, root, get=http.get_json):
 def run_internetdb(project, root, get=http.get_json, now=None):
     now = now or timezone.now()
     owned = _owned_registrables(project)
-    enriched = candidates = 0
+    enriched = candidates = down = 0
+    aborted = {}
     for ip in _root_ips(project, root):
         if _fresh(ip, 'internetdb', now):
             continue
         status, body = get(internetdb.build_url(ip.value), provider='internetdb')
+        down = down + 1 if status is None else 0
+        if down >= MAX_CONSECUTIVE_FAILURES:
+            aborted = {'internetdb_aborted': 1}
+            break
         if status == 404:
             data = None
         elif status == 200:
@@ -94,16 +100,21 @@ def run_internetdb(project, root, get=http.get_json, now=None):
                 if reg and reg not in owned:
                     inventory.upsert_candidate(project, 'root_domain', reg, 'internetdb', f'ip:{ip.value}')
                     candidates += 1
-    return {'internetdb_enriched': enriched, 'candidates': candidates}
+    return {'internetdb_enriched': enriched, 'candidates': candidates, **aborted}
 
 
 def run_ripestat(project, root, get=http.get_json, now=None):
     now = now or timezone.now()
-    holders, enriched = {}, 0
+    holders, enriched, down = {}, 0, 0
+    aborted = {}
     for ip in _root_ips(project, root):
         if _fresh(ip, 'ripestat', now):
             continue
         status, body = get(ripestat.network_info_url(ip.value), provider='ripestat')
+        down = down + 1 if status is None else 0
+        if down >= MAX_CONSECUTIVE_FAILURES:
+            aborted = {'ripestat_aborted': 1}
+            break
         if status != 200:
             continue
         info = ripestat.parse_network_info(body)
@@ -112,4 +123,4 @@ def run_ripestat(project, root, get=http.get_json, now=None):
             holders[info['asn']] = ripestat.parse_as_overview(b)['holder'] if s == 200 else None
         _store(ip, 'ripestat', {**info, 'holder': holders.get(info['asn'])}, now)
         enriched += 1
-    return {'ripestat_enriched': enriched}
+    return {'ripestat_enriched': enriched, **aborted}
