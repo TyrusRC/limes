@@ -20,8 +20,8 @@ MAX_CONSECUTIVE_FAILURES = 3  # provider unreachable: stop calling it for the re
 FRESH_FOR = timedelta(hours=24)
 
 
-def _owned_registrables(project):
-    return {domains.registrable(v) or v for v in inventory.owned_root_values(project)}
+def _is_owned(domain, owned):
+    return any(domain == r or domain.endswith('.' + r) for r in owned)
 
 
 def _root_ips(project, root):
@@ -69,7 +69,7 @@ def run_crtsh(project, root, get=http.get_json):
         if not in_root:
             continue
         for reg in sorted(regs - done):
-            if any(reg == r or reg.endswith('.' + r) for r in owned):
+            if _is_owned(reg, owned):
                 continue
             done.add(reg)
             if candidates >= MAX_CANDIDATES_PER_ROOT:
@@ -83,7 +83,7 @@ def run_crtsh(project, root, get=http.get_json):
 
 def run_internetdb(project, root, get=http.get_json, now=None):
     now = now or timezone.now()
-    owned = _owned_registrables(project)
+    owned = inventory.owned_root_values(project)
     enriched = candidates = down = 0
     aborted = {}
     for ip in _root_ips(project, root):
@@ -105,7 +105,7 @@ def run_internetdb(project, root, get=http.get_json, now=None):
         if data and ip.scope_tier in ('owned_root', 'owned_host'):
             for host in data['hostnames']:
                 reg = domains.registrable(host)
-                if reg and reg not in owned:
+                if reg and not _is_owned(reg, owned):
                     inventory.upsert_candidate(project, 'root_domain', reg, 'internetdb', f'ip:{ip.value}')
                     candidates += 1
     return {'internetdb_enriched': enriched, 'candidates': candidates, **aborted}
@@ -128,7 +128,8 @@ def run_ripestat(project, root, get=http.get_json, now=None):
         info = ripestat.parse_network_info(body)
         if info['asn'] and info['asn'] not in holders:
             s, b = get(ripestat.as_overview_url(info['asn']), provider='ripestat')
-            holders[info['asn']] = ripestat.parse_as_overview(b)['holder'] if s == 200 else None
+            if s == 200:
+                holders[info['asn']] = ripestat.parse_as_overview(b)['holder']  # a failed lookup is retried
         _store(ip, 'ripestat', {**info, 'holder': holders.get(info['asn'])}, now)
         enriched += 1
     return {'ripestat_enriched': enriched, **aborted}

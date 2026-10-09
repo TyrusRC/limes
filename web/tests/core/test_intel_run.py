@@ -110,6 +110,13 @@ class IntelRunTest(TestCase):
         self.assertEqual([s['evidence'] for s in Asset.objects.get(value='co.net').sources],
                          ['cert:1 (h1.example.com) shared with example.com'])
 
+    def test_owned_subdomain_root_does_not_suppress_its_parent_domain(self):
+        self.root.value = 'shop.example.com'
+        self.root.save()
+        rows = [{'id': 1, 'name_value': 'shop.example.com\nexample.com'}]
+        intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(self.tier('example.com'), 'candidate')
+
     def test_crtsh_failure_is_harmless(self):
         self.assertEqual(intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(None, None))),
                          {'hostnames': 0, 'candidates': 0, 'candidates_capped': 0})
@@ -125,6 +132,13 @@ class IntelRunTest(TestCase):
         ev = [s['evidence'] for s in Asset.objects.get(value='partner-co.com').sources]
         self.assertEqual(ev, ['ip:203.0.114.7'])  # not from the dependency IP
         self.assertEqual(out['internetdb_enriched'], 2)
+
+    def test_internetdb_owned_subdomain_root_does_not_suppress_parent_domain(self):
+        self.root.value = 'shop.example.com'
+        self.root.save()
+        body = load('internetdb_sample.json')
+        intel.run_internetdb(self.p, self.root, get=Fake(internetdb=lambda url: (200, dict(body, ip=url.rsplit('/', 1)[1]))))
+        self.assertEqual(self.tier('example.com'), 'candidate')
 
     def test_internetdb_404_cached_as_no_data_and_fresh_skipped(self):
         fake = Fake(internetdb=(404, load('internetdb_404.json')))
@@ -179,3 +193,17 @@ class IntelRunTest(TestCase):
         self.assertEqual((r['asn'], r['prefix'], r['holder']), ('13335', '104.16.0.0/13', 'CLOUDFLARENET - Cloudflare, Inc., US'))
         self.assertEqual(sum(1 for p, u in fake.calls if 'as-overview' in u), 1)  # one holder lookup for one ASN
         self.assertEqual(out['ripestat_enriched'], 2)
+
+    def test_failed_holder_lookup_is_retried_for_the_next_ip(self):
+        overviews = []
+
+        def ripe(url):
+            if 'network-info' in url:
+                return 200, load('ripestat_network_info.json')
+            overviews.append(url)
+            return (500, None) if len(overviews) == 1 else (200, load('ripestat_as_overview.json'))
+        intel.run_ripestat(self.p, self.root, get=Fake(ripestat=ripe))
+        self.assertEqual(len(overviews), 2)
+        holders = sorted(str(a.enrichment['ripestat']['holder']) for a in (self.own_ip, self.dep_ip)
+                         for a in [Asset.objects.get(pk=a.pk)])
+        self.assertEqual(holders, ['CLOUDFLARENET - Cloudflare, Inc., US', 'None'])
