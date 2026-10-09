@@ -80,6 +80,16 @@ class IntelRunTest(TestCase):
         self.assertEqual(Asset.objects.filter(scope_tier='candidate').count(), 100)
         self.assertEqual((out['candidates'], out['candidates_capped']), (100, 50))
 
+    def test_second_run_surfaces_candidates_past_the_cap(self):
+        # existing candidates/rejected domains must not use up the per-run cap
+        rows = [{'id': i, 'name_value': f'h{i}.example.com\nco{i}.net'} for i in range(1, 151)]
+        intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        Asset.objects.filter(value='co1.net').update(scope_tier='rejected')
+        out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual((out['candidates'], out['candidates_capped']), (50, 0))
+        self.assertEqual(Asset.objects.filter(kind='root_domain', value__startswith='co').count(), 150)
+        self.assertEqual(Asset.objects.get(value='co1.net').scope_tier, 'rejected')
+
     def test_cert_without_in_root_name_contributes_no_candidates(self):
         rows = [{'id': 5, 'name_value': 'other.net\nco.org'}]
         out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
