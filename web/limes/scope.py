@@ -50,6 +50,8 @@ def target_host(target):
     t = (target or '').strip()
     if not t:
         return None
+    if parse_ip(t) is not None:  # bare IPv6 (no brackets) can't go through urlsplit
+        return str(ipaddress.ip_address(t)).lower()
     if '://' not in t:
         t = '//' + t
     try:
@@ -58,3 +60,65 @@ def target_host(target):
         return None
     host = (host or '').rstrip('.').lower()
     return host or None
+
+
+def _assets_by_value(project, hosts):
+    from startScan.models import Asset
+    by_value = {}
+    # NOTE: one IN query per call; fine for tens of thousands of targets.
+    for a in Asset.objects.filter(project=project, value__in=hosts).prefetch_related('ip_addresses'):
+        by_value.setdefault(a.value, []).append(a)
+    return by_value
+
+
+def _refusal(host, assets, attack, allow_co_brand):
+    if not host:
+        return 'no host'
+    ip = parse_ip(host)
+    if ip is not None:
+        ips = {str(ip)}
+    else:
+        ips = {i.address for a in assets for i in a.ip_addresses.all() if i.address}
+        if not ips:
+            return 'not resolved'
+    bad = sorted(i for i in ips if is_reserved_ip(i))
+    if bad:
+        return 'resolves to private/reserved ' + ', '.join(bad)
+    if not attack:
+        return None
+    if not assets:
+        return 'not in inventory'
+    if any(a.is_active_scan_allowed and (allow_co_brand or a.scope_tier != 'co_brand') for a in assets):
+        return None
+    return 'scope tier ' + '/'.join(sorted({a.scope_tier for a in assets})) + ' is not actively scannable'
+
+
+def _check(project, targets, attack, allow_co_brand):
+    targets = list(targets)
+    if project is None:
+        return [], [(t, 'no project') for t in targets]
+    allowed, refused = [], []
+    try:
+        hosts = {t: target_host(t) for t in targets}
+        assets = _assets_by_value(project, {h for h in hosts.values() if h})
+        for t in targets:
+            h = hosts[t]
+            p = parse_ip(h) if h else None
+            reason = _refusal(h, assets.get(str(p) if p else h, []), attack, allow_co_brand)
+            if reason:
+                refused.append((t, reason))
+            else:
+                allowed.append(t)
+    except Exception as e:  # fail closed on any lookup error
+        return [], [(t, f'scope check failed: {e}') for t in targets]
+    return allowed, refused
+
+
+def may_contact(project, targets):
+    """Allowed to send any packet: every resolved IP is public."""
+    return _check(project, targets, attack=False, allow_co_brand=True)
+
+
+def may_attack(project, targets, allow_co_brand=True):
+    """may_contact plus an actively scannable scope tier."""
+    return _check(project, targets, attack=True, allow_co_brand=allow_co_brand)
