@@ -68,6 +68,21 @@ class ResolveRootTest(TestCase):
                 n = resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
         self.assertEqual(n, 0)
 
+    def test_root_only_resolves_just_the_root(self):
+        resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run(), root_only=True)
+        self.assertEqual(self.hosts, ['example.com'])
+
+    def test_soft_time_limit_is_not_swallowed(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        def slow(argv, **kw):
+            raise SoftTimeLimitExceeded()
+        with self.assertRaises(SoftTimeLimitExceeded):
+            resolution.resolve_root(self.p, self.root, self.dir, run=slow)
+        with mock.patch('limes.tasks.inventory.record_resolution', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
+
     def test_existing_ip_asset_keeps_its_tier(self):
         Asset.objects.create(project=self.p, kind='ip', value='93.184.216.34', scope_tier='owned_host')
         resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run())
@@ -147,4 +162,4 @@ class ResolveDomainTest(TestCase):
         root = Asset.objects.create(project=self.p, kind='root_domain', value='example.com', scope_tier='owned_root')
         with mock.patch.object(resolution, 'resolve_root', return_value=4) as rr:
             self.assertEqual(resolution.resolve_domain(self.domain(self.p), '/d'), 4)
-        rr.assert_called_once_with(self.p, root, '/d')
+        rr.assert_called_once_with(self.p, root, '/d', root_only=False)

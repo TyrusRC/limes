@@ -2,6 +2,8 @@
 import logging
 import os
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from limes import commands
 from limes.pipeline import dnsx
 from limes.tasks import inventory
@@ -12,15 +14,17 @@ logger = logging.getLogger(__name__)
 DNSX_TIMEOUT = 30 * 60
 
 
-def resolve_root(project, root_asset, results_dir, run=commands.run):
-    """Resolve the root and its hostname assets; returns how many hosts were recorded.
-    Best-effort: failures are logged and leave previous resolutions untouched."""
+def resolve_root(project, root_asset, results_dir, run=commands.run, root_only=False):
+    """Resolve the root and (unless root_only) its hostname assets; returns how many hosts were
+    recorded. Best-effort: failures are logged and leave previous resolutions untouched."""
     if not project or not root_asset:
         return 0
     try:
         # NOTE: holds one root's hostnames in memory (tens of thousands is fine).
         assets = {root_asset.value: root_asset}
-        for a in Asset.objects.filter(project=project, kind='hostname', parent=root_asset).iterator(chunk_size=2000):
+        children = () if root_only else (
+            Asset.objects.filter(project=project, kind='hostname', parent=root_asset).iterator(chunk_size=2000))
+        for a in children:
             assets[a.value] = a
         hosts_file = os.path.join(results_dir, 'resolve_hosts.txt')
         out_file = os.path.join(results_dir, 'dnsx.jsonl')
@@ -43,9 +47,13 @@ def resolve_root(project, root_asset, results_dir, run=commands.run):
             try:
                 inventory.record_resolution(asset, record)
                 count += 1
+            except SoftTimeLimitExceeded:
+                raise  # the stage's time-limit handler must see it
             except Exception:
                 logger.exception(f'Recording resolution failed for {name}')
         return count
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:
         logger.exception('Resolution failed')
         return 0
@@ -60,10 +68,10 @@ def root_for_domain(domain):
     return project, root
 
 
-def resolve_domain(domain, results_dir):
+def resolve_domain(domain, results_dir, root_only=False):
     """Resolve a scan's root domain inventory; 0 when the domain has no project or root asset."""
     project, root = root_for_domain(domain)
     if not project or not root:
         logger.warning('Resolve: no project/root asset for this scan, skipping')
         return 0
-    return resolve_root(project, root, results_dir)
+    return resolve_root(project, root, results_dir, root_only=root_only)
