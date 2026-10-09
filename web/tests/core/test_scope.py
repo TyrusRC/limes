@@ -119,3 +119,9 @@ class GuardTest(TestCase):
         self.host('ok.x.com', ips=['8.8.8.8'])
         allowed, _ = scope.may_contact(self.p, ['127.0.0.1', 'http://10.0.0.1\\@ok.x.com/'])
         self.assertEqual(allowed, [])
+
+    def test_non_canonical_ip_target_finds_its_asset(self):
+        Asset.objects.create(project=self.p, kind='ip', value='2606:4700::1111', scope_tier='owned_host')
+        self.assertEqual(scope.may_attack(self.p, ['[2606:4700:0:0::1111]:443'])[0], ['[2606:4700:0:0::1111]:443'])
+        Asset.objects.create(project=self.p, kind='ip', value='8.8.8.8', scope_tier='owned_host')
+        self.assertEqual(scope.may_attack(self.p, ['[::ffff:8.8.8.8]:80'])[0], ['[::ffff:8.8.8.8]:80'])
