@@ -8,6 +8,7 @@ AUTO_SOURCES = {'probe', 'dns'}
 def demote_auto_owned_ips(apps, schema_editor):
     """IPs the old pipeline auto-owned (probe/dns evidence or A0 back-fill, no human decision)
     become dependencies unless they sit inside owned space a person declared."""
+    # NOTE: per-row save and O(IPs x owned networks) membership scan; fine for a one-off migration.
     Asset = apps.get_model('startScan', 'Asset')
     owned = Asset.objects.filter(kind__in=('ip', 'cidr'), scope_tier__in=('owned_root', 'owned_host'))
     declared = {}
@@ -17,7 +18,10 @@ def demote_auto_owned_ips(apps, schema_editor):
         except ValueError:
             continue
     for a in owned.filter(kind='ip', added_by__isnull=True, decision_reason='').iterator():
-        if any((s or {}).get('source') not in AUTO_SOURCES for s in (a.sources or [])):
+        # Anything that is not a list of {'source': auto} dicts is unknown evidence: leave the IP owned.
+        srcs = a.sources or []
+        if not isinstance(srcs, list) or any(
+                not isinstance(s, dict) or s.get('source') not in AUTO_SOURCES for s in srcs):
             continue
         try:
             ip = ipaddress.ip_address(a.value)
