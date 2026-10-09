@@ -2,19 +2,9 @@ import ipaddress
 
 import validators
 
+from limes.scope import is_reserved_ip, is_reserved_network, parse_ip
 from startScan.inventory_migrate import normalize_host
 
-
-# Networks are rejected on OVERLAP with any of these (is_private only tests
-# "subnet of", so supernets like 0.0.0.0/0 would slip through).
-_RESERVED = [ipaddress.ip_network(c) for c in (
-    '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
-    '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15',
-    '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4', '255.255.255.255/32',
-    '::1/128', '::/128', 'fc00::/7', 'fe80::/10', 'ff00::/8', '2001:db8::/32', '::ffff:0:0/96',
-    # transition/translation ranges that embed or route to IPv4 (incl. private), plus special-purpose
-    '64:ff9b::/96', '64:ff9b:1::/48', '2002::/16', '2001::/23', '100::/64', '5f00::/16',
-)]
 
 # Names that only resolve inside a network (mDNS, RFC 2606/6761/8375, common internal zones).
 _INTERNAL_TLDS = ('local', 'internal', 'localhost', 'test', 'invalid', 'example', 'lan', 'corp')
@@ -41,18 +31,12 @@ def classify_asset_entry(raw):
             net = ipaddress.ip_network(s, strict=False)
         except ValueError:
             return _err(f'invalid CIDR: {s}')
-        if (any(net.version == r.version and net.overlaps(r) for r in _RESERVED)
-                or not net.network_address.is_global or not net.broadcast_address.is_global):
+        if is_reserved_network(net):
             return _err(f'private/reserved CIDR rejected: {s}')
         return _ok('cidr', str(net))
-    try:
-        ip = ipaddress.ip_address(s)
-    except ValueError:
-        ip = None
+    ip = parse_ip(s)
     if ip is not None:
-        if ip.version == 6 and ip.ipv4_mapped:
-            ip = ip.ipv4_mapped
-        if ip.is_multicast or not ip.is_global or any(ip.version == r.version and ip in r for r in _RESERVED):
+        if is_reserved_ip(ip):
             return _err(f'private/reserved IP rejected: {s}')
         return _ok('ip', str(ip))
     try:
