@@ -2,11 +2,13 @@ import json
 import os
 from datetime import timedelta
 
+from unittest import mock
+
 from django.test import TestCase
 from django.utils import timezone
 
 from dashboard.models import Project
-from limes.tasks import intel
+from limes.tasks import intel, inventory
 from startScan.models import Asset, IpAddress
 
 FX = os.path.join(os.path.dirname(__file__), 'fixtures')
@@ -83,6 +85,30 @@ class IntelRunTest(TestCase):
         out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
         self.assertFalse(Asset.objects.filter(scope_tier='candidate').exists())
         self.assertEqual(out['candidates'], 0)
+
+    def test_repeated_name_is_upserted_once_and_only_new_names_are_counted(self):
+        rows = [{'id': i, 'name_value': 'new.example.com\nwww.example.com'} for i in (1, 2, 3)]
+        with mock.patch.object(inventory, 'upsert_hostname_asset', wraps=inventory.upsert_hostname_asset) as up:
+            out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(up.call_count, 2)
+        self.assertEqual(out['hostnames'], 1)  # www.example.com already existed
+        self.assertEqual(intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))['hostnames'], 0)
+
+    def test_name_cap_counts_distinct_names_not_upserts(self):
+        rows = [{'id': 1, 'name_value': 'a.example.com'}, {'id': 2, 'name_value': 'a.example.com\nb.example.com'},
+                {'id': 3, 'name_value': 'c.example.com'}]
+        with mock.patch.object(intel, 'MAX_NAMES_PER_ROOT', 2):
+            out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(out['hostnames'], 2)
+        self.assertTrue(Asset.objects.filter(value='b.example.com').exists())
+        self.assertFalse(Asset.objects.filter(value='c.example.com').exists())
+
+    def test_co_tenant_candidate_is_upserted_once_across_certs(self):
+        rows = [{'id': i, 'name_value': f'h{i}.example.com\nco.net'} for i in (1, 2)]
+        out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(out['candidates'], 1)
+        self.assertEqual([s['evidence'] for s in Asset.objects.get(value='co.net').sources],
+                         ['cert:1 (h1.example.com) shared with example.com'])
 
     def test_crtsh_failure_is_harmless(self):
         self.assertEqual(intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(None, None))),

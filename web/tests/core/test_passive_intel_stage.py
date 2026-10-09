@@ -86,3 +86,9 @@ class PassiveIntelStageTest(TestCase):
         self.patched()
         with mock.patch('limes.tasks.resolution.root_for_domain', side_effect=RuntimeError('db')):
             self.assertEqual(stages.passive_intel(ctx=dict(self.ctx)), {})
+
+    def test_resolve_skipped_when_crtsh_found_nothing_new(self):
+        m = self.patched(run_crtsh=mock.patch('limes.tasks.intel.run_crtsh', return_value={'hostnames': 0}))
+        stages.passive_intel(ctx=dict(self.ctx))
+        m['resolve_root'].assert_not_called()
+        m['run_internetdb'].assert_called_once()
