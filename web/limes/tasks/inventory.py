@@ -60,6 +60,7 @@ def upsert_hostname_asset(project, name, parent=None, source='discovery',
 
 
 def owned_ip_space(project):
+    # NOTE: one owned-networks query per new IP (see _new_ip_tier). Upgrade: cache per resolution run.
     """Networks a person (or an owned root's import) declared ours: owned ip/cidr assets."""
     nets = []
     for value in Asset.objects.filter(project=project, kind__in=('ip', 'cidr'),
@@ -135,14 +136,20 @@ def finalize_lifecycle(run):
 
 
 def record_resolution(asset, record):
-    """Write one host's dnsx answer: CNAME, IP assets (via upsert_ip_asset), host->IP links."""
+    """Write one host's dnsx answer: CNAME, IP assets (via upsert_ip_asset), host->IP links.
+    The answer REPLACES the host's links, so a stale (e.g. private) IP cannot veto it forever."""
     from startScan.models import IpAddress
     if record.get('cname'):
         asset.cname = record['cname'][0]
+    rows = []
+    # NOTE: per-IP queries and IpAddress.address is unindexed. Upgrade: fetch rows once per
+    # resolution run with address__in.
     for address in list(record.get('a', [])) + list(record.get('aaaa', [])):
         upsert_ip_asset(asset.project, address, source='dns', evidence=f'host:{asset.value}')
         # address is not unique on the legacy table: reuse the oldest row
         ip = IpAddress.objects.filter(address=address).order_by('id').first() or IpAddress.objects.create(address=address)
-        asset.ip_addresses.add(ip)
+        if ip not in rows:
+            rows.append(ip)
+    asset.ip_addresses.set(rows)
     asset.last_resolved_at = timezone.now()
     asset.save(update_fields=['cname', 'last_resolved_at'])

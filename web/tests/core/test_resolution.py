@@ -77,3 +77,29 @@ class ResolveRootTest(TestCase):
         IpAddress.objects.create(address='93.184.216.34')
         IpAddress.objects.create(address='93.184.216.34')
         self.assertEqual(resolution.resolve_root(self.p, self.root, self.dir, run=self.fake_run()), 1)
+
+
+class StaleIpReplacementTest(ResolveRootTest):
+    def runner_with(self, line):
+        def run(argv, **kw):
+            with open(argv[argv.index('-o') + 1], 'w') as f:
+                f.write(line + '\n')
+            return SimpleNamespace(return_code=0)
+        return run
+
+    def test_new_answer_replaces_stale_private_link(self):
+        from limes import scope
+        resolution.resolve_root(self.p, self.root, self.dir,
+                                run=self.runner_with('{"host":"app.example.com","a":["10.1.2.3"]}'))
+        self.assertEqual(scope.may_contact(self.p, ['app.example.com'])[0], [])
+        resolution.resolve_root(self.p, self.root, self.dir,
+                                run=self.runner_with('{"host":"app.example.com","a":["93.184.216.34"]}'))
+        self.assertEqual(list(self.app.ip_addresses.values_list('address', flat=True)), ['93.184.216.34'])
+        self.assertEqual(scope.may_contact(self.p, ['app.example.com'])[0], ['app.example.com'])
+
+    def test_unanswered_host_keeps_previous_ips(self):
+        resolution.resolve_root(self.p, self.root, self.dir,
+                                run=self.runner_with('{"host":"app.example.com","a":["93.184.216.34"]}'))
+        resolution.resolve_root(self.p, self.root, self.dir,
+                                run=self.runner_with('{"host":"example.com","a":["93.184.216.35"]}'))
+        self.assertEqual(list(self.app.ip_addresses.values_list('address', flat=True)), ['93.184.216.34'])
