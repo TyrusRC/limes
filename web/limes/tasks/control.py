@@ -2,7 +2,7 @@ from limes.tasks.base import *
 from limes.tasks import resolution
 from limes.tasks.notifications import send_scan_notif
 from limes.tasks.persistence import save_endpoint, save_imported_subdomains, save_subdomain
-from limes.tasks.stages import code_audit, fetch_url, port_scan, screenshot, subdomain_discovery, vulnerability_scan
+from limes.tasks.stages import code_audit, fetch_url, passive_intel, port_scan, screenshot, subdomain_discovery, vulnerability_scan
 
 #----------------------#
 # Scan / Subscan tasks #
@@ -14,9 +14,11 @@ def build_workflow(ctx, mode):
 	if mode == 'asm':
 		return chain(
 			subdomain_discovery.si(ctx=ctx, description='Subdomain discovery'),
+			passive_intel.si(ctx=ctx, description='Passive intel'),
 			screenshot.si(ctx=ctx, description='Screenshot'))
 	return chain(
 		subdomain_discovery.si(ctx=ctx, description='Subdomain discovery'),
+		passive_intel.si(ctx=ctx, description='Passive intel'),
 		port_scan.si(ctx=ctx, description='Port scan'),
 		fetch_url.si(ctx=ctx, description='Fetch URL'),
 		group(

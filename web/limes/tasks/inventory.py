@@ -14,7 +14,7 @@ STATE_FIELDS = ('http_status', 'page_title', 'webserver', 'content_type',
                 'cdn_name', 'screenshot_path')
 
 STAGE_BY_TASK = {
-    'subdomain_discovery': 'discovery', 'http_crawl': 'probe', 'screenshot': 'probe',
+    'subdomain_discovery': 'discovery', 'passive_intel': 'discovery', 'http_crawl': 'probe', 'screenshot': 'probe',
     'port_scan': 'ports', 'fetch_url': 'crawl',
     'vulnerability_scan': 'dast', 'code_audit': 'code',
 }
