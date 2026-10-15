@@ -13,6 +13,7 @@ Assets
           <h4 class="header-title mb-0">Assets</h4>
           <button type="button" class="btn btn-primary btn-sm" onclick="show_add_asset_modal()">Add assets</button>
         </div>
+        <div id="asset_score" class="mb-3"></div>
         <div class="row g-2 mb-3">
           <div class="col-md-3">
             <select id="f_kind" class="form-select form-select-sm">
@@ -63,6 +64,7 @@ Assets
 <script src="{% static 'custom/asset.js' %}"></script>
 <script type="text/javascript">
 $(document).ready(function() {
+  load_asset_score();
   var project = "{{ current_project.slug }}";
   var esc = $.fn.dataTable.render.text().display;
   var join = function(d) { return esc((d || []).join(', ')); };
