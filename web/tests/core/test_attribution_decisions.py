@@ -119,17 +119,20 @@ class DecisionTest(DecisionBase):
     def test_rescore_command_scores_only_by_default(self):
         a = self.cand('cmd.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
         out = StringIO()
-        call_command('rescore_assets', 'p', stdout=out)
+        with mock.patch('limes.intel.delegation.verify', side_effect=AssertionError('network used')):
+            call_command('rescore_assets', 'p', stdout=out)
         self.assertEqual(self.tier(a), 'candidate')
         self.assertGreaterEqual(a.confidence, 0.9)
         self.assertEqual(out.getvalue().strip(), 'scored=1')
 
-    def test_rescore_command_decides_on_request(self):
+    def test_rescore_command_verifies_then_decides_on_request(self):
         a = self.cand('cmd.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
-        self.delegate(a)
         out = StringIO()
-        call_command('rescore_assets', 'p', '--decide', stdout=out)
+        with mock.patch('limes.intel.delegation.verify', return_value=(True, 'delegation verified at x')) as v:
+            call_command('rescore_assets', 'p', '--decide', stdout=out)
+        v.assert_called_once_with('cmd.net', ['ns1.example.com'])
         self.assertEqual(self.tier(a), 'owned_root')
+        self.assertIn('verified=1', out.getvalue())
         self.assertIn('auto_confirmed=1', out.getvalue())
 
     def test_stale_ns_facts_never_auto_confirm(self):

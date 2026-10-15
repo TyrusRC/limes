@@ -240,14 +240,15 @@ def passive_intel(self, ctx={}, description=None):
 		('ripestat', lambda: intel.run_ripestat(project, root)),
 		('attribution_dns', lambda: attribution.collect_dns(project, self.results_dir)),
 		('attribution_score', lambda: attribution.score_project(project)),
+		('attribution_verify', lambda: attribution.verify_delegations(project)),
 		('attribution_decide', lambda: attribution.apply_decisions(project)),
 	)
 	counts, failed = {}, []
 	for name, step in steps:
 		if name == 'resolve' and counts.get('hostnames') == 0:
 			continue  # crt.sh found nothing new to resolve
-		if name == 'attribution_decide' and {'attribution_dns', 'attribution_score'} & set(failed):
-			continue  # facts or scores may be stale or partial: never decide from them
+		if name == 'attribution_decide' and {'attribution_dns', 'attribution_score', 'attribution_verify'} & set(failed):
+			continue  # facts, scores or delegations may be stale or partial: never decide from them
 		try:
 			for k, v in step().items():
 				counts[k] = counts.get(k, 0) + v
