@@ -142,10 +142,14 @@ def score_project(project):
     cands = list(Asset.objects.filter(project=project, scope_tier='candidate'))
     if not cands:
         return {'scored': 0}
-    roots = inventory.owned_root_values(project)
+    # auto-confirmed assets never count as evidence, so one confirmation can't vouch for the next
+    auto = {'sources__contains': [{'source': 'attribution'}]}
+    roots = set(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
+                .exclude(**auto).values_list('value', flat=True))
     owned_ips = set(Asset.objects.filter(project=project, kind='ip', scope_tier__in=OWNED)
-                    .values_list('value', flat=True))
+                    .exclude(**auto).values_list('value', flat=True))
     owned_certs = dict(AssetFact.objects.filter(asset__project=project, asset__scope_tier__in=OWNED, kind='cert')
+                       .exclude(asset__sources__contains=[{'source': 'attribution'}])
                        .values_list('value', 'asset__value'))
     keywords = [k.lower() for k in (project.brand_keywords or []) if isinstance(k, str) and len(k) >= MIN_BRAND_LEN]
     facts = defaultdict(list)

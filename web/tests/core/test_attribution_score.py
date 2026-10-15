@@ -67,6 +67,20 @@ class ScoreTest(TestCase):
         self.assertAlmostEqual(score, 0.60, places=4)
         self.assertFalse(by['ip']['corroborates'])
 
+    def test_auto_confirmed_assets_are_never_evidence(self):
+        # an auto-confirmed root must not vouch for the next candidate (no chaining)
+        auto = Asset.objects.create(project=self.p, kind='root_domain', value='chained.net', scope_tier='owned_root',
+                                    sources=[{'source': 'crtsh', 'evidence': 'x'},
+                                             {'source': 'attribution', 'evidence': 'auto-confirmed'}])
+        inventory.record_fact(auto, 'cert', '900', 'crtsh')
+        Asset.objects.create(project=self.p, kind='ip', value='203.0.114.9', scope_tier='owned_host',
+                             sources=[{'source': 'attribution', 'evidence': 'auto-confirmed'}])
+        a = self.cand('next.net', ('ns', 'ns1.chained.net', 'dns'), ('mx', 'mx.chained.net', 'dns'),
+                      ('cert', '900', 'crtsh'), ('ip', '203.0.114.9', 'internetdb'))
+        score, by = self.score(a)
+        self.assertEqual(by, {})
+        self.assertAlmostEqual(score or 0.0, 0.0, places=4)
+
     def test_brand_whole_label_and_short_keywords_ignored(self):
         self.assertAlmostEqual(self.score(self.cand('acme-store.net'))[0], 0.30, places=4)
         self.assertAlmostEqual(self.score(self.cand('acmesoft.net'))[0] or 0.0, 0.0, places=4)
