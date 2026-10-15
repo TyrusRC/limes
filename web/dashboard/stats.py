@@ -1,16 +1,17 @@
+"""Project dashboard data (A-dash): inventory-first, read from the Asset inventory and the A4 score.
+Cached per project for STATS_TTL; asset decisions and finished scans call invalidate()."""
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Count, Q
-from django.db.models.functions import TruncDay
 from django.utils import timezone
 
-from startScan.models import (CountryISO, CveId, CweId, EndPoint, IpAddress, Port, ScanActivity, ScanHistory,
-                              Subdomain, Technology, Vulnerability, VulnerabilityTags)
-from targetApp.models import Domain
-
 STATS_TTL = 60
-SEVERITIES = {'unknown_count': -1, 'info_count': 0, 'low_count': 1, 'medium_count': 2, 'high_count': 3, 'critical_count': 4}
+WEEK = timedelta(days=7)
+LIST_LIMIT = 10
+OWNED = ('owned_root', 'owned_host')
+SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 
 
 def _key(project_id):
@@ -21,60 +22,97 @@ def invalidate(project_id):
     cache.delete(_key(project_id))
 
 
-def _last_week(qs, field, dates):
-    rows = (qs.filter(**{f'{field}__gte': timezone.now() - timedelta(days=7)})
-            .annotate(day=TruncDay(field)).values('day').annotate(n=Count('id')).order_by())
-    by_day = {row['day'].date(): row['n'] for row in rows}
-    return [by_day.get(d, 0) for d in reversed(dates)]
+def _risk(project):
+    from limes import scoring
+    from startScan.models import ScoreSnapshot
+    risk = scoring.project_score(project)
+    snaps = ScoreSnapshot.objects.filter(project=project).order_by('-date').values('date', 'score')[:30]
+    risk['trend'] = [{'date': s['date'].isoformat(), 'score': s['score']} for s in reversed(list(snaps))]
+    return risk
 
 
-def _compute(project):
-    domains = Domain.objects.filter(project=project)
+def _inventory(project):
+    from startScan.models import Asset
+    assets = Asset.objects.filter(project=project)
+    counts = assets.aggregate(
+        owned_root=Count('id', filter=Q(scope_tier='owned_root')),
+        owned_host=Count('id', filter=Q(scope_tier='owned_host', kind__in=('hostname', 'root_domain'))),
+        ip=Count('id', filter=Q(scope_tier__in=OWNED, kind='ip')),
+        dependency=Count('id', filter=Q(scope_tier='dependency')))
+    states = dict(assets.filter(scope_tier__in=OWNED).values_list('state').annotate(n=Count('id')))
+    counts['states'] = {s: states.get(s, 0) for s in ('active', 'missing', 'stale', 'retired')}
+    return counts
+
+
+def _review(project):
+    from limes.tasks.attribution import REVIEW
+    from startScan.models import Asset
+    cands = Asset.objects.filter(project=project, scope_tier='candidate')
+    return {'candidates': cands.filter(Q(confidence__isnull=True) | Q(confidence__gte=REVIEW)).count(),
+            'would_auto_confirm': cands.filter(confidence_detail__would_auto_confirm=True).count()}
+
+
+def _changes(project, now):
+    from startScan.models import Asset
+    owned = Asset.objects.filter(project=project, scope_tier__in=OWNED)
+    new = owned.filter(first_seen__gte=now - WEEK).order_by('-first_seen', 'id')[:LIST_LIMIT]
+    missing = owned.filter(state='missing').order_by('-last_seen', 'id')[:LIST_LIMIT]
+    auto = []
+    for a in owned.filter(decision_reason__startswith='auto-confirmed', sources__contains=[{'source': 'attribution'}]):
+        seen = max((s.get('seen_at') or '' for s in a.sources or [] if s.get('source') == 'attribution'), default='')
+        if seen >= (now - WEEK).isoformat():
+            auto.append({'value': a.value, 'kind': a.kind, 'seen_at': seen})
+    auto.sort(key=lambda r: r['seen_at'], reverse=True)
+    return {'new_owned': _rows(new, 'first_seen'), 'missing': _rows(missing, 'last_seen'),
+            'auto_confirmed': auto[:LIST_LIMIT]}
+
+
+def _rows(assets, field):
+    return [{'value': a.value, 'kind': a.kind, field: getattr(a, field)} for a in assets]
+
+
+def _findings(project):
+    from limes import scoring
+    from startScan.models import Vulnerability
+    base = scoring.baselines(project)
+    assets = scoring.assessed_assets(project, base)
+    counts = (Vulnerability.objects.filter(scan_history__in=[s.id for s in base.values()], open_status=True,
+                                           asset_id__in=list(assets), severity__gte=1)
+              .values_list('severity').annotate(n=Count('id')))
+    by_sev = dict(counts)
+    return {name: by_sev.get(sev, 0) for sev, name in SEVERITY_FIELDS.items()}
+
+
+def _monitoring(project, now):
+    from limes import continuous
+    from startScan.models import ScanHistory
     scans = ScanHistory.objects.filter(domain__project=project)
-    subdomains = Subdomain.objects.filter(scan_history__domain__project=project)
-    endpoints = EndPoint.objects.filter(scan_history__domain__project=project)
-    vulns = Vulnerability.objects.filter(scan_history__domain__project=project)
-    ips = IpAddress.objects.filter(ip_addresses__in=subdomains)
+    # NOTE: due_roots spans every project; fine for hundreds of roots, cached for STATS_TTL
+    due = [a for a in continuous.due_roots(now) if a.project_id == project.id][:5]
+    last_auto = scans.filter(initiated_by__isnull=True).order_by('-start_scan_date').values_list('start_scan_date', flat=True).first()
+    return {'enabled': settings.CONTINUOUS_SCANS,
+            'running': scans.filter(scan_status__in=continuous.IN_PROGRESS).count(),
+            'next_due': [{'value': a.value, 'cadence_tier': a.cadence_tier} for a in due],
+            'last_auto': last_auto}
 
-    sub = subdomains.aggregate(total=Count('id'), alive=Count('id', filter=~Q(http_status=0)))
-    ep = endpoints.aggregate(total=Count('id'), alive=Count('id', filter=Q(http_status=200)))
-    sev = vulns.aggregate(**{k: Count('id', filter=Q(severity=v)) for k, v in SEVERITIES.items()})
-    dates = [(timezone.now() - timedelta(days=i)).date() for i in range(7)]
 
-    stats = {
-        'domain_count': domains.count(),
-        'scan_count': scans.count(),
-        'subdomain_count': sub['total'] or 0,
-        'alive_count': sub['alive'] or 0,
-        'subdomain_with_ip_count': subdomains.filter(ip_addresses__isnull=False).distinct().count(),
-        'endpoint_count': ep['total'] or 0,
-        'endpoint_alive_count': ep['alive'] or 0,
-        **{k: v or 0 for k, v in sev.items()},
-        'targets_in_last_week': _last_week(domains, 'insert_date', dates),
-        'subdomains_in_last_week': _last_week(subdomains, 'discovered_date', dates),
-        'vulns_in_last_week': _last_week(vulns, 'discovered_date', dates),
-        'scans_in_last_week': _last_week(scans, 'start_scan_date', dates),
-        'endpoints_in_last_week': _last_week(endpoints, 'discovered_date', dates),
-        'last_7_dates': dates,
-        'vulnerability_feed': list(vulns.order_by('-discovered_date')[:50]),
-        'activity_feed': list(ScanActivity.objects.filter(scan_of__in=scans).order_by('-time')[:50]),
-        'total_ips': ips.count(),
-        'most_used_port': list(Port.objects.filter(ports__in=ips).annotate(count=Count('ports')).order_by('-count')[:7]),
-        'most_used_ip': list(ips.annotate(count=Count('ip_addresses')).order_by('-count').exclude(ip_addresses__isnull=True)[:7]),
-        'most_used_tech': list(Technology.objects.filter(technologies__in=subdomains).annotate(count=Count('technologies')).order_by('-count')[:7]),
-        'most_common_cve': list(CveId.objects.filter(cve_ids__in=vulns).annotate(nused=Count('cve_ids')).order_by('-nused').values('name', 'nused')[:7]),
-        'most_common_cwe': list(CweId.objects.filter(cwe_ids__in=vulns).annotate(nused=Count('cwe_ids')).order_by('-nused').values('name', 'nused')[:7]),
-        'most_common_tags': list(VulnerabilityTags.objects.filter(vuln_tags__in=vulns).annotate(nused=Count('vuln_tags')).order_by('-nused').values('name', 'nused')[:7]),
-        'asset_countries': list(CountryISO.objects.filter(ipaddress__in=ips).annotate(count=Count('ipaddress')).order_by('-count')),
+def asm_stats(project):
+    from startScan.models import ScanActivity
+    now = timezone.now()
+    return {
+        'risk': _risk(project),
+        'inventory': _inventory(project),
+        'review': _review(project),
+        'changes': _changes(project, now),
+        'findings': _findings(project),
+        'monitoring': _monitoring(project, now),
+        'activity': list(ScanActivity.objects.filter(scan_of__domain__project=project).order_by('-time')[:15]),
     }
-    stats['total_vul_count'] = sum(stats[k] for k in SEVERITIES)
-    stats['total_vul_ignore_info_count'] = stats['total_vul_count'] - stats['info_count'] - stats['unknown_count']
-    return stats
 
 
 def project_stats(project):
     stats = cache.get(_key(project.id))
     if stats is None:
-        stats = _compute(project)
+        stats = asm_stats(project)
         cache.set(_key(project.id), stats, STATS_TTL)
     return stats
