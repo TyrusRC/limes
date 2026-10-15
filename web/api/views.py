@@ -2690,6 +2690,9 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		tag = params.get('tag')
 		if tag:
 			qs = qs.filter(tags__name=tag)
+		if self.action == 'list' and not params.get('show_low'):
+			from limes.tasks.attribution import REVIEW
+			qs = qs.exclude(scope_tier='candidate', confidence__lt=REVIEW)  # unscored (null) stay visible
 		return qs
 
 	def filter_queryset(self, qs):
@@ -2701,8 +2704,11 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		direction = self.request.GET.get('order[0][dir]', 'asc')
 		# No checkbox column in A2: DataTables column index -> model field.
 		colmap = {'0': 'value', '1': 'kind', '2': 'scope_tier', '3': 'state',
-				  '4': 'http_status', '8': 'last_seen'}
+				  '4': 'http_status', '8': 'last_seen', '10': 'confidence'}
 		field = colmap.get(col, 'value')
+		if field == 'confidence':
+			f = F('confidence')
+			return qs.order_by(f.desc(nulls_last=True) if direction == 'desc' else f.asc(nulls_last=True), 'id')
 		return qs.order_by(('-' if direction == 'desc' else '') + field, 'id')
 
 	def paginate_queryset(self, queryset, view=None):
