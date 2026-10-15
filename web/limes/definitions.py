@@ -112,6 +112,8 @@ INITIATED_TASK = -1
 FAILED_TASK = 0
 RUNNING_TASK = 1
 SUCCESS_TASK = 2
+# Error-message prefix on a SUCCESS vulnerability_scan activity that scanned nothing (limes.scoring skips it)
+NOTHING_ASSESSED = 'nothing assessed'
 ABORTED_TASK = 3
 
 CELERY_TASK_STATUS_MAP = {

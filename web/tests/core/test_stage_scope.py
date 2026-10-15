@@ -72,6 +72,17 @@ class StageScopeTest(TestCase):
         self.assertEqual(self.read('assay_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
         run.assert_called_once()
 
+    def test_vulnerability_scan_that_assessed_nothing_says_so(self):
+        # recorded on the SUCCESS activity, so scoring never takes this scan as a baseline
+        from limes.definitions import NOTHING_ASSESSED
+        with mock.patch.object(stages, 'get_http_urls', return_value=[]):
+            stages.vulnerability_scan(ctx=dict(self.ctx))
+        self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
+        with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
+                mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
+            stages.vulnerability_scan(ctx=dict(self.ctx))  # assay wrote no report
+        self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
+
     def test_screenshot_contact_level(self):
         urls = ['https://own.x.com/', 'https://priv.x.com/']
         with mock.patch.object(stages, 'get_http_urls', return_value=urls), \

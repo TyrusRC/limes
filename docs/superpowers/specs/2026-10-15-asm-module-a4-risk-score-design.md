@@ -196,3 +196,9 @@ The beat task `snapshot_scores` runs daily (`86400s`, `ORCHESTRATE` route). It u
 - **A scan that is only partially successful.** If the vulnerability stage succeeded on some hosts and timed out on others, it is still one successful activity and becomes the baseline. Missed hosts read as clean. Coverage shows only root-level freshness. The upgrade path is per-host baselines, using `ScanJob` per asset.
 - **Hostnames without an asset.** Findings on hosts with no asset row stay unlinked and unscored. The pipeline upserts hostnames before the vulnerability stage, so this should be rare. The backfill command catches the stragglers.
 - **P10 on tiny estates is close to the minimum.** With fewer than 10 assets, the project score equals the worst asset. That is intended: weakest link.
+
+## Amendment after final review (2026-10-15)
+
+- **A subscan's vulnerability stage never makes a baseline.** Subscans attach their `ScanActivity` to the parent scan but cover one host. Activities whose `celery_id` belongs to one of the scan's `SubScan.celery_ids` are ignored.
+- **A stage that assessed nothing never makes a baseline.** When `vulnerability_scan` has no alive URLs, or assay writes no report, the stage stays SUCCESS but records `error_message` starting `nothing assessed`. Scoring skips such activities. If assay omits its report on a clean run, a clean rescan would not recover the score. The current assay version writes a report whenever it exits normally; revisit if that changes.
+- **Never-scanned is not clean.** Only assets under an owned root that has a baseline get a score. Others return `score: None, grade: 'N/A', assessed: False`, and the UI says "Not yet vulnerability-scanned". `project_score` adds `unassessed` (the scored-but-unassessed count). `asset_count` is now the number of assessed assets, and the project score is the P10 over those.

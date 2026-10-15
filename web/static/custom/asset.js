@@ -112,6 +112,7 @@ function asset_penalty_rows(rows, withAsset) {
 // Risk section of the asset modal (limes.scoring); null for assets that are not scored.
 function asset_risk_html(risk) {
 	if (!risk) return '';
+	if (risk.assessed === false) return '<h5>Risk</h5><p class="text-muted">Not yet vulnerability-scanned: no score.</p>';
 	var rows = asset_penalty_rows(risk.penalties, false);
 	return '<h5>Risk ' + asset_esc(risk.score) + ' <span class="badge bg-soft-primary text-primary">' + asset_esc(risk.grade) +
 		'</span></h5>' + (rows ? '<table class="table table-sm"><thead><tr><th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' +
@@ -125,15 +126,17 @@ function load_asset_score() {
 		.then(function(r) { if (!r.ok) throw new Error('score'); return r.json(); })
 		.then(function(s) {
 			if (s.score === null) {
-				box.innerHTML = '<p class="text-muted mb-0">No owned assets to score yet.</p>';
+				box.innerHTML = '<p class="text-muted mb-0">' + (Number(s.unassessed) > 0 ?
+					'No owned root has had a vulnerability scan yet: no score.' : 'No owned assets to score yet.') + '</p>';
 				return;
 			}
+			var pending = Number(s.unassessed) > 0 ? ' &middot; ' + Number(s.unassessed) + ' assets not yet scanned (not scored)' : '';
 			var cov = s.coverage === null ? 'n/a' : Math.round(Number(s.coverage) * 100) + '%';
 			var rows = asset_penalty_rows(s.top_penalties, true);
 			box.innerHTML = '<div class="d-flex align-items-baseline mb-1"><span class="h2 mb-0 me-2">' + asset_esc(s.score) +
 				'</span><span class="badge bg-soft-primary text-primary me-3">' + asset_esc(s.grade) + '</span>' +
 				'<small class="text-muted">' + asset_esc(cov) + ' of owned roots scanned for vulnerabilities in 30 days &middot; ' +
-				asset_esc(s.version) + '</small></div>' + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
+				asset_esc(s.version) + pending + '</small></div>' + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
 				'<th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' + rows + '</tbody></table>' : '');
 		}).catch(function() {
 			box.innerHTML = '<p class="text-muted mb-0">Score unavailable.</p>';

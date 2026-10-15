@@ -2,6 +2,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
+from limes.definitions import NOTHING_ASSESSED
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
@@ -791,6 +792,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 	target_urls = _in_scope(self, get_http_urls(is_alive=True, ctx=ctx) or [], 'attack')
 	if not target_urls:
 		logger.warning('No alive HTTP URLs to scan, skipping DAST stage')
+		self.error = f'{NOTHING_ASSESSED}: no alive HTTP URLs'  # still SUCCESS, never a scoring baseline
 		return 0
 
 	targets_file = f'{self.results_dir}/assay_targets.txt'
@@ -816,6 +818,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 		report_path = f'{out_dir}/assay-report.json'
 		if not os.path.isfile(report_path):
 			logger.warning(f'assay produced no report at {report_path}')
+			self.error = f'{NOTHING_ASSESSED}: assay produced no report'
 			return 0
 		# assay echoes the raw request (incl. secret headers) into its report:
 		# scrub it on disk and before anything reaches the DB.
