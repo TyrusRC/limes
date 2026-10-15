@@ -109,7 +109,7 @@ These are two bulk updates. They do not touch `missed_count`.
 - `state='missing'` and `last_seen < now - 30d` → `stale`.
 - `state='stale'` and `last_seen < now - 90d` → `retired`.
 
-A null `last_seen` never ages. It returns `{'stale': n, 'retired': m}`.
+It returns `{'stale': n, 'retired': m}`.
 
 `Asset.mark_missing_or_seen(seen=True)` now returns any of `missing`, `stale` or `retired` to `active`. Today only `missing` comes back.
 
@@ -159,7 +159,6 @@ A null `last_seen` never ages. It returns `{'stale': n, 'retired': m}`.
 **Aging:**
 - the thresholds at 29d versus 31d, and 89d versus 91d;
 - `active` is never aged by time;
-- a null `last_seen` never ages;
 - a sighting returns `stale` and `retired` to `active`.
 
 **API:**
