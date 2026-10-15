@@ -29,6 +29,7 @@ from limes.utilities import is_safe_path
 from scanEngine.models import *
 from startScan.models import *
 from startScan.models import EndPoint
+from limes.continuous import start_asm_scan
 from targetApp.models import *
 from api.permissions import *
 from api.serializers import *
@@ -794,40 +795,8 @@ class RescanAsset(APIView):
 		asset = _load_asset(request)
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
-		if asset.kind != 'root_domain' or not asset.is_active_scan_allowed:
-			return Response({'status': False, 'message': 'Per-asset rescan is not supported yet (owned root domains only in A2).'})
-		domain = Domain.objects.filter(project=asset.project, name=asset.value).first()
-		if not domain:
-			return Response({'status': False, 'message': 'no Domain record for this root; add it as a target first.'})
-		# The Assets page sends no engine: reuse the target's last engine, else the first built-in one.
-		engine_id = request.data.get('engine_id')
-		if engine_id in (None, ''):
-			last = ScanHistory.objects.filter(domain=domain, scan_type__isnull=False).order_by('-start_scan_date').first()
-			engine = last.scan_type if last else EngineType.objects.filter(default_engine=True).order_by('id').first()
-		else:
-			try:
-				engine = EngineType.objects.filter(id=int(engine_id)).first()
-			except (TypeError, ValueError, OverflowError):
-				engine = None
-		if not engine:
-			return Response({'status': False, 'message': 'unknown scan engine; pick an engine or set a default one.'})
-		engine_id = engine.id
-		scan_history_id = create_scan_object(
-			host_id=domain.id, engine_id=engine_id, initiated_by_id=request.user.id)
-		# Mirrors startScan.views.start_scan_ui, plus scan_mode='asm'.
-		kwargs = {
-			'scan_history_id': scan_history_id,
-			'domain_id': domain.id,
-			'engine_id': engine_id,
-			'scan_type': LIVE_SCAN,
-			'results_dir': '/usr/src/scan_results',
-			'imported_subdomains': [],
-			'out_of_scope_subdomains': [],
-			'initiated_by_id': request.user.id,
-			'scan_mode': 'asm',
-		}
-		initiate_scan.apply_async(kwargs=kwargs)
-		return Response({'status': True, 'message': f'ASM scan started for {asset.value}'})
+		ok, message = start_asm_scan(asset, engine_id=request.data.get('engine_id'), initiated_by_id=request.user.id)
+		return Response({'status': ok, 'message': message})
 
 
 class AddTarget(APIView):
