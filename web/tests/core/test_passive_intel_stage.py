@@ -45,6 +45,7 @@ class PassiveIntelStageTest(TestCase):
             'run_ripestat': mock.patch('limes.tasks.intel.run_ripestat', return_value={'ripestat_enriched': 2}),
             'collect_dns': mock.patch('limes.tasks.attribution.collect_dns', return_value={'dns_checked': 1}),
             'score_project': mock.patch('limes.tasks.attribution.score_project', return_value={'scored': 1}),
+            'verify_delegations': mock.patch('limes.tasks.attribution.verify_delegations', return_value={'verified': 0}),
             'apply_decisions': mock.patch('limes.tasks.attribution.apply_decisions', return_value={'auto_confirmed': 0}),
         }
         mocks.update(overrides)
@@ -114,3 +115,18 @@ class PassiveIntelStageTest(TestCase):
         stages.passive_intel(ctx=dict(self.ctx))
         m['resolve_root'].assert_not_called()
         m['run_internetdb'].assert_called_once()
+
+    def test_verifies_between_scoring_and_deciding(self):
+        m = self.patched()
+        order = mock.Mock()
+        for name in ('score_project', 'verify_delegations', 'apply_decisions'):
+            order.attach_mock(m[name], name)
+        stages.passive_intel(ctx=dict(self.ctx))
+        self.assertEqual([c[0] for c in order.mock_calls], ['score_project', 'verify_delegations', 'apply_decisions'])
+
+    def test_never_decides_when_verification_fails(self):
+        m = self.patched(verify_delegations=mock.patch('limes.tasks.attribution.verify_delegations',
+                                                       side_effect=RuntimeError('registry')))
+        out = stages.passive_intel(ctx=dict(self.ctx))
+        m['apply_decisions'].assert_not_called()
+        self.assertEqual(out['failed'], 'attribution_verify')
