@@ -138,3 +138,34 @@ class DispatchTest(Base):
         a = self.root('off.com', 'off')
         self.assertEqual(continuous.start_asm_scan(a, initiated_by_id=None, scan_type=SCHEDULED_SCAN),
                          (True, 'ASM scan started for off.com'))
+
+
+class AgingTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.now = timezone.now()
+
+    def asset(self, value, state, days):
+        return Asset.objects.create(project=self.p, kind='hostname', value=value, scope_tier='owned_host', state=state,
+                                    last_seen=self.now - timedelta(days=days))
+
+    def state(self, a):
+        a.refresh_from_db()
+        return a.state
+
+    def test_thresholds(self):
+        m29, m31 = self.asset('m29', 'missing', 29), self.asset('m31', 'missing', 31)
+        s89, s91 = self.asset('s89', 'stale', 89), self.asset('s91', 'stale', 91)
+        self.assertEqual(continuous.age_assets(), {'stale': 1, 'retired': 1})
+        self.assertEqual([self.state(a) for a in (m29, m31, s89, s91)], ['missing', 'stale', 'stale', 'retired'])
+
+    def test_active_never_ages(self):
+        active = self.asset('a', 'active', 400)
+        continuous.age_assets()
+        self.assertEqual(self.state(active), 'active')
+
+    def test_sighting_revives_stale_and_retired(self):
+        for state in ('missing', 'stale', 'retired'):
+            a = self.asset(state, state, 200)
+            a.mark_missing_or_seen(True)
+            self.assertEqual(self.state(a), 'active', state)
