@@ -99,7 +99,7 @@ class Asset(models.Model):
 
 class AssetFact(models.Model):
     """Typed ownership evidence attached to an asset (A3c attribution graph)."""
-    KINDS = [(k, k) for k in ('cert', 'ip', 'ns', 'mx')]
+    KINDS = [(k, k) for k in ('cert', 'ip', 'ns', 'mx', 'delegation')]
 
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='facts')
     kind = models.CharField(max_length=10, choices=KINDS)

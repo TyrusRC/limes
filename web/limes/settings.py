@@ -28,8 +28,8 @@ LIMES_RESULTS = env('LIMES_RESULTS', default=f'{LIMES_HOME}/scan_results')
 LIMES_CACHE_ENABLED = env.bool('LIMES_CACHE_ENABLED', default=False)
 LIMES_RECORD_ENABLED = env.bool('LIMES_RECORD_ENABLED', default=True)
 LIMES_RAISE_ON_ERROR = env.bool('LIMES_RAISE_ON_ERROR', default=False)
-# Off: NS control seen through a recursive resolver is spoofable (see A3c spec amendment)
-ATTRIBUTION_AUTO_CONFIRM = env.bool('LIMES_ATTRIBUTION_AUTO_CONFIRM', default=False)
+# On: auto-confirm still needs a registry-verified delegation (limes.intel.delegation); false only flags
+ATTRIBUTION_AUTO_CONFIRM = env.bool('LIMES_ATTRIBUTION_AUTO_CONFIRM', default=True)
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)

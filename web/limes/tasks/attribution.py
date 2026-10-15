@@ -1,6 +1,7 @@
 """Ownership attribution (A3c): evidence collection, scoring and decisions for candidates.
 
-DNS lookups go to resolvers only, never to a target.
+DNS lookups go to resolvers only, never to a target; delegation checks (verify_delegations) query
+registry servers and our own nameservers only.
 """
 import logging
 import os
@@ -13,7 +14,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from limes import commands
-from limes.intel import domains
+from limes.intel import delegation, domains
 from limes.pipeline import dnsx
 from limes.tasks import inventory
 from startScan.models import Asset, AssetFact
@@ -87,6 +88,7 @@ REVIEW = 0.40
 MIN_BRAND_LEN = 4  # NOTE: shorter keywords would match everything
 OWNED = ('owned_root', 'owned_host')
 NS_FRESH = timedelta(hours=24)  # NS control must come from a delegation seen this recently
+MAX_VERIFY = 25  # NOTE: registry checks per run, highest confidence first; the rest wait (<= 25 x 2 x 2 x 2s = 200s)
 
 
 def _under_root(host, roots):
@@ -183,7 +185,10 @@ def score_project(project):
                                  'control': False, 'corroborates': False})
         score = round(_combine(contribs), 4)
         c.confidence = score
+        prev = (c.confidence_detail or {}).get('delegation')
         c.confidence_detail = {'version': VERSION, 'score': score, 'contributions': contribs}
+        if prev:
+            c.confidence_detail['delegation'] = prev  # the last registry check stays visible until the next
     # a human decision may have landed since load: never score a candidate that is no longer one
     still = set(Asset.objects.filter(pk__in=[c.pk for c in cands], scope_tier='candidate')
                 .values_list('pk', flat=True))
@@ -192,32 +197,68 @@ def score_project(project):
     return {'scored': len(cands)}
 
 
+def _qualifying_control(a, fresh_after):
+    """a's hop-1 NS control contribution if a qualifies for auto-confirm on evidence: control plus
+    corroboration, and current NS facts seen since fresh_after that equal that control. Else None."""
+    contribs = (a.confidence_detail or {}).get('contributions') or []
+    control = next((c for c in contribs if c.get('hop') == 1 and c.get('control')), None)
+    if not control or not any(c.get('hop') == 1 and c.get('corroborates') for c in contribs):
+        return None
+    # re-derive control from current facts: scoring may predate a dropped or replaced delegation
+    ns_now = AssetFact.objects.filter(asset=a, kind='ns')
+    if (not ns_now.exists() or ns_now.filter(last_seen__lt=fresh_after).exists()
+            or ', '.join(sorted(ns_now.values_list('value', flat=True))) != control['value']):
+        return None
+    return control
+
+
+def verify_delegations(project, verify=None):
+    """Ask the registry who each qualifying candidate is delegated to (limes.intel.delegation).
+    Success records the 'delegation' fact apply_decisions requires; failure deletes it (fail closed)."""
+    verify = verify or delegation.verify
+    fresh_after = timezone.now() - NS_FRESH
+    counts = {'verified': 0, 'unverified': 0}
+    for a in Asset.objects.filter(project=project, scope_tier='candidate', kind='root_domain',
+                                  confidence__gte=AUTO_CONFIRM).order_by('-confidence', 'id'):
+        control = _qualifying_control(a, fresh_after)
+        if not control:
+            continue
+        if sum(counts.values()) >= MAX_VERIFY:
+            break
+        ok, reason = verify(a.value, control['value'].split(', '))
+        if ok:
+            inventory.record_fact(a, 'delegation', control['value'], 'parent')
+        else:
+            AssetFact.objects.filter(asset=a, kind='delegation').delete()
+        counts['verified' if ok else 'unverified'] += 1
+        status = {'ok': ok, 'reason': reason, 'checked_at': timezone.now().isoformat()}
+        Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
+            confidence_detail={**a.confidence_detail, 'delegation': status})
+    return counts
+
+
 def apply_decisions(project):
-    """Auto-confirm only score >= AUTO_CONFIRM with hop-1 NS control AND hop-1 corroboration, and only
-    from NS facts seen within NS_FRESH. The conditional update means a concurrent human decision wins.
-    With settings.ATTRIBUTION_AUTO_CONFIRM off (the default) no tier changes: qualifying candidates are
-    only flagged 'would_auto_confirm' for a human to review."""
+    """Auto-confirm only score >= AUTO_CONFIRM with hop-1 NS control AND hop-1 corroboration, from NS
+    facts seen within NS_FRESH, AND a registry-verified delegation of that same NS set seen within
+    NS_FRESH (verify_delegations). The conditional update means a concurrent human decision wins.
+    With settings.ATTRIBUTION_AUTO_CONFIRM off no tier changes: qualifying candidates are only
+    flagged 'would_auto_confirm' for a human to review."""
     from dashboard.stats import invalidate
     auto = would = 0
     fresh_after = timezone.now() - NS_FRESH
     # hostname candidates never get NS facts today, so they never qualify
     for a in Asset.objects.filter(project=project, scope_tier='candidate', kind__in=('root_domain', 'hostname'),
                                   confidence__gte=AUTO_CONFIRM):
-        contribs = (a.confidence_detail or {}).get('contributions') or []
-        control = next((c for c in contribs if c.get('hop') == 1 and c.get('control')), None)
-        if not control or not any(c.get('hop') == 1 and c.get('corroborates') for c in contribs):
-            continue
-        # re-derive control from current facts: scoring may predate a dropped or replaced delegation
-        ns_now = AssetFact.objects.filter(asset=a, kind='ns')
-        if (not ns_now.exists() or ns_now.filter(last_seen__lt=fresh_after).exists()
-                or ', '.join(sorted(ns_now.values_list('value', flat=True))) != control['value']):
+        control = _qualifying_control(a, fresh_after)
+        if not control or not AssetFact.objects.filter(asset=a, kind='delegation', value=control['value'],
+                                                       last_seen__gte=fresh_after).exists():
             continue
         if not settings.ATTRIBUTION_AUTO_CONFIRM:
             would += Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
                 confidence_detail={**a.confidence_detail, 'would_auto_confirm': True})
             continue
         reason = (f'auto-confirmed ({VERSION}) {a.confidence:.2f}: NS {control["value"]} '
-                  f'under owned root {control["via"]}')
+                  f'under owned root {control["via"]}; delegation verified at parent')
         # append to the sources as stored now, so provenance added concurrently is not overwritten
         a.sources = Asset.objects.filter(pk=a.pk).values_list('sources', flat=True).first() or []
         inventory._append_source(a, 'attribution', reason)
