@@ -5,6 +5,7 @@ non-recursively who the zone is delegated to, then asks those nameservers - ours
 authoritative SOA. Queries go only to registry servers and the delegated nameservers, and never
 to a private or reserved address.
 """
+from celery.exceptions import SoftTimeLimitExceeded
 import dns.exception
 import dns.flags
 import dns.message
@@ -29,7 +30,7 @@ def _norm(name):
 
 
 def _udp_query(qname, rdtype, server_ip):
-    q = dns.message.make_query(qname, rdtype)
+    q = dns.message.make_query(qname, rdtype, use_edns=0, payload=1232)  # larger referrals fit untruncated
     q.flags &= ~dns.flags.RD
     return dns.query.udp(q, server_ip, timeout=QUERY_TIMEOUT)
 
@@ -37,7 +38,11 @@ def _udp_query(qname, rdtype, server_ip):
 def _resolve(name, rdtype):
     try:
         return [_norm(r.to_text()) for r in dns.resolver.resolve(name, rdtype, lifetime=QUERY_TIMEOUT * 2)]
-    except dns.exception.DNSException:
+    except dns.exception.DNSException as e:
+        # the resolver records each server's exception and retries, Celery's soft time limit included
+        for err in (getattr(e, 'kwargs', None) or {}).get('errors') or []:
+            if isinstance(err[3], SoftTimeLimitExceeded):
+                raise err[3]
         return []
 
 
@@ -79,7 +84,8 @@ def verify(domain, control_ns, query=_udp_query, resolve=_resolve):
     if resp is None:
         return False, 'parent unreachable'
     ns = _rrset(resp.authority, domain, dns.rdatatype.NS)
-    if resp.rcode() != dns.rcode.NOERROR or resp.flags & dns.flags.AA or ns is None:
+    # a truncated (TC) referral may carry a partial NS set
+    if resp.rcode() != dns.rcode.NOERROR or resp.flags & (dns.flags.AA | dns.flags.TC) or ns is None:
         return False, 'no delegation at parent'
     got = tuple(sorted(_norm(r.target) for r in ns))
     if got != want:

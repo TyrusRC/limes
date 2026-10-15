@@ -1,8 +1,12 @@
+from unittest import mock
+
+from celery.exceptions import SoftTimeLimitExceeded
 from django.test import SimpleTestCase
 
 import dns.exception
 import dns.flags
 import dns.message
+import dns.nameserver
 import dns.rcode
 import dns.rrset
 
@@ -130,3 +134,23 @@ class VerifyTest(SimpleTestCase):
         (ok, reason), fake = self.check(table, control=inside)
         self.assertEqual((ok, reason), (False, 'nameservers unreachable'))
         self.assertNotIn('10.0.0.53', {ip for _, _, ip in fake.asked})
+
+    def test_truncated_referral_is_not_a_delegation(self):
+        table = ours_ok()
+        table[('NS', '192.5.6.30')].flags |= dns.flags.TC  # a partial NS set could equal ours
+        (ok, reason), _ = self.check(table)
+        self.assertEqual((ok, reason), (False, 'no delegation at parent'))
+
+    def test_queries_are_non_recursive_with_edns(self):
+        with mock.patch('dns.query.udp') as udp:
+            delegation._udp_query('ours.net', 'NS', '192.5.6.30')
+        q = udp.call_args[0][0]
+        self.assertFalse(q.flags & dns.flags.RD)
+        self.assertEqual(q.edns, 0)  # larger referrals fit without truncation
+
+    def test_soft_time_limit_inside_the_resolver_propagates(self):
+        # dnspython's resolver records per-server exceptions and retries; Celery's limit must escape
+        with mock.patch.object(dns.nameserver.Do53Nameserver, 'query', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                delegation._resolve('net', 'NS')
+
