@@ -31,6 +31,7 @@ urlpatterns = [
     path('action/asset/reject/', RejectAsset.as_view(), name='reject_asset'),
     path('action/asset/rescan/', RescanAsset.as_view(), name='rescan_asset'),
     path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
+    path('asset_score/', AssetScore.as_view(), name='asset_score'),
     path(
         'add/target/',
         AddTarget.as_view(),

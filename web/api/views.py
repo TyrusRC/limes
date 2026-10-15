@@ -818,6 +818,20 @@ class SetAssetCadence(APIView):
 		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 
+class AssetScore(APIView):
+	"""Project risk score (limes.scoring) with its last 30 daily snapshots."""
+
+	def get(self, request):
+		from limes import scoring
+		project = Project.objects.filter(slug=request.query_params.get('project') or '').first()
+		if not project:
+			return Response({'status': False, 'message': 'project not found'}, status=404)
+		data = scoring.project_score(project)
+		data['history'] = list(project.score_snapshots.order_by('-date')
+							   .values('date', 'score', 'grade', 'version')[:30])
+		return Response(data)
+
+
 class AddTarget(APIView):
 	permission_classes = [HasPermission]
 	permission_required = PERM_MODIFY_TARGETS
@@ -2698,6 +2712,15 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			f = F('confidence')
 			return qs.order_by(f.desc(nulls_last=True) if direction == 'desc' else f.asc(nulls_last=True), 'id')
 		return qs.order_by(('-' if direction == 'desc' else '') + field, 'id')
+
+	def retrieve(self, request, *args, **kwargs):
+		# Risk is computed on retrieve only: scoring every row of a list page would be N+1.
+		from limes import scoring
+		asset = self.get_object()
+		data = self.get_serializer(asset).data
+		scored = scoring.scored_assets(asset.project).filter(pk=asset.pk).exists()
+		data['risk'] = scoring.asset_breakdown(asset) if scored else None
+		return Response(data)
 
 	def paginate_queryset(self, queryset, view=None):
 		if 'no_page' in self.request.query_params:
