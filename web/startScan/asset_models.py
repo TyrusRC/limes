@@ -17,7 +17,7 @@ SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
 
-__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob']
+__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot']
 
 
 class Tag(models.Model):
@@ -141,3 +141,18 @@ class ScanJob(models.Model):
     class Meta:
         indexes = [models.Index(fields=['run', 'stage'], name='scanjob_run_stage_idx'),
                    models.Index(fields=['asset', 'stage'], name='scanjob_asset_stage_idx')]
+
+
+class ScoreSnapshot(models.Model):
+    """Daily project risk score (A4, limes.scoring), kept with the model version that produced it."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='score_snapshots')
+    date = models.DateField()
+    version = models.CharField(max_length=30)
+    score = models.IntegerField(null=True, blank=True)
+    grade = models.CharField(max_length=3)
+    coverage = models.FloatField(null=True, blank=True)
+    asset_count = models.IntegerField(default=0)
+    top_penalties = models.JSONField(default=list)
+
+    class Meta:
+        unique_together = ('project', 'date')
