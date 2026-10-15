@@ -3,11 +3,12 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import connection
 from django.utils import timezone
 
 from limes.celery import app
 from limes.common_func import create_scan_object
-from limes.definitions import INITIATED_TASK, LIVE_SCAN, RUNNING_TASK, SCHEDULED_SCAN
+from limes.definitions import INITIATED_TASK, LIVE_SCAN, RUNNING_TASK
 from limes.tasks.control import initiate_scan
 from scanEngine.models import EngineType
 from startScan.models import Asset, ScanHistory
@@ -21,10 +22,13 @@ MAX_IN_FLIGHT = 2  # NOTE: global ceiling: automation waits while this many scan
 MAX_DISPATCH_PER_TICK = 1
 MAX_ATTEMPTS_PER_TICK = 5
 IN_PROGRESS = (INITIATED_TASK, RUNNING_TASK)
+DISPATCH_LOCK = 0x4C494D45  # Postgres advisory lock key: one dispatcher at a time
 
 
-def start_asm_scan(asset, engine_id=None, initiated_by_id=None, scan_type=LIVE_SCAN):
-    """Start the per-root ASM run (discovery, passive intel, screenshots). Returns (ok, message)."""
+def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
+    """Start the per-root ASM run (discovery, passive intel, screenshots). Returns (ok, message).
+    Always LIVE_SCAN: initiate_scan then runs on the ScanHistory written here. SCHEDULED_SCAN would make
+    it create a second one and orphan this one in INITIATED."""
     if asset.kind != 'root_domain' or not asset.is_active_scan_allowed:
         return False, 'Per-asset rescan is not supported yet (owned root domains only in A2).'
     domain = Domain.objects.filter(project=asset.project, name=asset.value).first()
@@ -47,7 +51,7 @@ def start_asm_scan(asset, engine_id=None, initiated_by_id=None, scan_type=LIVE_S
         'scan_history_id': scan_history_id,
         'domain_id': domain.id,
         'engine_id': engine.id,
-        'scan_type': scan_type,
+        'scan_type': LIVE_SCAN,
         'results_dir': '/usr/src/scan_results',
         'imported_subdomains': [],
         'out_of_scope_subdomains': [],
@@ -82,11 +86,25 @@ def due_roots(now):
 def dispatch_due_scans():
     if not settings.CONTINUOUS_SCANS:
         return {'dispatched': 0, 'reason': 'disabled'}
+    # Ticks queued while workers were down can run in parallel: only one may pick and start roots.
+    # Session-level lock, so each started scan's ScanHistory is committed before the next check.
+    with connection.cursor() as c:
+        c.execute('SELECT pg_try_advisory_lock(%s)', [DISPATCH_LOCK])
+        if not c.fetchone()[0]:
+            return {'dispatched': 0, 'skipped': 0, 'reason': 'locked'}
+    try:
+        return _dispatch()
+    finally:
+        with connection.cursor() as c:
+            c.execute('SELECT pg_advisory_unlock(%s)', [DISPATCH_LOCK])
+
+
+def _dispatch():
     if ScanHistory.objects.filter(scan_status__in=IN_PROGRESS).count() >= MAX_IN_FLIGHT:
         return {'dispatched': 0, 'skipped': 0}
     dispatched = skipped = 0
     for asset in due_roots(timezone.now())[:MAX_ATTEMPTS_PER_TICK]:
-        ok, message = start_asm_scan(asset, initiated_by_id=None, scan_type=SCHEDULED_SCAN)
+        ok, message = start_asm_scan(asset, initiated_by_id=None)
         if ok:
             dispatched += 1
             if dispatched >= MAX_DISPATCH_PER_TICK:

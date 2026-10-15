@@ -65,7 +65,7 @@ Owned roots are rediscovered on a schedule, with no one pressing Rescan. Assets 
 
 The body of `RescanAsset.post` after asset loading moves into:
 
-`start_asm_scan(asset, engine_id=None, initiated_by_id=None, scan_type=LIVE_SCAN) -> (ok: bool, message: str)`
+`start_asm_scan(asset, engine_id=None, initiated_by_id=None) -> (ok: bool, message: str)`
 
 It keeps the current checks and messages unchanged:
 - the asset must be a `root_domain` with `is_active_scan_allowed`;
@@ -94,7 +94,7 @@ It keeps the current checks and messages unchanged:
    `ScanHistory` is used rather than `ScanRun` because `create_scan_object` writes it synchronously, while `ScanRun` is only created once the Celery task starts. Checking `ScanRun` could double-dispatch on the next tick.
 
    Due-ness is measured from when the last run *started*, whatever its outcome, so a root whose scans keep failing is retried once per interval, never every minute. A manual full scan also counts as fresh: it includes discovery.
-4. Dispatch at most `MAX_DISPATCH_PER_TICK = 1` due root. Pick the one never scanned first, else the oldest latest-start, tie-broken by asset `id`. Call `start_asm_scan(asset, scan_type=SCHEDULED_SCAN)` with `initiated_by_id=None`.
+4. Dispatch at most `MAX_DISPATCH_PER_TICK = 1` due root. Pick the one never scanned first, else the oldest latest-start, tie-broken by asset `id`. Call `start_asm_scan(asset)` with `initiated_by_id=None`.
    - A `(False, message)` result is logged at info and counted as `skipped`. It never raises. The next due root is tried in the same tick, up to 5 attempts.
 5. Return `{'dispatched': n, 'skipped': m}`.
 
@@ -150,11 +150,12 @@ It returns `{'stale': n, 'retired': m}`.
 - `candidate`, `co_brand` and `rejected` roots are never dispatched;
 - a root with no `Domain` is skipped and the next one is tried;
 - the kill switch returns `disabled`;
-- dispatch passes `scan_type=SCHEDULED_SCAN` and `initiated_by_id=None`.
+- dispatch passes `initiated_by_id=None`, and the scan reuses the `ScanHistory` row dispatch created (`LIVE_SCAN`);
+- a second, concurrent tick does not dispatch.
 
 `initiate_scan.apply_async` is mocked.
 
-**`start_asm_scan`:** the existing `RescanAsset` tests stay green unchanged. Add one test of the direct call with `SCHEDULED_SCAN`.
+**`start_asm_scan`:** the existing `RescanAsset` tests stay green unchanged. Add one test of the direct call with no user.
 
 **Aging:**
 - the thresholds at 29d versus 31d, and 89d versus 91d;
@@ -183,3 +184,8 @@ It returns `{'stale': n, 'retired': m}`.
 - **Load on upgrade.** Every existing owned root becomes due at once. The per-tick and in-flight caps spread the work out, but a large estate takes a while to cycle. That is accepted, and it is visible because the scans appear in scan history.
 - **Third-party rate limits.** crt.sh and InternetDB see more traffic. Weekly is the default, and A3b's providers already back off and cache.
 - **The global cap of 2 starves automation on a busy instance.** That is intentional: people come first. The upgrade path is a capacity-aware budget.
+
+## Amendment after final review (2026-10-15)
+
+- **Every dispatched scan uses `LIVE_SCAN`.** With `SCHEDULED_SCAN`, `initiate_scan` creates its own `ScanHistory` row. The one written by `create_scan_object` would then sit in `INITIATED`, holding an in-flight slot until the reaper. `start_asm_scan` lost its `scan_type` parameter.
+- **One dispatcher at a time.** The dispatcher takes a session-level Postgres advisory lock (`pg_try_advisory_lock`), and the beat entry expires after 55s. Ticks queued during worker downtime therefore never run in parallel or late.

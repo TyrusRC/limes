@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from dashboard.models import Project
 from limes import continuous
-from limes.definitions import FAILED_TASK, INITIATED_TASK, RUNNING_TASK, SCHEDULED_SCAN, SUCCESS_TASK
+from limes.definitions import FAILED_TASK, INITIATED_TASK, LIVE_SCAN, RUNNING_TASK, SUCCESS_TASK
 from scanEngine.models import EngineType
 from startScan.models import Asset, ScanHistory
 from targetApp.models import Domain
@@ -42,11 +42,11 @@ class Base(TestCase):
 
 
 class StartAsmScanTest(Base):
-    def test_scheduled_system_start(self):
+    def test_system_start(self):
         a = self.root('x.com')
-        self.assertEqual(continuous.start_asm_scan(a, scan_type=SCHEDULED_SCAN), (True, 'ASM scan started for x.com'))
+        self.assertEqual(continuous.start_asm_scan(a), (True, 'ASM scan started for x.com'))
         kw = self.apply_async.call_args.kwargs['kwargs']
-        self.assertEqual((kw['scan_type'], kw['initiated_by_id'], kw['scan_mode']), (SCHEDULED_SCAN, None, 'asm'))
+        self.assertEqual((kw['scan_type'], kw['initiated_by_id'], kw['scan_mode']), (LIVE_SCAN, None, 'asm'))
 
 
 class DueRootsTest(Base):
@@ -96,12 +96,37 @@ class DueRootsTest(Base):
 
 
 class DispatchTest(Base):
-    def test_dispatches_one_per_tick_as_scheduled_system_scan(self):
+    def test_dispatches_one_per_tick_as_system_scan(self):
         self.root('a.com')
         self.root('b.com')
         self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 1, 'skipped': 0})
         kw = self.apply_async.call_args.kwargs['kwargs']
-        self.assertEqual((kw['scan_type'], kw['initiated_by_id'], kw['scan_mode']), (SCHEDULED_SCAN, None, 'asm'))
+        self.assertEqual((kw['initiated_by_id'], kw['scan_mode']), (None, 'asm'))
+
+    def test_scan_reuses_the_row_dispatch_created(self):
+        # initiate_scan creates a second ScanHistory for SCHEDULED_SCAN and orphans ours in INITIATED,
+        # which then holds an in-flight slot until the reaper: the scan must reuse the row we wrote
+        mock.patch.stopall()  # the real create_scan_object this time
+        with mock.patch('limes.continuous.initiate_scan.apply_async') as apply_async:
+            self.root('a.com')
+            continuous.dispatch_due_scans()
+        kw = apply_async.call_args.kwargs['kwargs']
+        rows = list(ScanHistory.objects.filter(domain__name='a.com').values_list('id', flat=True))
+        self.assertEqual(rows, [kw['scan_history_id']])
+        self.assertEqual(kw['scan_type'], LIVE_SCAN)  # LIVE_SCAN: initiate_scan uses scan_history_id as given
+
+    def test_concurrent_tick_does_not_dispatch(self):
+        from django.db import connections
+        self.root('a.com')
+        other = connections['default'].copy()  # a second session, like a parallel worker
+        try:
+            with other.cursor() as c:
+                c.execute('SELECT pg_advisory_lock(%s)', [continuous.DISPATCH_LOCK])
+            self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'skipped': 0, 'reason': 'locked'})
+            self.apply_async.assert_not_called()
+        finally:
+            other.close()
+        self.assertEqual(continuous.dispatch_due_scans()['dispatched'], 1)  # lock released with that session
 
     def test_next_tick_never_redispatches_the_same_root(self):
         self.root('a.com')
@@ -136,7 +161,7 @@ class DispatchTest(Base):
 
     def test_off_tier_still_allows_manual_start(self):
         a = self.root('off.com', 'off')
-        self.assertEqual(continuous.start_asm_scan(a, initiated_by_id=None, scan_type=SCHEDULED_SCAN),
+        self.assertEqual(continuous.start_asm_scan(a),
                          (True, 'ASM scan started for off.com'))
 
 
