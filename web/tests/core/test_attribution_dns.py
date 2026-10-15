@@ -54,6 +54,8 @@ class CollectDnsTest(TestCase):
         return sorted(AssetFact.objects.filter(asset__value=value, kind=kind).values_list('value', flat=True))
 
     def test_records_ns_mx_and_a_only_for_resolving_candidates(self):
+        lame = Asset.objects.get(value='lame.net')
+        AssetFact.objects.create(asset=lame, kind='ns', value='old.example.com', source='dns')
         out = attribution.collect_dns(self.p, self.dir, run=self.run_with())
         self.assertEqual(sorted(self.hosts), ['lame.net', 'partner-co.com', 'thirdparty.org'])  # candidates only
         self.assertEqual(self.kw.get('timeout'), 600)
@@ -61,6 +63,8 @@ class CollectDnsTest(TestCase):
         self.assertEqual(self.facts('partner-co.com', 'mx'), ['mail.example.com'])
         self.assertEqual(self.facts('partner-co.com', 'ip'), ['198.51.99.10'])
         self.assertEqual(self.facts('lame.net', 'ns'), [])  # did not resolve: delegation unproven
+        self.assertEqual(set(AssetFact.objects.filter(kind='ip', asset__value='partner-co.com')
+                             .values_list('source', flat=True)), {'dns'})
         self.assertEqual(out['dns_checked'], 3)
 
     def test_ns_facts_replaced_by_latest_lookup(self):
@@ -82,3 +86,38 @@ class CollectDnsTest(TestCase):
             raise SoftTimeLimitExceeded()
         with self.assertRaises(SoftTimeLimitExceeded):
             attribution.collect_dns(self.p, self.dir, run=slow)
+
+    def seed_ns(self):
+        for a in Asset.objects.filter(scope_tier='candidate'):
+            AssetFact.objects.create(asset=a, kind='ns', value='old.example.com', source='dns')
+
+    def test_unanswered_candidate_loses_ns(self):
+        self.seed_ns()
+        only = os.path.join(self.dir, 'only.jsonl')
+        with open(only, 'w') as f:
+            f.write('{"host":"partner-co.com","a":["198.51.99.10"],"ns":["ns1.example.com"]}\n')
+        attribution.collect_dns(self.p, self.dir, run=self.run_with(fixture=only))
+        self.assertEqual(self.facts('thirdparty.org', 'ns'), [])
+        self.assertEqual(self.facts('lame.net', 'ns'), [])
+        self.assertEqual(self.facts('partner-co.com', 'ns'), ['ns1.example.com'])
+
+    def test_no_output_file_clears_ns(self):
+        self.seed_ns()
+        out = attribution.collect_dns(self.p, self.dir, run=lambda argv, **kw: SimpleNamespace(return_code=1))
+        self.assertEqual(out, {'dns_checked': 0})
+        self.assertEqual(AssetFact.objects.filter(kind='ns').count(), 0)
+
+    def test_run_failure_clears_ns_but_time_limit_keeps_it(self):
+        self.seed_ns()
+
+        def boom(argv, **kw):
+            raise OSError('x')
+
+        def slow(argv, **kw):
+            raise SoftTimeLimitExceeded()
+        with self.assertRaises(SoftTimeLimitExceeded):
+            attribution.collect_dns(self.p, self.dir, run=slow)
+        self.assertEqual(AssetFact.objects.filter(kind='ns').count(), 3)
+        with self.assertLogs('limes.tasks.attribution', level='ERROR'):
+            attribution.collect_dns(self.p, self.dir, run=boom)
+        self.assertEqual(AssetFact.objects.filter(kind='ns').count(), 0)
