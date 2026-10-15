@@ -193,10 +193,15 @@ def apply_decisions(project):
         control = next((c for c in contribs if c.get('hop') == 1 and c.get('control')), None)
         if not control or not any(c.get('hop') == 1 and c.get('corroborates') for c in contribs):
             continue
-        if AssetFact.objects.filter(asset=a, kind='ns', last_seen__lt=fresh_after).exists():
-            continue  # stale delegation (e.g. DNS step failed this run): never confirm from it
+        # re-derive control from current facts: scoring may predate a dropped or replaced delegation
+        ns_now = AssetFact.objects.filter(asset=a, kind='ns')
+        if (not ns_now.exists() or ns_now.filter(last_seen__lt=fresh_after).exists()
+                or ', '.join(sorted(ns_now.values_list('value', flat=True))) != control['value']):
+            continue
         reason = (f'auto-confirmed ({VERSION}) {a.confidence:.2f}: NS {control["value"]} '
                   f'under owned root {control["via"]}')
+        # append to the sources as stored now, so provenance added concurrently is not overwritten
+        a.sources = Asset.objects.filter(pk=a.pk).values_list('sources', flat=True).first() or []
         inventory._append_source(a, 'attribution', reason)
         tier = 'owned_root' if a.kind == 'root_domain' else 'owned_host'
         auto += Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
