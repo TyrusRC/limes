@@ -12,8 +12,8 @@ from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from limes.celery import app
-from limes.definitions import SUCCESS_TASK
-from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, Vulnerability
+from limes.definitions import NOTHING_ASSESSED, SUCCESS_TASK
+from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, SubScan, Vulnerability
 from targetApp.models import Domain
 
 VERSION = 'limes-score-v1'
@@ -42,21 +42,48 @@ def _owned_domains(project):
     return Domain.objects.filter(project=project, name__in=roots)
 
 
+def _assessed(activities):
+    return (activities.filter(name='vulnerability_scan', status=SUCCESS_TASK)
+            .exclude(error_message__startswith=NOTHING_ASSESSED))
+
+
+def _scan_stage_assessed(scan):
+    """The scan's own vulnerability stage scanned something. A subscan's activity attaches to the parent
+    scan but covers one host, so it never counts."""
+    subscan_ids = {c for ids in SubScan.objects.filter(scan_history=scan).values_list('celery_ids', flat=True)
+                   for c in ids or []}
+    return any(c not in subscan_ids
+               for c in _assessed(ScanActivity.objects.filter(scan_of=scan)).values_list('celery_id', flat=True))
+
+
 def baselines(project):
-    """{domain_id: ScanHistory} - each owned root's latest scan whose vulnerability stage succeeded."""
-    vuln_ok = ScanActivity.objects.filter(scan_of=OuterRef('pk'), name='vulnerability_scan', status=SUCCESS_TASK)
+    """{root value: ScanHistory} - each owned root's latest scan whose own vulnerability stage assessed
+    something. NOTE: a few queries per owned root; fine for tens of roots. Upgrade: one annotated query."""
+    vuln_ok = _assessed(ScanActivity.objects.filter(scan_of=OuterRef('pk')))
     out = {}
     for d in _owned_domains(project):
-        scan = (ScanHistory.objects.filter(domain=d).filter(Exists(vuln_ok))
-                .order_by('-start_scan_date', '-id').first())
-        if scan:
-            out[d.id] = scan
+        for scan in ScanHistory.objects.filter(domain=d).filter(Exists(vuln_ok)).order_by('-start_scan_date', '-id'):
+            if _scan_stage_assessed(scan):
+                out[d.name] = scan
+                break
     return out
 
 
-def _penalties(project, asset_ids=None):
+def _root_of(value, roots):
+    return next((r for r in sorted(roots, key=len, reverse=True) if value == r or value.endswith('.' + r)), None)
+
+
+def assessed_assets(project, base=None):
+    """{asset_id: value} of scored assets whose owned root has a baseline: only these get a score.
+    An asset never vulnerability-scanned is unassessed, not clean."""
+    base = baselines(project) if base is None else base
+    return {a: v for a, v in scored_assets(project).values_list('id', 'value') if _root_of(v, base)}
+
+
+def _penalties(project, asset_ids=None, base=None):
     """{asset_id: {category: severity}} from the baseline scans, worst severity per category."""
-    scans = [s.id for s in baselines(project).values()]
+    base = baselines(project) if base is None else base
+    scans = [s.id for s in base.values()]
     vulns = Vulnerability.objects.filter(scan_history_id__in=scans, open_status=True, severity__gte=1,
                                          asset__in=scored_assets(project))
     if asset_ids is not None:
@@ -81,9 +108,12 @@ def _rows(value, categories):
 
 
 def asset_breakdown(asset):
-    categories = _penalties(asset.project, [asset.id]).get(asset.id, {})
+    base = baselines(asset.project)
+    if asset.id not in assessed_assets(asset.project, base):
+        return {'score': None, 'grade': grade(None), 'penalties': [], 'assessed': False}
+    categories = _penalties(asset.project, [asset.id], base).get(asset.id, {})
     score = _score(categories)
-    return {'score': score, 'grade': grade(score), 'penalties': _rows(asset.value, categories)}
+    return {'score': score, 'grade': grade(score), 'penalties': _rows(asset.value, categories), 'assessed': True}
 
 
 def p10(scores):
@@ -94,24 +124,27 @@ def p10(scores):
     return ordered[max(0, math.ceil(0.10 * len(ordered)) - 1)]
 
 
-def coverage(project, now=None):
+def coverage(project, now=None, base=None):
     now = now or timezone.now()
-    domains = list(_owned_domains(project).values_list('id', flat=True))
+    domains = _owned_domains(project).count()
     if not domains:
         return None
-    fresh = sum(1 for s in baselines(project).values() if s.start_scan_date >= now - COVERAGE_WINDOW)
-    return fresh / len(domains)
+    base = baselines(project) if base is None else base
+    fresh = sum(1 for s in base.values() if s.start_scan_date >= now - COVERAGE_WINDOW)
+    return fresh / domains
 
 
 def project_score(project):
-    assets = dict(scored_assets(project).values_list('id', 'value'))
-    penalties = _penalties(project)
+    base = baselines(project)
+    assets = assessed_assets(project, base)
+    penalties = _penalties(project, base=base)
     scores = [_score(penalties.get(a, {})) for a in assets]
     rows = [r for a, cats in penalties.items() if a in assets for r in _rows(assets[a], cats)]
     rows.sort(key=lambda r: (-r['points'], r['asset'], r['issue']))
     score = p10(scores)
-    return {'version': VERSION, 'score': score, 'grade': grade(score), 'coverage': coverage(project),
-            'asset_count': len(assets), 'top_penalties': rows[:TOP_PENALTIES]}
+    return {'version': VERSION, 'score': score, 'grade': grade(score), 'coverage': coverage(project, base=base),
+            'asset_count': len(assets), 'unassessed': scored_assets(project).count() - len(assets),
+            'top_penalties': rows[:TOP_PENALTIES]}
 
 
 @app.task(name='snapshot_scores', bind=False)

@@ -5,9 +5,9 @@ from django.utils import timezone
 
 from dashboard.models import Project
 from limes import scoring
-from limes.definitions import FAILED_TASK, SUCCESS_TASK
+from limes.definitions import FAILED_TASK, NOTHING_ASSESSED, SUCCESS_TASK
 from scanEngine.models import EngineType
-from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, Vulnerability
+from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, SubScan, Subdomain, Vulnerability
 from targetApp.models import Domain
 
 
@@ -44,7 +44,7 @@ class Base(TestCase):
 class AssetScoreTest(Base):
     def test_clean_asset_scores_max(self):
         self.scan()
-        self.assertEqual(scoring.asset_breakdown(self.host('a.x.com')), {'score': 950, 'grade': 'A', 'penalties': []})
+        self.assertEqual(scoring.asset_breakdown(self.host('a.x.com')), {'score': 950, 'grade': 'A', 'penalties': [], 'assessed': True})
 
     def test_penalties_and_ceilings(self):
         s = self.scan()
@@ -110,6 +110,26 @@ class BaselineTest(Base):
         self.scan(ago=timedelta(hours=1), vuln_stage=FAILED_TASK)
         self.assertEqual(self.score(a), 599)
 
+    def test_subscan_vuln_stage_never_makes_a_baseline(self):
+        # a one-host vulnerability subscan attaches its activity to the parent scan
+        a = self.host('a.x.com')
+        self.vuln(self.scan(ago=timedelta(days=2)), a, 4)
+        asm_only = self.scan(ago=timedelta(hours=2), vuln_stage=None)
+        sub = Subdomain.objects.create(scan_history=asm_only, target_domain=asm_only.domain, name='b.x.com')
+        SubScan.objects.create(scan_history=asm_only, subdomain=sub, start_scan_date=self.now, status=SUCCESS_TASK,
+                               celery_ids=['sub-1'])
+        ScanActivity.objects.create(scan_of=asm_only, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK, celery_id='sub-1')
+        self.assertEqual(self.score(a), 599)
+
+    def test_stage_that_assessed_nothing_is_never_a_baseline(self):
+        a = self.host('a.x.com')
+        self.vuln(self.scan(ago=timedelta(days=2)), a, 4)
+        empty = self.scan(ago=timedelta(hours=1), vuln_stage=None)
+        ScanActivity.objects.create(scan_of=empty, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK, error_message=f'{NOTHING_ASSESSED}: no alive HTTP URLs')
+        self.assertEqual(self.score(a), 599)
+
     def test_refound_finding_counts_once(self):
         a = self.host('a.x.com')
         self.vuln(self.scan(ago=timedelta(days=2)), a, 3)
@@ -164,6 +184,23 @@ class ProjectScoreTest(Base):
         self.vuln(self.scan('z.com'), a, 4)
         self.scan('x.com')
         self.assertEqual(scoring.project_score(self.p)['score'], 950)
+
+
+class AssessmentTest(Base):
+    def test_never_vulnerability_scanned_is_not_clean(self):
+        a = self.host('a.x.com')
+        self.scan(vuln_stage=None)  # asm-only
+        self.assertEqual(scoring.asset_breakdown(a), {'score': None, 'grade': 'N/A', 'penalties': [], 'assessed': False})
+        s = scoring.project_score(self.p)
+        self.assertEqual((s['score'], s['grade'], s['asset_count'], s['unassessed']), (None, 'N/A', 0, 2))
+
+    def test_only_assessed_roots_drive_the_project(self):
+        self.owned_root('y.com')
+        self.vuln(self.scan('x.com'), self.host('a.x.com'), 2)
+        bad = self.host('b.y.com')  # y.com never vulnerability-scanned: not counted as clean
+        s = scoring.project_score(self.p)
+        self.assertEqual((s['score'], s['asset_count'], s['unassessed']), (925, 2, 2))
+        self.assertFalse(scoring.asset_breakdown(bad)['assessed'])
 
 
 class SnapshotTest(Base):
