@@ -25,6 +25,7 @@ TASK_PLAN = {
     # orchestration 15 min
     'initiate_scan': (ORCHESTRATE, 15 * MIN), 'initiate_subscan': (ORCHESTRATE, 15 * MIN),
     'report': (ORCHESTRATE, 15 * MIN), 'reap_stuck_scans': (ORCHESTRATE, 15 * MIN),
+    'dispatch_due_scans': (ORCHESTRATE, 15 * MIN), 'age_assets': (ORCHESTRATE, 15 * MIN),
 }
 
 MAX_TIME_LIMIT = max(limit for _, limit in TASK_PLAN.values())

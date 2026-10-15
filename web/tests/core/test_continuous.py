@@ -47,3 +47,94 @@ class StartAsmScanTest(Base):
         self.assertEqual(continuous.start_asm_scan(a, scan_type=SCHEDULED_SCAN), (True, 'ASM scan started for x.com'))
         kw = self.apply_async.call_args.kwargs['kwargs']
         self.assertEqual((kw['scan_type'], kw['initiated_by_id'], kw['scan_mode']), (SCHEDULED_SCAN, None, 'asm'))
+
+
+class DueRootsTest(Base):
+    def test_never_scanned_root_is_due(self):
+        self.root('new.com')
+        self.assertEqual(self.due(), ['new.com'])
+
+    def test_each_tier_waits_its_interval(self):
+        for tier, interval in (('crown_jewel', timedelta(hours=24)), ('standard', timedelta(days=7)),
+                               ('inactive', timedelta(days=30))):
+            self.root(f'{tier}-fresh.com', tier)
+            self.scanned(f'{tier}-fresh.com', interval - timedelta(minutes=5))
+            self.root(f'{tier}-old.com', tier)
+            self.scanned(f'{tier}-old.com', interval + timedelta(minutes=5))
+        self.assertEqual(sorted(self.due()), ['crown_jewel-old.com', 'inactive-old.com', 'standard-old.com'])
+
+    def test_off_is_never_due(self):
+        self.root('off.com', 'off')
+        self.assertEqual(self.due(), [])
+
+    def test_scan_in_progress_blocks_root(self):
+        for status, value in ((INITIATED_TASK, 'queued.com'), (RUNNING_TASK, 'running.com')):
+            self.root(value)
+            self.scanned(value, timedelta(days=60), status=status)
+        self.assertEqual(self.due(), [])
+
+    def test_failed_scan_counts_from_its_start(self):
+        self.root('recent-fail.com')
+        self.scanned('recent-fail.com', timedelta(hours=1), status=FAILED_TASK)
+        self.root('old-fail.com')
+        self.scanned('old-fail.com', timedelta(days=8), status=FAILED_TASK)
+        self.assertEqual(self.due(), ['old-fail.com'])
+
+    def test_only_owned_roots_with_a_domain(self):
+        for scope in ('candidate', 'co_brand', 'rejected', 'dependency'):
+            self.root(f'{scope}.com', scope=scope)
+        self.root('nodomain.com', domain=False)
+        self.assertEqual(self.due(), [])
+
+    def test_never_scanned_first_then_most_overdue(self):
+        self.root('a-old.com')
+        self.scanned('a-old.com', timedelta(days=20))
+        self.root('b-older.com')
+        self.scanned('b-older.com', timedelta(days=40))
+        self.root('c-never.com')
+        self.assertEqual(self.due(), ['c-never.com', 'b-older.com', 'a-old.com'])
+
+
+class DispatchTest(Base):
+    def test_dispatches_one_per_tick_as_scheduled_system_scan(self):
+        self.root('a.com')
+        self.root('b.com')
+        self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 1, 'skipped': 0})
+        kw = self.apply_async.call_args.kwargs['kwargs']
+        self.assertEqual((kw['scan_type'], kw['initiated_by_id'], kw['scan_mode']), (SCHEDULED_SCAN, None, 'asm'))
+
+    def test_next_tick_never_redispatches_the_same_root(self):
+        self.root('a.com')
+        self.root('b.com')
+        continuous.dispatch_due_scans()
+        continuous.dispatch_due_scans()
+        domains = [c.kwargs['kwargs']['domain_id'] for c in self.apply_async.call_args_list]
+        self.assertEqual(len(domains), len(set(domains)))
+        self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'skipped': 0})  # 2 in flight now
+
+    def test_waits_while_two_scans_run(self):
+        self.root('busy1.com')
+        self.root('busy2.com')
+        self.scanned('busy1.com', timedelta(minutes=1), status=RUNNING_TASK)
+        self.scanned('busy2.com', timedelta(minutes=1), status=INITIATED_TASK)
+        self.root('due.com')
+        self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'skipped': 0})
+        self.apply_async.assert_not_called()
+
+    def test_unstartable_root_is_skipped_and_next_tried(self):
+        self.root('a-bad.com')
+        self.root('b-good.com')
+        with mock.patch.object(continuous, 'start_asm_scan', side_effect=[(False, 'no engine'), (True, 'ok')]) as start:
+            self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 1, 'skipped': 1})
+        self.assertEqual([c.args[0].value for c in start.call_args_list], ['a-bad.com', 'b-good.com'])
+
+    @override_settings(CONTINUOUS_SCANS=False)
+    def test_kill_switch(self):
+        self.root('a.com')
+        self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'reason': 'disabled'})
+        self.apply_async.assert_not_called()
+
+    def test_off_tier_still_allows_manual_start(self):
+        a = self.root('off.com', 'off')
+        self.assertEqual(continuous.start_asm_scan(a, initiated_by_id=None, scan_type=SCHEDULED_SCAN),
+                         (True, 'ASM scan started for off.com'))

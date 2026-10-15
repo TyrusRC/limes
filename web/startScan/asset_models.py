@@ -12,6 +12,7 @@ SCOPE_TIERS = [('owned_root', 'owned_root'), ('owned_host', 'owned_host'),
                ('dependency', 'dependency')]  # infrastructure we rely on, never scanned by IP
 ASSET_STATES = [('active', 'active'), ('missing', 'missing'), ('stale', 'stale'), ('retired', 'retired')]
 MISSING_THRESHOLD = 3
+CADENCE_TIERS = [(t, t) for t in ('crown_jewel', 'standard', 'inactive', 'off')]  # intervals: limes.continuous
 SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
@@ -62,7 +63,7 @@ class Asset(models.Model):
     ip_addresses = models.ManyToManyField(IpAddress, blank=True, related_name='assets')
 
     tags = models.ManyToManyField(Tag, blank=True, related_name='assets')
-    cadence_tier = models.CharField(max_length=20, default='standard')
+    cadence_tier = models.CharField(max_length=20, choices=CADENCE_TIERS, default='standard')
     request_headers = models.JSONField(null=True, blank=True)
 
     class Meta:

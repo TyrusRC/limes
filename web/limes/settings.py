@@ -30,6 +30,8 @@ LIMES_RECORD_ENABLED = env.bool('LIMES_RECORD_ENABLED', default=True)
 LIMES_RAISE_ON_ERROR = env.bool('LIMES_RAISE_ON_ERROR', default=False)
 # On: auto-confirm still needs a registry-verified delegation (limes.intel.delegation); false only flags
 ATTRIBUTION_AUTO_CONFIRM = env.bool('LIMES_ATTRIBUTION_AUTO_CONFIRM', default=True)
+# Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
+CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
@@ -219,9 +221,11 @@ CELERY_IGNORE_RESULTS = False
 CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_IMPORTS = ('limes.tasks', 'limes.reaper')
+CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
+    'dispatch-due-scans': {'task': 'dispatch_due_scans', 'schedule': 60.0},
+    'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
 }
 CELERY_TASK_ROUTES = celery_routing.task_routes()
 CELERY_TASK_ANNOTATIONS = celery_routing.task_annotations()
