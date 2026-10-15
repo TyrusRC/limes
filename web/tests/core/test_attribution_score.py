@@ -60,6 +60,13 @@ class ScoreTest(TestCase):
         self.assertAlmostEqual(score, 0.60, places=4)
         self.assertFalse(by['ip']['corroborates'])
 
+    def test_internetdb_ip_scores_but_never_corroborates(self):
+        # InternetDB hostnames include any domain whose A record points at the IP: attacker-influenced
+        a = self.cand('shodan.net', ('ip', '203.0.114.7', 'internetdb'))
+        score, by = self.score(a)
+        self.assertAlmostEqual(score, 0.60, places=4)
+        self.assertFalse(by['ip']['corroborates'])
+
     def test_brand_whole_label_and_short_keywords_ignored(self):
         self.assertAlmostEqual(self.score(self.cand('acme-store.net'))[0], 0.30, places=4)
         self.assertAlmostEqual(self.score(self.cand('acmesoft.net'))[0] or 0.0, 0.0, places=4)

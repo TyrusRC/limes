@@ -88,6 +88,11 @@ class DecisionTest(DecisionBase):
         self.run_all()
         self.assertEqual((self.tier(a), self.tier(b)), ('candidate', 'candidate'))
 
+    def test_ns_control_plus_internetdb_ip_only_never_qualifies(self):
+        a = self.cand('pointed.net', ('ns', 'ns1.example.com', 'dns'), ('ip', '203.0.114.7', 'internetdb'))
+        self.assertEqual(self.run_all(), {'auto_confirmed': 0, 'would_auto_confirm': 0})
+        self.assertEqual(self.tier(a), 'candidate')
+
     def test_high_score_without_control_stays_candidate(self):
         a = self.cand('rich.net', ('mx', 'mail.example.com', 'dns'), ('ip', '203.0.114.7', 'internetdb'),
                       ('cert', '102', 'crtsh'))

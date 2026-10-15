@@ -121,11 +121,12 @@ def _hop1(asset, facts, roots, owned_ips, owned_certs, keywords):
     ns = sorted(v for k, v, _ in facts if k == 'ns')
     if ns and all(_under_root(h, roots) for h in ns):
         add('ns', ', '.join(ns), _under_root(ns[0], roots), WEIGHTS['ns_control'], control=True)
-    for kind, value, source in facts:
+    for kind, value, _ in facts:
         if kind == 'mx' and _under_root(value, roots):
             add('mx', value, _under_root(value, roots), WEIGHTS['mx'])
         elif kind == 'ip' and value in owned_ips:
-            add('ip', value, value, WEIGHTS['ip'], corroborates=source == 'internetdb')
+            # never corroborates: InternetDB hostnames include any domain whose A record points here
+            add('ip', value, value, WEIGHTS['ip'])
         elif kind == 'cert' and value in owned_certs:
             add('cert', value, owned_certs[value], WEIGHTS['cert'], corroborates=True)
     tokens = brand_tokens(asset.value)
