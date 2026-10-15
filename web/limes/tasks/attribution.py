@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
 from django.utils import timezone
 
 from limes import commands
@@ -183,10 +184,13 @@ def score_project(project):
 
 def apply_decisions(project):
     """Auto-confirm only score >= AUTO_CONFIRM with hop-1 NS control AND hop-1 corroboration, and only
-    from NS facts seen within NS_FRESH. The conditional update means a concurrent human decision wins."""
+    from NS facts seen within NS_FRESH. The conditional update means a concurrent human decision wins.
+    With settings.ATTRIBUTION_AUTO_CONFIRM off (the default) no tier changes: qualifying candidates are
+    only flagged 'would_auto_confirm' for a human to review."""
     from dashboard.stats import invalidate
-    auto = 0
+    auto = would = 0
     fresh_after = timezone.now() - NS_FRESH
+    # hostname candidates never get NS facts today, so they never qualify
     for a in Asset.objects.filter(project=project, scope_tier='candidate', kind__in=('root_domain', 'hostname'),
                                   confidence__gte=AUTO_CONFIRM):
         contribs = (a.confidence_detail or {}).get('contributions') or []
@@ -198,6 +202,10 @@ def apply_decisions(project):
         if (not ns_now.exists() or ns_now.filter(last_seen__lt=fresh_after).exists()
                 or ', '.join(sorted(ns_now.values_list('value', flat=True))) != control['value']):
             continue
+        if not settings.ATTRIBUTION_AUTO_CONFIRM:
+            would += Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
+                confidence_detail={**a.confidence_detail, 'would_auto_confirm': True})
+            continue
         reason = (f'auto-confirmed ({VERSION}) {a.confidence:.2f}: NS {control["value"]} '
                   f'under owned root {control["via"]}')
         # append to the sources as stored now, so provenance added concurrently is not overwritten
@@ -208,4 +216,4 @@ def apply_decisions(project):
             scope_tier=tier, decision_reason=reason, sources=a.sources, added_by=None)
     if auto:
         invalidate(project.id)
-    return {'auto_confirmed': auto}
+    return {'auto_confirmed': auto, 'would_auto_confirm': would}
