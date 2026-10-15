@@ -73,6 +73,7 @@ def run_crtsh(project, root, get=http.get_json):
         in_root = next((n for n in cert['names'] if n == root.value or n.endswith('.' + root.value)), None)
         if not in_root:
             continue
+        inventory.record_fact(root, 'cert', str(cert['id']), 'crtsh')
         for reg in sorted(regs - done):
             if _is_owned(reg, owned):
                 continue
@@ -81,8 +82,10 @@ def run_crtsh(project, root, get=http.get_json):
             if is_new and candidates >= MAX_CANDIDATES_PER_ROOT:
                 capped += 1
                 continue
-            inventory.upsert_candidate(project, 'root_domain', reg, 'crtsh',
-                                       f'cert:{cert["id"]} ({in_root}) shared with {root.value}')
+            cand = inventory.upsert_candidate(project, 'root_domain', reg, 'crtsh',
+                                              f'cert:{cert["id"]} ({in_root}) shared with {root.value}')
+            if cand:
+                inventory.record_fact(cand, 'cert', str(cert['id']), 'crtsh')
             candidates += is_new
     return {'hostnames': hostnames, 'candidates': candidates, 'candidates_capped': capped}
 
@@ -112,7 +115,9 @@ def run_internetdb(project, root, get=http.get_json, now=None):
             for host in data['hostnames']:
                 reg = domains.registrable(host)
                 if reg and not _is_owned(reg, owned):
-                    inventory.upsert_candidate(project, 'root_domain', reg, 'internetdb', f'ip:{ip.value}')
+                    cand = inventory.upsert_candidate(project, 'root_domain', reg, 'internetdb', f'ip:{ip.value}')
+                    if cand:
+                        inventory.record_fact(cand, 'ip', ip.value, 'internetdb')
                     candidates += 1
     return {'internetdb_enriched': enriched, 'candidates': candidates, **aborted}
 

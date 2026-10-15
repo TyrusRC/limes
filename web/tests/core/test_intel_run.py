@@ -217,3 +217,17 @@ class IntelRunTest(TestCase):
         holders = sorted(str(a.enrichment['ripestat']['holder']) for a in (self.own_ip, self.dep_ip)
                          for a in [Asset.objects.get(pk=a.pk)])
         self.assertEqual(holders, ['CLOUDFLARENET - Cloudflare, Inc., US', 'None'])
+
+    def test_crtsh_records_cert_facts_on_root_and_co_tenant(self):
+        from startScan.models import AssetFact
+        intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, load('crtsh_sample.json'))))
+        self.assertTrue(AssetFact.objects.filter(asset=self.root, kind='cert', value='102').exists())
+        org = Asset.objects.get(value='example.org')
+        self.assertTrue(AssetFact.objects.filter(asset=org, kind='cert', value='102', source='crtsh').exists())
+
+    def test_internetdb_records_ip_fact_on_candidate(self):
+        from startScan.models import AssetFact
+        body = load('internetdb_sample.json')
+        intel.run_internetdb(self.p, self.root, get=Fake(internetdb=lambda url: (200, dict(body, ip=url.rsplit('/', 1)[1]))))
+        cand = Asset.objects.get(value='partner-co.com')
+        self.assertTrue(AssetFact.objects.filter(asset=cand, kind='ip', value='203.0.114.7', source='internetdb').exists())
