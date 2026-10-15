@@ -86,11 +86,16 @@ function asset_confidence_html(a) {
 		return '<tr><td>' + asset_esc(c.kind) + '</td><td>' + asset_esc(c.value) + '</td><td>' + asset_esc(c.via) +
 			'</td><td>' + asset_esc(c.weight) + '</td><td>' + asset_esc(c.hop) + '</td></tr>';
 	}).join('') || '<tr><td colspan="5" class="text-muted">No evidence yet.</td></tr>';
+	var dg = d.delegation, delegation = '';
+	if (dg && typeof dg === 'object') {
+		delegation = '<p class="' + (dg.ok === true ? 'text-success' : 'text-muted') + '">' +
+			asset_esc(dg.ok === true ? 'Delegation verified at the registry' : 'Delegation not verified: ' + dg.reason) + '</p>';
+	}
 	return '<h5>Confidence ' + asset_esc(Number(d.score).toFixed(2)) + ' <small class="text-muted">(' +
 		asset_esc(d.version) + ')</small></h5><table class="table table-sm"><thead><tr><th>Evidence</th><th>Value</th>' +
-		'<th>Via</th><th>Weight</th><th>Hop</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+		'<th>Via</th><th>Weight</th><th>Hop</th></tr></thead><tbody>' + rows + '</tbody></table>' + delegation +
 		(d.would_auto_confirm === true ? '<p class="text-warning">' +
-			asset_esc('Would auto-confirm — NS control is unverified; confirm manually if correct.') + '</p>' : '');
+			asset_esc('Would auto-confirm (delegation verified); auto-confirm is disabled.') + '</p>' : '');
 }
 
 // "Why is this mine": follow parent links up to the root. Depth-capped so a bad cycle can't loop.
