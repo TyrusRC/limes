@@ -334,6 +334,27 @@ def create_scan_activity(scan_history_id, message, status):
 #--------------------#
 
 
+def resolve_vuln_asset(scan_history, subdomain=None, http_url=None):
+	"""The scan's project Asset (hostname or root domain) a finding is on, else None.
+	Never crosses projects: the asset must belong to the scan's own project."""
+	from urllib.parse import urlsplit
+	from startScan.models import Asset
+	if not scan_history:
+		return None
+	host = getattr(subdomain, 'name', None)
+	if not host and http_url:
+		try:
+			host = urlsplit(http_url if '://' in http_url else '//' + http_url).hostname
+		except ValueError:
+			host = None
+	host = (host or '').strip().rstrip('.').lower()
+	if not host:
+		return None
+	return (Asset.objects
+			.filter(project_id=scan_history.domain.project_id, kind__in=('hostname', 'root_domain'), value=host)
+			.first())
+
+
 def save_vulnerability(**vuln_data):
 	references = vuln_data.pop('references', [])
 	cve_ids = vuln_data.pop('cve_ids', [])
@@ -343,6 +364,9 @@ def save_vulnerability(**vuln_data):
 
 	# remove nulls
 	vuln_data = replace_nulls(vuln_data)
+	if not vuln_data.get('asset'):
+		vuln_data['asset'] = resolve_vuln_asset(
+			vuln_data.get('scan_history'), vuln_data.get('subdomain'), vuln_data.get('http_url'))
 
 	# Create vulnerability
 	vuln, created = Vulnerability.objects.get_or_create(**vuln_data)
