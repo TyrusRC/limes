@@ -95,3 +95,17 @@ def dispatch_due_scans():
             logger.info(f'Continuous scan skipped for {asset.value}: {message}')
             skipped += 1
     return {'dispatched': dispatched, 'skipped': skipped}
+
+
+STALE_AFTER = timedelta(days=30)
+RETIRE_AFTER = timedelta(days=90)
+
+
+@app.task(name='age_assets', bind=False)
+def age_assets():
+    """missing -> stale after STALE_AFTER unseen; stale -> retired after RETIRE_AFTER.
+    A sighting brings an asset back to active (Asset.mark_missing_or_seen)."""
+    now = timezone.now()
+    stale = Asset.objects.filter(state='missing', last_seen__lt=now - STALE_AFTER).update(state='stale')
+    retired = Asset.objects.filter(state='stale', last_seen__lt=now - RETIRE_AFTER).update(state='retired')
+    return {'stale': stale, 'retired': retired}

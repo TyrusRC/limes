@@ -89,7 +89,7 @@ class Asset(models.Model):
         if seen:
             self.missed_count = 0
             self.last_seen = timezone.now()
-            if self.state == 'missing':
+            if self.state in ('missing', 'stale', 'retired'):
                 self.state = 'active'
         else:
             self.missed_count += 1
