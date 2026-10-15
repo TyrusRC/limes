@@ -369,3 +369,50 @@ class RescanAssetApiTest(TestCase):
     def test_without_permission_denied(self):
         self.assertEqual(self._post(self.auditor, asset_id=self.root.id).status_code, 403)
         self.apply_async.assert_not_called()
+
+
+class AssetCadenceApiTest(TestCase):
+    def setUp(self):
+        from rolepermissions.roles import assign_role
+        self.admin = User.objects.create_user('adm4', password='p')
+        assign_role(self.admin, 'sys_admin')
+        self.auditor = User.objects.create_user('aud4', password='p')
+        assign_role(self.auditor, 'auditor')
+        user_logged_in.disconnect(on_user_logged_in)
+        self.addCleanup(user_logged_in.connect, on_user_logged_in)
+        self.p = Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
+        self.root = Asset.objects.create(project=self.p, kind='root_domain', value='x.com', scope_tier='owned_root')
+        self.host = Asset.objects.create(project=self.p, kind='hostname', value='a.x.com', scope_tier='owned_host')
+
+    def _post(self, user, **body):
+        body.setdefault('project', 'p1')
+        c = APIClient()
+        c.force_login(user)
+        return c.post('/api/action/asset/cadence/', body, format='json')
+
+    def tier(self, a):
+        a.refresh_from_db()
+        return a.cadence_tier
+
+    def test_sets_a_known_tier(self):
+        for tier in ('crown_jewel', 'inactive', 'off', 'standard'):
+            r = self._post(self.admin, asset_id=self.root.id, cadence_tier=tier).json()
+            self.assertEqual(r, {'status': True, 'message': f'cadence set to {tier}'})
+            self.assertEqual(self.tier(self.root), tier)
+
+    def test_rejects_unknown_tier_and_non_roots(self):
+        for body in ({'asset_id': self.root.id, 'cadence_tier': 'hourly'}, {'asset_id': self.root.id},
+                     {'asset_id': self.root.id, 'cadence_tier': ['off']}, {'asset_id': self.host.id, 'cadence_tier': 'off'}):
+            self.assertFalse(self._post(self.admin, **body).json()['status'], body)
+        self.assertEqual((self.tier(self.root), self.tier(self.host)), ('standard', 'standard'))
+
+    def test_needs_scan_permission(self):
+        r = self._post(self.auditor, asset_id=self.root.id, cadence_tier='off')
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.tier(self.root), 'standard')
+
+    def test_list_exposes_cadence(self):
+        c = APIClient()
+        c.force_login(self.admin)
+        r = c.get(f'/api/listDatatableAsset/{self.root.id}/', {'project': 'p1'})
+        self.assertEqual(r.json()['cadence_tier'], 'standard')

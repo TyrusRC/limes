@@ -79,6 +79,29 @@ function rescan_asset(id) {
 	asset_run_action('rescan', id);
 }
 
+var ASSET_CADENCES = [['crown_jewel', 'Crown jewel (daily)'], ['standard', 'Standard (weekly)'],
+	['inactive', 'Inactive (monthly)'], ['off', 'Off (manual only)']];
+
+// How often continuous monitoring rediscovers an owned root.
+function asset_cadence_html(a) {
+	if (a.kind !== 'root_domain') return '';
+	var opts = ASSET_CADENCES.map(function(c) {
+		return '<option value="' + c[0] + '"' + (a.cadence_tier === c[0] ? ' selected' : '') + '>' + c[1] + '</option>';
+	}).join('');
+	return '<div class="d-flex align-items-center mb-2"><label class="form-label mb-0 me-2" for="asset_cadence"><b>Cadence</b></label>' +
+		'<select id="asset_cadence" class="form-select form-select-sm w-auto me-2">' + opts + '</select>' +
+		'<button class="btn btn-xs btn-soft-primary" onclick="set_asset_cadence(' + Number(a.id) + ')">Save</button></div>';
+}
+
+function set_asset_cadence(id) {
+	var body = {asset_id: Number(id), project: asset_project(), cadence_tier: document.getElementById('asset_cadence').value};
+	asset_post('/api/action/asset/cadence/', body).then(function(data) {
+		asset_toast(data.message);
+	}).catch(function() {
+		asset_toast('Request failed.');
+	});
+}
+
 function asset_confidence_html(a) {
 	var d = a.confidence_detail;
 	if (!d || !Array.isArray(d.contributions)) return '';
@@ -149,6 +172,7 @@ function get_asset_modal(id) {
 			'<p><b>Kind</b> ' + asset_esc(a.kind) + ' &middot; <b>Scope</b> ' + asset_esc(a.scope_tier) +
 			' &middot; <b>State</b> ' + asset_esc(a.state) + ' &middot; <b>Vulnerabilities</b> ' + asset_esc(a.vuln_count) + '</p>' +
 			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
+			asset_cadence_html(a) +
 			'<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
 			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
 			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
