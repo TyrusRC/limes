@@ -76,7 +76,7 @@ The function is pure apart from the two injected I/O functions:
    Failure reasons are `'nameservers unreachable'` and `'not authoritative'`.
 4. Return `(True, 'delegation verified at <parent server name>')`.
 
-Queries go only to TLD or registry servers and to our own nameservers, never to a server an outsider chose. As a fail-closed belt, the nameserver hosts also pass `scope.may_contact` before being queried. If any are refused, the check fails with `'nameserver out of scope'`.
+Queries go only to TLD or registry servers and to our own nameservers, never to a server an outsider chose. As a fail-closed belt, any server address that `scope.is_reserved_ip` flags is skipped. That covers private, loopback, link-local and documentation ranges. The candidate's nameserver hosts are not put through `scope.may_contact`: it requires an inventoried, resolved hostname, and our nameserver hosts usually aren't inventoried, so every check would fail. (Amended while planning, 2026-10-15.)
 
 Constants:
 - `QUERY_TIMEOUT = 2` seconds;
@@ -155,7 +155,7 @@ All verifier tests use injected `query` and `resolve` functions built from `dns.
 - every parent server times out → `parent unreachable`;
 - SOA without AA → `not authoritative`;
 - nameservers time out → `nameservers unreachable`;
-- nameserver host refused by scope → fails;
+- nameserver resolving to a reserved address is never queried → `nameservers unreachable`;
 - private-suffix tenant (`myorg.github.io`, platform answers with AA) → `no delegation`.
 
 **Verify step:**
@@ -192,3 +192,4 @@ All verifier tests use injected `query` and `resolve` functions built from `dns.
 - **Vanity nameservers on a shared DNS provider.** If `ns1.ourco.com` is a CNAME to, or shares IPs with, a multi-tenant DNS provider, that provider may answer with AA set for another customer's zone. An outsider could then register a zone on the same provider and point their registry delegation at `ns1.ourco.com`. This is the remaining residual. It needs our nameserver hostnames, which an outsider can see, plus an account on the same provider. Decisions are audited and reversible. The upgrade path is to compare the SOA MNAME and RNAME against our owned zones' SOA.
 - **Registry anycast and response-rate limiting.** At most 25 candidates per run, two queries each, at a 2s timeout is well inside normal registry tolerances.
 - **Resolver trust.** The parent servers' addresses and our nameservers' addresses come from the system recursive resolver. A poisoned resolver could steer queries, but poisoning it is outside an outsider's normal reach. DNSSEC validation is the upgrade path.
+- **Parent and child NS sets that legitimately differ.** This was seen live while planning: the `io` registry delegates `github.io` to five servers, but the zone lists a different set. Such domains never auto-confirm and stay in the review queue for a human. This is accepted, because equality is what makes partial-overlap spoofing fail.
