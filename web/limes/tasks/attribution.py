@@ -147,6 +147,7 @@ def score_project(project):
     auto = {'sources__contains': [{'source': 'attribution'}]}
     roots = set(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
                 .exclude(**auto).values_list('value', flat=True))
+    roots = {r for r in roots if domains.registrable(r)}  # a public-suffix root would vouch for everyone
     owned_ips = set(Asset.objects.filter(project=project, kind='ip', scope_tier__in=OWNED)
                     .exclude(**auto).values_list('value', flat=True))
     owned_certs = dict(AssetFact.objects.filter(asset__project=project, asset__scope_tier__in=OWNED, kind='cert')

@@ -55,3 +55,9 @@ class ClassifyEntryTest(SimpleTestCase):
     def test_ipv4_mapped_ipv6_collapses_to_ipv4(self):
         r = classify_asset_entry('::ffff:8.8.8.8')
         self.assertEqual((r['kind'], r['value']), ('ip', '8.8.8.8'))
+
+    def test_rejects_public_suffix_as_root(self):
+        r = classify_asset_entry('co.uk')
+        self.assertIsNone(r['kind'])
+        self.assertIn('public suffix', r['error'])
+        self.assertIsNone(classify_asset_entry('example.co.uk')['error'])
