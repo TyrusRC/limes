@@ -1,59 +1,157 @@
+from datetime import timedelta
+from unittest import mock
+
 from django.core.cache import cache
-from django.db import connection
-from django.test import TestCase
-from django.test.utils import CaptureQueriesContext
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from dashboard.models import Project
-from dashboard.stats import invalidate, project_stats
+from dashboard.stats import asm_stats, invalidate, project_stats
+from limes.definitions import RUNNING_TASK, SUCCESS_TASK
 from scanEngine.models import EngineType
-from startScan.models import EndPoint, IpAddress, ScanHistory, Subdomain, Vulnerability
+from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, Vulnerability
 from targetApp.models import Domain
 
 
-class StatsTest(TestCase):
+class Base(TestCase):
     def setUp(self):
         cache.clear()
-        now = timezone.now()
-        self.project = Project.objects.create(name='p', slug='p', insert_date=now)
-        domain = Domain.objects.create(name='d.test', project=self.project, insert_date=now)
-        engine = EngineType.objects.create(engine_name='t', yaml_configuration='{}')
-        scan = ScanHistory.objects.create(domain=domain, scan_type=engine, start_scan_date=now, scan_status=2)
-        s1 = Subdomain.objects.create(name='a.d.test', scan_history=scan, target_domain=domain, http_status=200, discovered_date=now)
-        Subdomain.objects.create(name='b.d.test', scan_history=scan, target_domain=domain, http_status=0, discovered_date=now)
-        ip1, ip2 = IpAddress.objects.create(address='192.0.2.1'), IpAddress.objects.create(address='192.0.2.2')
-        s1.ip_addresses.add(ip1, ip2)
-        EndPoint.objects.create(http_url='https://a.d.test/', scan_history=scan,
-                                target_domain=domain, subdomain=s1, http_status=200, discovered_date=now)
-        for sev in (0, 3, 3, 4):
-            Vulnerability.objects.create(name='v', severity=sev, scan_history=scan, target_domain=domain, discovered_date=now)
+        self.now = timezone.now()
+        self.eng = EngineType.objects.create(engine_name='e', yaml_configuration='{}')
+        self.p = Project.objects.create(name='p', slug='p', insert_date=self.now)
+        self.other = Project.objects.create(name='o', slug='o', insert_date=self.now)
+        self.root = self.owned_root(self.p, 'x.com')
+        self.owned_root(self.other, 'y.com')
 
-    def test_counts(self):
-        s = project_stats(self.project)
-        self.assertEqual((s['domain_count'], s['subdomain_count'], s['alive_count']), (1, 2, 1))
-        self.assertEqual(s['subdomain_with_ip_count'], 1)  # distinct, not one row per IP
-        self.assertEqual((s['high_count'], s['critical_count'], s['info_count']), (2, 1, 1))
-        self.assertEqual(s['total_vul_ignore_info_count'], 3)
-        self.assertEqual(s['subdomains_in_last_week'][-1], 2)
-        self.assertEqual(len(s['last_7_dates']), 7)
+    def owned_root(self, project, value):
+        Domain.objects.create(project=project, name=value, insert_date=self.now)
+        return Asset.objects.create(project=project, kind='root_domain', value=value, scope_tier='owned_root')
 
-    def test_empty_project_returns_zeros(self):
-        empty = Project.objects.create(name='e', slug='e', insert_date=timezone.now())
-        s = project_stats(empty)
-        self.assertEqual((s['subdomain_count'], s['critical_count'], s['total_vul_count']), (0, 0, 0))
-        self.assertEqual(s['vulns_in_last_week'], [0] * 7)
+    def asset(self, value, tier='owned_host', kind='hostname', project=None, **kw):
+        return Asset.objects.create(project=project or self.p, kind=kind, value=value, scope_tier=tier, **kw)
 
-    def test_query_budget_and_cache_hit(self):
-        with CaptureQueriesContext(connection) as cold:
-            project_stats(self.project)
-        self.assertLessEqual(len(cold.captured_queries), 25)
-        with CaptureQueriesContext(connection) as warm:
-            project_stats(self.project)
-        self.assertEqual(len(warm.captured_queries), 0)
+    def scan(self, domain='x.com', ago=timedelta(hours=1), vuln=True, user=None, status=SUCCESS_TASK):
+        s = ScanHistory.objects.create(domain=Domain.objects.get(name=domain), scan_type=self.eng, scan_status=status,
+                                       start_scan_date=self.now - ago, initiated_by=user)
+        if vuln:
+            ScanActivity.objects.create(scan_of=s, name='vulnerability_scan', title='v', time=self.now, status=SUCCESS_TASK)
+        return s
 
-    def test_invalidate(self):
-        project_stats(self.project)
-        invalidate(self.project.id)
-        with CaptureQueriesContext(connection) as ctx:
-            project_stats(self.project)
-        self.assertGreater(len(ctx.captured_queries), 0)
+
+class InventoryTest(Base):
+    def test_counts_are_per_project_and_owned(self):
+        self.asset('a.x.com')
+        self.asset('b.x.com', state='missing')
+        self.asset('203.0.113.9', kind='ip')
+        self.asset('cdn.net', tier='dependency', kind='root_domain')
+        self.asset('cand.x.com', tier='candidate', state='missing')
+        self.asset('o.y.com', project=self.other)
+        inv = asm_stats(self.p)['inventory']
+        self.assertEqual((inv['owned_root'], inv['owned_host'], inv['ip'], inv['dependency']), (1, 2, 1, 1))
+        self.assertEqual(inv['states'], {'active': 3, 'missing': 1, 'stale': 0, 'retired': 0})
+
+    def test_review_queue(self):
+        self.asset('low.net', tier='candidate', kind='root_domain', confidence=0.2)
+        self.asset('mid.net', tier='candidate', kind='root_domain', confidence=0.6)
+        self.asset('new.net', tier='candidate', kind='root_domain')
+        self.asset('would.net', tier='candidate', kind='root_domain', confidence=0.95,
+                   confidence_detail={'would_auto_confirm': True})
+        self.asset('o.net', tier='candidate', kind='root_domain', project=self.other)
+        self.assertEqual(asm_stats(self.p)['review'], {'candidates': 3, 'would_auto_confirm': 1})
+
+
+class ChangesTest(Base):
+    def test_seven_day_windows_and_order(self):
+        recent, old = self.asset('recent.x.com'), self.asset('old.x.com')
+        Asset.objects.filter(pk=recent.pk).update(first_seen=self.now - timedelta(days=6))
+        Asset.objects.filter(pk=old.pk).update(first_seen=self.now - timedelta(days=8))
+        Asset.objects.filter(pk=self.root.pk).update(first_seen=self.now - timedelta(days=30))
+        m1 = self.asset('m1.x.com', state='missing')
+        m2 = self.asset('m2.x.com', state='missing')
+        Asset.objects.filter(pk=m1.pk).update(last_seen=self.now - timedelta(days=5), first_seen=self.now - timedelta(days=30))
+        Asset.objects.filter(pk=m2.pk).update(last_seen=self.now - timedelta(days=2), first_seen=self.now - timedelta(days=30))
+        ch = asm_stats(self.p)['changes']
+        self.assertEqual([r['value'] for r in ch['new_owned']], ['recent.x.com'])
+        self.assertEqual([r['value'] for r in ch['missing']], ['m2.x.com', 'm1.x.com'])
+
+    def test_auto_confirmed_this_week(self):
+        for value, days in (('fresh.net', 2), ('stale.net', 8)):
+            self.asset(value, tier='owned_root', kind='root_domain',
+                       decision_reason='auto-confirmed (attribution-v1) 0.97: NS ...',
+                       sources=[{'source': 'attribution', 'evidence': 'e',
+                                 'seen_at': (self.now - timedelta(days=days)).isoformat()}])
+        self.asset('manual.net', tier='owned_root', kind='root_domain', decision_reason='confirmed by hand',
+                   sources=[{'source': 'manual', 'evidence': 'e', 'seen_at': self.now.isoformat()}])
+        self.assertEqual([r['value'] for r in asm_stats(self.p)['changes']['auto_confirmed']], ['fresh.net'])
+
+
+class FindingsTest(Base):
+    def test_counts_only_baseline_findings_on_assessed_assets(self):
+        a = self.asset('a.x.com')
+        old = self.scan(ago=timedelta(days=3))
+        Vulnerability.objects.create(scan_history=old, asset=a, name='gone', severity=4, open_status=True)
+        new = self.scan()
+        for sev in (4, 3, 3, 1, 0):
+            Vulnerability.objects.create(scan_history=new, asset=a, name=f'v{sev}', severity=sev, open_status=True)
+        Vulnerability.objects.create(scan_history=new, asset=a, name='closed', severity=4, open_status=False)
+        self.assertEqual(asm_stats(self.p)['findings'], {'critical': 1, 'high': 2, 'medium': 0, 'low': 1})
+
+    def test_other_project_findings_never_counted(self):
+        o = self.asset('o.y.com', project=self.other)
+        Vulnerability.objects.create(scan_history=self.scan('y.com'), asset=o, name='v', severity=4, open_status=True)
+        self.assertEqual(asm_stats(self.p)['findings']['critical'], 0)
+
+
+class RiskTest(Base):
+    def test_trend_oldest_first_capped_and_scoped(self):
+        for i in range(35):
+            ScoreSnapshot.objects.create(project=self.p, date=(self.now - timedelta(days=i)).date(), version='v',
+                                         score=900 - i, grade='A')
+        ScoreSnapshot.objects.create(project=self.other, date=(self.now + timedelta(days=1)).date(), version='v',
+                                     score=1, grade='F')
+        trend = asm_stats(self.p)['risk']['trend']
+        self.assertEqual(len(trend), 30)
+        self.assertEqual((trend[0]['score'], trend[-1]['score']), (871, 900))
+        self.assertTrue(trend[0]['date'] < trend[-1]['date'])
+
+
+class MonitoringTest(Base):
+    def test_due_roots_scoped_and_last_auto_ignores_users(self):
+        from django.contrib.auth.models import User
+        user = User.objects.create_user('u', password='p')
+        self.scan(ago=timedelta(days=1), vuln=False)  # automatic (no user)
+        self.scan(ago=timedelta(hours=1), vuln=False, user=user)  # manual, newer
+        self.scan('y.com', ago=timedelta(minutes=1), vuln=False)  # other project's automatic scan
+        mon = asm_stats(self.p)['monitoring']
+        self.assertEqual(mon['last_auto'], self.now - timedelta(days=1))
+        self.assertEqual(mon['next_due'], [])  # x.com was scanned within its 7-day cadence
+        Asset.objects.filter(pk=self.root.pk).update(cadence_tier='crown_jewel')
+        Asset.objects.filter(project=self.other).update(cadence_tier='crown_jewel')
+        ScanHistory.objects.all().update(start_scan_date=self.now - timedelta(days=2))
+        self.assertEqual(asm_stats(self.p)['monitoring']['next_due'], [{'value': 'x.com', 'cadence_tier': 'crown_jewel'}])
+
+    @override_settings(CONTINUOUS_SCANS=False)
+    def test_running_and_disabled(self):
+        self.scan(vuln=False, status=RUNNING_TASK)
+        self.scan('y.com', vuln=False, status=RUNNING_TASK)
+        mon = asm_stats(self.p)['monitoring']
+        self.assertEqual((mon['enabled'], mon['running']), (False, 1))
+
+
+class EmptyAndCacheTest(Base):
+    def test_empty_project_renders_defaults(self):
+        empty = Project.objects.create(name='e', slug='e', insert_date=self.now)
+        s = asm_stats(empty)
+        self.assertEqual((s['risk']['score'], s['risk']['grade'], s['risk']['trend']), (None, 'N/A', []))
+        self.assertEqual(s['inventory']['owned_root'], 0)
+        self.assertEqual(s['changes'], {'new_owned': [], 'missing': [], 'auto_confirmed': []})
+        self.assertEqual(s['activity'], [])
+
+    def test_cached_until_invalidated(self):
+        with mock.patch('dashboard.stats.asm_stats', wraps=asm_stats) as compute:
+            project_stats(self.p)
+            project_stats(self.p)
+            self.assertEqual(compute.call_count, 1)
+            invalidate(self.p.id)
+            project_stats(self.p)
+            self.assertEqual(compute.call_count, 2)
