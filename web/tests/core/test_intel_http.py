@@ -14,6 +14,11 @@ class RegistrableTest(SimpleTestCase):
         for bad in ('', None, 'localhost', 'com'):
             self.assertIsNone(domains.registrable(bad), bad)
 
+    def test_private_suffix_tenant_owns_its_own_name(self):
+        self.assertEqual(domains.registrable('www.myorg.github.io'), 'myorg.github.io')
+        for suffix in ('github.io', 'herokuapp.com'):
+            self.assertIsNone(domains.registrable(suffix), suffix)
+
 
 class Resp:
     def __init__(self, status, body=None, bad_json=False):

@@ -1,7 +1,8 @@
 """Registrable-domain decisions from the bundled public-suffix snapshot (never fetched)."""
 import tldextract
 
-_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+# Private suffixes count: a github.io or herokuapp.com tenant owns its own name, never the platform's.
+_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), include_psl_private_domains=True)
 
 
 def registrable(name):

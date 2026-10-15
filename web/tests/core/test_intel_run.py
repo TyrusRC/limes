@@ -143,6 +143,12 @@ class IntelRunTest(TestCase):
         self.assertEqual(ev, ['ip:203.0.114.7'])  # not from the dependency IP
         self.assertEqual(out['internetdb_enriched'], 2)
 
+    def test_internetdb_platform_tenant_hostname_never_suggests_the_platform(self):
+        body = dict(load('internetdb_sample.json'), hostnames=['www.tenant.herokuapp.com'])
+        intel.run_internetdb(self.p, self.root, get=Fake(internetdb=lambda url: (200, dict(body, ip=url.rsplit('/', 1)[1]))))
+        self.assertEqual(self.tier('tenant.herokuapp.com'), 'candidate')
+        self.assertFalse(Asset.objects.filter(value='herokuapp.com').exists())
+
     def test_internetdb_owned_subdomain_root_does_not_suppress_parent_domain(self):
         self.root.value = 'shop.example.com'
         self.root.save()
