@@ -2,7 +2,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
-from limes.tasks import intel, resolution
+from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
 from limes.tasks.runner import run_command, stream_command
@@ -238,6 +238,8 @@ def passive_intel(self, ctx={}, description=None):
 		('resolve', lambda: {'resolved': resolution.resolve_root(project, root, self.results_dir)}),
 		('internetdb', lambda: intel.run_internetdb(project, root)),
 		('ripestat', lambda: intel.run_ripestat(project, root)),
+		('attribution_dns', lambda: attribution.collect_dns(project, self.results_dir)),
+		('attribution', lambda: {**attribution.score_project(project), **attribution.apply_decisions(project)}),
 	)
 	counts, failed = {}, []
 	for name, step in steps:

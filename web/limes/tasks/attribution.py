@@ -6,8 +6,10 @@ import logging
 import os
 import re
 from collections import defaultdict
+from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
+from django.utils import timezone
 
 from limes import commands
 from limes.intel import domains
@@ -81,6 +83,7 @@ AUTO_CONFIRM = 0.90
 REVIEW = 0.40
 MIN_BRAND_LEN = 4  # NOTE: shorter keywords would match everything
 OWNED = ('owned_root', 'owned_host')
+NS_FRESH = timedelta(hours=24)  # NS control must come from a delegation seen this recently
 
 
 def _under_root(host, roots):
@@ -154,13 +157,14 @@ def score_project(project):
         for kind, value, _ in fl:
             if kind in ('cert', 'ip'):
                 sharing[(kind, value)].add(aid)
+    hop1_score = {cid: _combine(contribs) for cid, contribs in hop1.items()}
     for c in cands:
         contribs = list(hop1[c.id])
         seen = {(x['kind'], x['value']) for x in contribs}
         for kind, value, _ in facts[c.id]:
             if kind not in ('cert', 'ip') or (kind, value) in seen:
                 continue
-            via = sorted(o for o in sharing[(kind, value)] if o != c.id and _combine(hop1[o]) >= REVIEW)
+            via = sorted(o for o in sharing[(kind, value)] if o != c.id and hop1_score[o] >= REVIEW)
             if via:
                 seen.add((kind, value))
                 contribs.append({'kind': kind, 'value': value, 'via': value_of[via[0]],
@@ -169,5 +173,34 @@ def score_project(project):
         score = round(_combine(contribs), 4)
         c.confidence = score
         c.confidence_detail = {'version': VERSION, 'score': score, 'contributions': contribs}
+    # a human decision may have landed since load: never score a candidate that is no longer one
+    still = set(Asset.objects.filter(pk__in=[c.pk for c in cands], scope_tier='candidate')
+                .values_list('pk', flat=True))
+    cands = [c for c in cands if c.pk in still]
     Asset.objects.bulk_update(cands, ['confidence', 'confidence_detail'], batch_size=500)
     return {'scored': len(cands)}
+
+
+def apply_decisions(project):
+    """Auto-confirm only score >= AUTO_CONFIRM with hop-1 NS control AND hop-1 corroboration, and only
+    from NS facts seen within NS_FRESH. The conditional update means a concurrent human decision wins."""
+    from dashboard.stats import invalidate
+    auto = 0
+    fresh_after = timezone.now() - NS_FRESH
+    for a in Asset.objects.filter(project=project, scope_tier='candidate', kind__in=('root_domain', 'hostname'),
+                                  confidence__gte=AUTO_CONFIRM):
+        contribs = (a.confidence_detail or {}).get('contributions') or []
+        control = next((c for c in contribs if c.get('hop') == 1 and c.get('control')), None)
+        if not control or not any(c.get('hop') == 1 and c.get('corroborates') for c in contribs):
+            continue
+        if AssetFact.objects.filter(asset=a, kind='ns', last_seen__lt=fresh_after).exists():
+            continue  # stale delegation (e.g. DNS step failed this run): never confirm from it
+        reason = (f'auto-confirmed ({VERSION}) {a.confidence:.2f}: NS {control["value"]} '
+                  f'under owned root {control["via"]}')
+        inventory._append_source(a, 'attribution', reason)
+        tier = 'owned_root' if a.kind == 'root_domain' else 'owned_host'
+        auto += Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
+            scope_tier=tier, decision_reason=reason, sources=a.sources, added_by=None)
+    if auto:
+        invalidate(project.id)
+    return {'auto_confirmed': auto}
