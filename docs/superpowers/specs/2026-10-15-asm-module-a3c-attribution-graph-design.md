@@ -103,7 +103,7 @@ passive_intel: crt.sh (+cert facts) → resolve → InternetDB (+ip facts) → R
 
 ## Review focus
 
-1. **No auto-confirm without verified control plus corroboration** — no path (hop 2, brand, MX, a lame NS delegation, rounding) reaches owned without a hop-1 working NS-control fact and a hop-1 cert/ip fact.
+1. **No auto-confirm without verified control plus corroboration** — no path (hop 2, brand, MX, a lame NS delegation, rounding) reaches owned without a hop-1 working NS-control fact and a hop-1 cert fact (IP matches never corroborate; see the amendment).
 2. **Never touch decided assets** — owned, rejected, co-brand, dependency are never re-scored or changed.
 3. **Brand matching is whole-label only**.
 4. **Explainability** — every score's contributions sum (via noisy-OR) to the stored score and are shown.
@@ -111,7 +111,7 @@ passive_intel: crt.sh (+cert facts) → resolve → InternetDB (+ip facts) → R
 
 ## Risks
 
-- **Spoofed control evidence** — a third party can name our hosts as their MX or NS without consent. Mitigated by the self-review amendment (MX never control; NS only with a working delegation; auto-confirm also needs a cert/ip corroboration). Residual: a vanity NS hosted on a shared DNS provider plus a co-tenant certificate would still pass — both require effort an outsider rarely has; decisions are audited and reversible. Upgrade path: query our own authoritative servers for the zone's SOA (A5).
+- **Spoofed control evidence** — a third party can name our hosts as their MX or NS without consent. Mitigated by the self-review amendment (MX never control; NS only with a working delegation; auto-confirm also needs a cert corroboration, and ships disabled; see the amendment). Residual: a vanity NS hosted on a shared DNS provider plus a co-tenant certificate would still pass — both require effort an outsider rarely has; decisions are audited and reversible. Upgrade path: query our own authoritative servers for the zone's SOA (A5).
 - **Weight tuning** — weights are guesses; `rescore_assets` re-applies changes, and the version string marks which model produced each score.
 
 ## Amendment after final review (2026-10-15)
@@ -124,9 +124,9 @@ The whole-branch review found that the decision path, which controls what the sc
 
 Together, an outsider could get a domain auto-confirmed and then aim our scanner at a victim. Changes:
 
-- **Auto-confirm ships disabled** behind `LIMES_ATTRIBUTION_AUTO_CONFIRM` (setting `ATTRIBUTION_AUTO_CONFIRM`, default off). The qualification check still runs; qualifying candidates stay candidates and carry `confidence_detail.would_auto_confirm = true`, shown in the UI as "Would auto-confirm — NS control is unverified; confirm manually if correct." Decisions are skipped when DNS collection failed, and `rescore_assets` only scores unless `--decide` is given.
+- **Auto-confirm ships disabled** behind `LIMES_ATTRIBUTION_AUTO_CONFIRM` (setting `ATTRIBUTION_AUTO_CONFIRM`, default off). The qualification check still runs; qualifying candidates stay candidates and carry `confidence_detail.would_auto_confirm = true`, shown in the UI as "Would auto-confirm — NS control is unverified; confirm manually if correct." Decisions are skipped when DNS collection or scoring failed, and `rescore_assets` only scores unless `--decide` is given.
 - **Corroboration is cert-only.** An owned-IP match still scores 0.60 but never corroborates.
-- **Auto-confirmed assets never count as evidence.** Roots, IPs and certificates of assets whose sources include an `attribution` decision are excluded from owned roots, owned IPs and owned certs when scoring. Public-suffix roots (e.g. `co.uk`) are rejected on manual add and ignored when scoring.
+- **Auto-confirmed assets never count as evidence.** Roots, IPs and certificates of assets whose sources include an `attribution` decision are excluded from owned roots, owned IPs and owned certs when scoring. Public-suffix roots, including private PSL entries (e.g. `co.uk`, `github.io`), are rejected on manual add and ignored when scoring; a platform tenant (`myorg.github.io`) is its own registrable domain.
 - **Hop 2 uses provider-reported facts only** (crt.sh, InternetDB), never DNS-sourced A records.
 
 Note: while hop-1 NS control (0.95) is required, the 0.90 `AUTO_CONFIRM` threshold is redundant; it only matters if control stops being mandatory.
