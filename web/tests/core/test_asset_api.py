@@ -298,8 +298,8 @@ class RescanAssetApiTest(TestCase):
                                          scope_tier='owned_host', parent=self.root)
         self.cand = Asset.objects.create(project=self.p, kind='root_domain', value='c.com', scope_tier='candidate')
         self.nodom = Asset.objects.create(project=self.p, kind='root_domain', value='nodom.com', scope_tier='owned_root')
-        # patch where the names are looked up (star-imported into api.views); nothing really runs
-        for target in ('api.views.initiate_scan.apply_async', 'api.views.create_scan_object'):
+        # patch where the names are looked up (limes.continuous.start_asm_scan); nothing really runs
+        for target in ('limes.continuous.initiate_scan.apply_async', 'limes.continuous.create_scan_object'):
             p = mock.patch(target)
             m = p.start()
             self.addCleanup(p.stop)
