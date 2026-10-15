@@ -20,7 +20,8 @@ from startScan.models import Asset, AssetFact
 
 logger = logging.getLogger(__name__)
 
-MAX_DNS_CANDIDATES = 2000  # NOTE: ceiling per run; oldest candidates first; upgrade path: rotate by last check
+MAX_DNS_CANDIDATES = 2000  # NOTE: ceiling per run, oldest first: candidates beyond it are never looked up
+                           # (so never gain NS facts); upgrade path: rotate by last check
 NS_MX_TIMEOUT = 10 * 60
 
 
@@ -55,10 +56,10 @@ def collect_dns(project, results_dir, run=commands.run):
             asset_id = cands.get(name)
             if asset_id is None:
                 continue
-            asset = Asset.objects.get(pk=asset_id)
+            asset = Asset(pk=asset_id, project=project)  # id is known: record_fact needs only the FK
             ns = rec['ns'] if rec['a'] else []  # lame delegation proves nothing
-            AssetFact.objects.filter(asset=asset, kind='ns').exclude(value__in=ns).delete()
-            AssetFact.objects.filter(asset=asset, kind='mx').exclude(value__in=rec['mx']).delete()
+            AssetFact.objects.filter(asset_id=asset_id, kind='ns').exclude(value__in=ns).delete()
+            AssetFact.objects.filter(asset_id=asset_id, kind='mx').exclude(value__in=rec['mx']).delete()
             for h in ns:
                 inventory.record_fact(asset, 'ns', h, 'dns')
             for h in rec['mx']:
