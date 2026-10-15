@@ -416,3 +416,49 @@ class AssetCadenceApiTest(TestCase):
         c.force_login(self.admin)
         r = c.get(f'/api/listDatatableAsset/{self.root.id}/', {'project': 'p1'})
         self.assertEqual(r.json()['cadence_tier'], 'standard')
+
+
+class AssetScoreApiTest(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from limes.definitions import SUCCESS_TASK
+        from scanEngine.models import EngineType
+        from startScan.models import ScanActivity, ScanHistory, Vulnerability
+        from targetApp.models import Domain
+        self.user = User.objects.create_user('u5', password='p')
+        user_logged_in.disconnect(on_user_logged_in)
+        self.addCleanup(user_logged_in.connect, on_user_logged_in)
+        self.c = APIClient()
+        self.c.force_login(self.user)
+        self.p = Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
+        domain = Domain.objects.create(project=self.p, name='x.com', insert_date=timezone.now())
+        self.root = Asset.objects.create(project=self.p, kind='root_domain', value='x.com', scope_tier='owned_root')
+        self.host = Asset.objects.create(project=self.p, kind='hostname', value='a.x.com', scope_tier='owned_host')
+        self.cand = Asset.objects.create(project=self.p, kind='root_domain', value='c.com', scope_tier='candidate')
+        scan = ScanHistory.objects.create(domain=domain, scan_type=EngineType.objects.create(engine_name='e', yaml_configuration='{}'),
+                                          start_scan_date=timezone.now() - timedelta(hours=1))
+        ScanActivity.objects.create(scan_of=scan, name='vulnerability_scan', title='v', time=timezone.now(), status=SUCCESS_TASK)
+        Vulnerability.objects.create(scan_history=scan, asset=self.host, name='<img src=x onerror=alert(1)>', severity=3,
+                                     http_url='https://a.x.com/')
+
+    def test_project_score(self):
+        r = self.c.get('/api/asset_score/', {'project': 'p1'})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertEqual((d['score'], d['grade'], d['version'], d['coverage'], d['asset_count']), (799, 'B', 'limes-score-v1', 1.0, 2))
+        self.assertEqual(d['top_penalties'][0]['issue'], '<img src=x onerror=alert(1)>')
+        self.assertEqual(d['history'], [])
+
+    def test_unknown_project_is_404(self):
+        self.assertEqual(self.c.get('/api/asset_score/', {'project': 'nope'}).status_code, 404)
+        self.assertEqual(self.c.get('/api/asset_score/').status_code, 404)
+
+    def test_requires_login(self):
+        self.assertNotEqual(APIClient().get('/api/asset_score/', {'project': 'p1'}).status_code, 200)
+
+    def test_retrieve_carries_risk_list_does_not(self):
+        one = self.c.get(f'/api/listDatatableAsset/{self.host.id}/', {'project': 'p1'}).json()
+        self.assertEqual((one['risk']['score'], one['risk']['grade']), (799, 'B'))
+        self.assertIsNone(self.c.get(f'/api/listDatatableAsset/{self.cand.id}/', {'project': 'p1'}).json()['risk'])
+        rows = self.c.get('/api/listDatatableAsset/', {'project': 'p1', 'no_page': '1'}).json()
+        self.assertTrue(all('risk' not in r for r in rows))
