@@ -108,12 +108,20 @@ class DecisionTest(DecisionBase):
         self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'rejected')
 
-    def test_rescore_command(self):
+    def test_rescore_command_scores_only_by_default(self):
         a = self.cand('cmd.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
         out = StringIO()
         call_command('rescore_assets', 'p', stdout=out)
+        self.assertEqual(self.tier(a), 'candidate')
+        self.assertGreaterEqual(a.confidence, 0.9)
+        self.assertEqual(out.getvalue().strip(), 'scored=1')
+
+    def test_rescore_command_decides_on_request(self):
+        a = self.cand('cmd.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        out = StringIO()
+        call_command('rescore_assets', 'p', '--decide', stdout=out)
         self.assertEqual(self.tier(a), 'owned_root')
-        self.assertIn('scored', out.getvalue())
+        self.assertIn('auto_confirmed=1', out.getvalue())
 
     def test_stale_ns_facts_never_auto_confirm(self):
         a = self.cand('stale.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
