@@ -1,3 +1,5 @@
+from unittest import mock
+
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
@@ -83,3 +85,15 @@ class ScoreTest(TestCase):
         rej.refresh_from_db(); self.root.refresh_from_db()
         self.assertIsNone(rej.confidence)
         self.assertIsNone(self.root.confidence)
+
+    def test_candidate_rejected_mid_scoring_is_not_written(self):
+        a = self.cand('race.net', ('cert', '102', 'crtsh'))
+
+        def reject_then_empty(*args, **kwargs):
+            Asset.objects.filter(pk=a.pk).update(scope_tier='rejected')
+            return []
+
+        with mock.patch('limes.tasks.attribution._hop1', side_effect=reject_then_empty):
+            self.assertEqual(attribution.score_project(self.p), {'scored': 0})
+        a.refresh_from_db()
+        self.assertIsNone(a.confidence)

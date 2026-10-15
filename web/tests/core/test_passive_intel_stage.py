@@ -43,6 +43,9 @@ class PassiveIntelStageTest(TestCase):
             'resolve_root': mock.patch('limes.tasks.resolution.resolve_root', return_value=3),
             'run_internetdb': mock.patch('limes.tasks.intel.run_internetdb', return_value={'internetdb_enriched': 2, 'candidates': 0}),
             'run_ripestat': mock.patch('limes.tasks.intel.run_ripestat', return_value={'ripestat_enriched': 2}),
+            'collect_dns': mock.patch('limes.tasks.attribution.collect_dns', return_value={'dns_checked': 1}),
+            'score_project': mock.patch('limes.tasks.attribution.score_project', return_value={'scored': 1}),
+            'apply_decisions': mock.patch('limes.tasks.attribution.apply_decisions', return_value={'auto_confirmed': 0}),
         }
         mocks.update(overrides)
         return {k: p.start() for k, p in mocks.items()}
@@ -55,6 +58,12 @@ class PassiveIntelStageTest(TestCase):
         stages.passive_intel(ctx=dict(self.ctx))
         for name in ('run_crtsh', 'resolve_root', 'run_internetdb', 'run_ripestat'):
             m[name].assert_called_once()
+
+    def test_attribution_runs_after_providers_even_if_dns_fails(self):
+        m = self.patched(collect_dns=mock.patch('limes.tasks.attribution.collect_dns', side_effect=RuntimeError('x')))
+        stages.passive_intel(ctx=dict(self.ctx))
+        m['score_project'].assert_called_once()
+        m['apply_decisions'].assert_called_once()
 
     def test_one_failing_provider_does_not_stop_others(self):
         m = self.patched(run_crtsh=mock.patch('limes.tasks.intel.run_crtsh', side_effect=RuntimeError('crt.sh down')))
