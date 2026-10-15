@@ -3,7 +3,7 @@ from io import StringIO
 from unittest import mock
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from dashboard.models import Project
@@ -11,7 +11,7 @@ from limes.tasks import attribution, inventory
 from startScan.models import Asset, AssetFact
 
 
-class DecisionTest(TestCase):
+class DecisionBase(TestCase):
     def setUp(self):
         self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
         self.root = Asset.objects.create(project=self.p, kind='root_domain', value='example.com', scope_tier='owned_root')
@@ -35,9 +35,39 @@ class DecisionTest(TestCase):
         a.refresh_from_db()
         return a.scope_tier
 
+
+class DisabledAutoConfirmTest(DecisionBase):
+    """Default: NS control is spoofable through a recursive resolver, so nothing changes tier."""
+
+    def test_qualifying_candidate_is_only_flagged(self):
+        a = self.cand('ours.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        self.assertEqual(self.run_all(), {'auto_confirmed': 0, 'would_auto_confirm': 1})
+        self.assertEqual(self.tier(a), 'candidate')
+        self.assertTrue(a.confidence_detail['would_auto_confirm'])
+        self.assertFalse(a.decision_reason)
+        self.assertEqual([s['source'] for s in a.sources if s['source'] == 'attribution'], [])
+        self.inv.assert_not_called()
+
+    def test_non_qualifying_candidate_has_no_flag(self):
+        a = self.cand('nsonly.net', ('ns', 'ns1.example.com', 'dns'))
+        self.assertEqual(self.run_all(), {'auto_confirmed': 0, 'would_auto_confirm': 0})
+        a.refresh_from_db()
+        self.assertNotIn('would_auto_confirm', a.confidence_detail)
+
+    def test_rescore_clears_a_stale_flag(self):
+        a = self.cand('ours.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        self.run_all()
+        AssetFact.objects.filter(asset=a, kind='cert').delete()
+        self.run_all()
+        a.refresh_from_db()
+        self.assertNotIn('would_auto_confirm', a.confidence_detail)
+
+
+@override_settings(ATTRIBUTION_AUTO_CONFIRM=True)
+class DecisionTest(DecisionBase):
     def test_working_ns_control_plus_cert_auto_confirms(self):
         a = self.cand('ours.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
-        self.assertEqual(self.run_all(), {'auto_confirmed': 1})
+        self.assertEqual(self.run_all(), {'auto_confirmed': 1, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'owned_root')
         self.assertIn('auto-confirmed (attribution-v1)', a.decision_reason)
         self.assertIn('ns1.example.com', a.decision_reason)
@@ -70,7 +100,7 @@ class DecisionTest(TestCase):
         a = self.cand('race.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
         attribution.score_project(self.p)
         Asset.objects.filter(pk=a.pk).update(scope_tier='rejected')  # human decision lands first
-        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0})
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'rejected')
 
     def test_rescore_command(self):
@@ -83,16 +113,16 @@ class DecisionTest(TestCase):
     def test_stale_ns_facts_never_auto_confirm(self):
         a = self.cand('stale.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
         AssetFact.objects.filter(asset=a, kind='ns').update(last_seen=timezone.now() - timedelta(hours=25))
-        self.assertEqual(self.run_all(), {'auto_confirmed': 0})
+        self.assertEqual(self.run_all(), {'auto_confirmed': 0, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'candidate')
         AssetFact.objects.filter(asset=a, kind='ns').update(last_seen=timezone.now() - timedelta(hours=1))
-        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 1})
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 1, 'would_auto_confirm': 0})
 
     def test_ns_facts_deleted_after_scoring_never_confirm(self):
         a = self.cand('gone.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
         attribution.score_project(self.p)
         AssetFact.objects.filter(asset=a, kind='ns').delete()
-        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0})
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'candidate')
 
     def test_ns_facts_replaced_after_scoring_never_confirm(self):
@@ -100,7 +130,7 @@ class DecisionTest(TestCase):
         attribution.score_project(self.p)
         AssetFact.objects.filter(asset=a, kind='ns').delete()
         inventory.record_fact(a, 'ns', 'ns1.other.net', 'dns')
-        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0})
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0, 'would_auto_confirm': 0})
         self.assertEqual(self.tier(a), 'candidate')
 
     def test_concurrent_source_provenance_is_kept(self):
