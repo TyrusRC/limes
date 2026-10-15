@@ -231,3 +231,30 @@ class IntelRunTest(TestCase):
         intel.run_internetdb(self.p, self.root, get=Fake(internetdb=lambda url: (200, dict(body, ip=url.rsplit('/', 1)[1]))))
         cand = Asset.objects.get(value='partner-co.com')
         self.assertTrue(AssetFact.objects.filter(asset=cand, kind='ip', value='203.0.114.7', source='internetdb').exists())
+
+    def test_mass_shared_certificate_records_no_cert_fact(self):
+        from startScan.models import AssetFact
+        names = '\n'.join(['www.example.com'] + [f'site{i}.com' for i in range(21)])
+        intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, [{'id': 9, 'name_value': names}])))
+        self.assertFalse(AssetFact.objects.filter(kind='cert', value='9').exists())
+
+    def test_cert_without_in_root_name_records_no_cert_fact(self):
+        from startScan.models import AssetFact
+        Asset.objects.create(project=self.p, kind='root_domain', value='other.net', scope_tier='candidate')
+        intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, [{'id': 5, 'name_value': 'other.net\nco.org'}])))
+        self.assertFalse(AssetFact.objects.filter(kind='cert', value='5').exists())
+
+    def test_capped_co_tenant_gets_no_cert_fact(self):
+        from startScan.models import AssetFact
+        rows = [{'id': i, 'name_value': f'h{i}.example.com\nco{i}.net'} for i in (1, 2)]
+        with mock.patch.object(intel, 'MAX_CANDIDATES_PER_ROOT', 1):
+            out = intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.assertEqual(out['candidates_capped'], 1)
+        self.assertEqual(list(AssetFact.objects.filter(kind='cert', value='2').values_list('asset__value', flat=True)),
+                         ['example.com'])
+
+    def test_candidate_from_dependency_ip_gets_no_ip_fact(self):
+        from startScan.models import AssetFact
+        body = load('internetdb_sample.json')
+        intel.run_internetdb(self.p, self.root, get=Fake(internetdb=lambda url: (200, dict(body, ip=url.rsplit('/', 1)[1]))))
+        self.assertFalse(AssetFact.objects.filter(kind='ip', value='104.16.1.1').exists())
