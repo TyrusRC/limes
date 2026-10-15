@@ -30,6 +30,7 @@ urlpatterns = [
     path('action/asset/confirm/', ConfirmAsset.as_view(), name='confirm_asset'),
     path('action/asset/reject/', RejectAsset.as_view(), name='reject_asset'),
     path('action/asset/rescan/', RescanAsset.as_view(), name='rescan_asset'),
+    path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
     path(
         'add/target/',
         AddTarget.as_view(),

@@ -29,6 +29,7 @@ from limes.utilities import is_safe_path
 from scanEngine.models import *
 from startScan.models import *
 from startScan.models import EndPoint
+from startScan.asset_models import CADENCE_TIERS
 from limes.continuous import start_asm_scan
 from targetApp.models import *
 from api.permissions import *
@@ -797,6 +798,24 @@ class RescanAsset(APIView):
 			return Response({'status': False, 'message': 'asset not found'})
 		ok, message = start_asm_scan(asset, engine_id=request.data.get('engine_id'), initiated_by_id=request.user.id)
 		return Response({'status': ok, 'message': message})
+
+
+class SetAssetCadence(APIView):
+	"""How often continuous monitoring rediscovers an owned root (limes.continuous)."""
+	permission_classes = [HasPermission]
+	permission_required = PERM_INITATE_SCANS_SUBSCANS
+
+	def post(self, request):
+		asset = _load_asset(request)
+		if not asset:
+			return Response({'status': False, 'message': 'asset not found'})
+		if asset.kind != 'root_domain':
+			return Response({'status': False, 'message': 'cadence applies to root domains only'})
+		tier = request.data.get('cadence_tier')
+		if not isinstance(tier, str) or tier not in dict(CADENCE_TIERS):
+			return Response({'status': False, 'message': 'unknown cadence tier'})
+		Asset.objects.filter(pk=asset.pk).update(cadence_tier=tier)
+		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 
 class AddTarget(APIView):
