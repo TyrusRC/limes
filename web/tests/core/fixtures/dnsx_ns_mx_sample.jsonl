@@ -1,0 +1,5 @@
+{"host":"Partner-Co.com","a":["198.51.99.10"],"ns":["NS1.Example.com.","ns2.example.com"],"mx":["10 mail.example.com."]}
+{"host":"lame.net","ns":["ns1.example.com"]}
+{"host":"thirdparty.org","a":["198.51.99.11"],"ns":["ns1.provider.net"],"mx":["mx.provider.net"]}
+not json
+{"host":"weird.com","a":"x","ns":5,"mx":[7]}
