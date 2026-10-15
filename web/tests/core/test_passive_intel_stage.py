@@ -66,6 +66,12 @@ class PassiveIntelStageTest(TestCase):
         m['apply_decisions'].assert_not_called()
         self.assertEqual(out['failed'], 'attribution_dns')
 
+    def test_never_decides_when_scoring_fails(self):
+        m = self.patched(score_project=mock.patch('limes.tasks.attribution.score_project', side_effect=RuntimeError('db')))
+        out = stages.passive_intel(ctx=dict(self.ctx))
+        m['apply_decisions'].assert_not_called()
+        self.assertEqual(out['failed'], 'attribution_score')
+
     def test_attribution_decides_after_dns_succeeds(self):
         m = self.patched()
         stages.passive_intel(ctx=dict(self.ctx))
