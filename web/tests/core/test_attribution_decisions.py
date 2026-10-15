@@ -87,3 +87,26 @@ class DecisionTest(TestCase):
         self.assertEqual(self.tier(a), 'candidate')
         AssetFact.objects.filter(asset=a, kind='ns').update(last_seen=timezone.now() - timedelta(hours=1))
         self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 1})
+
+    def test_ns_facts_deleted_after_scoring_never_confirm(self):
+        a = self.cand('gone.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        attribution.score_project(self.p)
+        AssetFact.objects.filter(asset=a, kind='ns').delete()
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0})
+        self.assertEqual(self.tier(a), 'candidate')
+
+    def test_ns_facts_replaced_after_scoring_never_confirm(self):
+        a = self.cand('moved.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        attribution.score_project(self.p)
+        AssetFact.objects.filter(asset=a, kind='ns').delete()
+        inventory.record_fact(a, 'ns', 'ns1.other.net', 'dns')
+        self.assertEqual(attribution.apply_decisions(self.p), {'auto_confirmed': 0})
+        self.assertEqual(self.tier(a), 'candidate')
+
+    def test_concurrent_source_provenance_is_kept(self):
+        a = self.cand('prov.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        attribution.score_project(self.p)
+        Asset.objects.filter(pk=a.pk).update(sources=[{'source': 'manual', 'evidence': 'x'}])
+        attribution.apply_decisions(self.p)
+        a.refresh_from_db()
+        self.assertEqual([s['source'] for s in a.sources], ['manual', 'attribution'])
