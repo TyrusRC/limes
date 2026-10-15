@@ -2,6 +2,7 @@ import ipaddress
 
 import validators
 
+from limes.intel import domains
 from limes.scope import is_reserved_ip, is_reserved_network, parse_ip
 from startScan.inventory_migrate import normalize_host
 
@@ -53,4 +54,6 @@ def classify_asset_entry(raw):
     # NOTE: label-count heuristic (<=2 labels = root_domain); a public-suffix-list
     # refinement (e.g. example.co.uk) is an A3 concern.
     kind = 'root_domain' if len(value.split('.')) <= 2 else 'hostname'
+    if kind == 'root_domain' and domains.registrable(value) is None:
+        return _err(f'public suffix cannot be a root domain: {s}')
     return _ok(kind, value)

@@ -81,6 +81,12 @@ class ScoreTest(TestCase):
         self.assertEqual(by, {})
         self.assertAlmostEqual(score or 0.0, 0.0, places=4)
 
+    def test_public_suffix_owned_root_is_never_evidence(self):
+        # a stray 'co.uk' root would make every *.co.uk nameserver and mail host look like ours
+        Asset.objects.create(project=self.p, kind='root_domain', value='co.uk', scope_tier='owned_root')
+        a = self.cand('evil.net', ('ns', 'ns1.attacker.co.uk', 'dns'), ('mx', 'mx.attacker.co.uk', 'dns'))
+        self.assertEqual(self.score(a)[1], {})
+
     def test_brand_whole_label_and_short_keywords_ignored(self):
         self.assertAlmostEqual(self.score(self.cand('acme-store.net'))[0], 0.30, places=4)
         self.assertAlmostEqual(self.score(self.cand('acmesoft.net'))[0] or 0.0, 0.0, places=4)
