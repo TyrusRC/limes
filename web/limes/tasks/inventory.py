@@ -39,7 +39,11 @@ def record_fact(asset, kind, value, source):
                                                     defaults={'source': source})
     if not created:
         fact.last_seen = timezone.now()
-        fact.save(update_fields=['last_seen'])
+        fields = ['last_seen']
+        if fact.source == 'dns' and source in ('internetdb', 'crtsh'):
+            fact.source = source  # a fact the provider also reports; never downgrade to 'dns'
+            fields.append('source')
+        fact.save(update_fields=fields)
     return fact
 
 

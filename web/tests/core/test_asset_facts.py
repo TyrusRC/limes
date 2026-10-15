@@ -18,6 +18,13 @@ class AssetFactTest(TestCase):
         self.assertEqual(AssetFact.objects.filter(asset=self.a).count(), 1)
         self.assertGreaterEqual(f2.last_seen, first)
 
+    def test_source_upgrades_from_dns_but_never_downgrades(self):
+        inventory.record_fact(self.a, 'ip', '198.51.99.1', 'dns')
+        inventory.record_fact(self.a, 'ip', '198.51.99.1', 'internetdb')
+        self.assertEqual(AssetFact.objects.get(asset=self.a, kind='ip').source, 'internetdb')
+        inventory.record_fact(self.a, 'ip', '198.51.99.1', 'dns')
+        self.assertEqual(AssetFact.objects.get(asset=self.a, kind='ip').source, 'internetdb')
+
     def test_value_normalized_and_empty_ignored(self):
         f = inventory.record_fact(self.a, 'ns', ' NS1.X.COM ', 'dns')
         self.assertEqual(f.value, 'ns1.x.com')

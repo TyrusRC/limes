@@ -18,6 +18,10 @@ MAX_DNS_CANDIDATES = 2000  # NOTE: ceiling per run; oldest candidates first; upg
 NS_MX_TIMEOUT = 10 * 60
 
 
+def _drop_ns(asset_ids):
+    AssetFact.objects.filter(asset_id__in=list(asset_ids), kind='ns').delete()
+
+
 def collect_dns(project, results_dir, run=commands.run):
     """NS/MX/A for candidate root domains. NS facts are kept only when the zone resolved (a working
     delegation); each answered host's NS/MX facts are replaced by the latest answer."""
@@ -36,6 +40,7 @@ def collect_dns(project, results_dir, run=commands.run):
         if res is None or res.return_code != 0:
             logger.warning(f'dnsx (ns/mx) exited with {getattr(res, "return_code", None)}')
         if not os.path.isfile(out_file):
+            _drop_ns(cands.values())
             return {'dns_checked': 0}
         with open(out_file) as f:
             records = dnsx.parse_ns_mx(f)
@@ -55,9 +60,12 @@ def collect_dns(project, results_dir, run=commands.run):
             for ip in rec['a']:
                 inventory.record_fact(asset, 'ip', ip, 'dns')
             checked += 1
+        # dnsx -silent omits unanswered hosts: their old delegation proves nothing any more
+        _drop_ns([i for n, i in cands.items() if n not in records])
         return {'dns_checked': checked}
     except SoftTimeLimitExceeded:
         raise
     except Exception:
         logger.exception('Attribution DNS collection failed')
+        _drop_ns(cands.values())  # fail closed: stale NS must not count as control
         return {'dns_checked': 0}
