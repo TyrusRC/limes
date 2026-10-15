@@ -239,12 +239,15 @@ def passive_intel(self, ctx={}, description=None):
 		('internetdb', lambda: intel.run_internetdb(project, root)),
 		('ripestat', lambda: intel.run_ripestat(project, root)),
 		('attribution_dns', lambda: attribution.collect_dns(project, self.results_dir)),
-		('attribution', lambda: {**attribution.score_project(project), **attribution.apply_decisions(project)}),
+		('attribution_score', lambda: attribution.score_project(project)),
+		('attribution_decide', lambda: attribution.apply_decisions(project)),
 	)
 	counts, failed = {}, []
 	for name, step in steps:
 		if name == 'resolve' and counts.get('hostnames') == 0:
 			continue  # crt.sh found nothing new to resolve
+		if name == 'attribution_decide' and 'attribution_dns' in failed:
+			continue  # NS facts may be stale or partial: never decide from them
 		try:
 			for k, v in step().items():
 				counts[k] = counts.get(k, 0) + v

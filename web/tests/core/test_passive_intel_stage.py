@@ -59,8 +59,15 @@ class PassiveIntelStageTest(TestCase):
         for name in ('run_crtsh', 'resolve_root', 'run_internetdb', 'run_ripestat'):
             m[name].assert_called_once()
 
-    def test_attribution_runs_after_providers_even_if_dns_fails(self):
+    def test_attribution_scores_but_never_decides_when_dns_fails(self):
         m = self.patched(collect_dns=mock.patch('limes.tasks.attribution.collect_dns', side_effect=RuntimeError('x')))
+        out = stages.passive_intel(ctx=dict(self.ctx))
+        m['score_project'].assert_called_once()
+        m['apply_decisions'].assert_not_called()
+        self.assertEqual(out['failed'], 'attribution_dns')
+
+    def test_attribution_decides_after_dns_succeeds(self):
+        m = self.patched()
         stages.passive_intel(ctx=dict(self.ctx))
         m['score_project'].assert_called_once()
         m['apply_decisions'].assert_called_once()
