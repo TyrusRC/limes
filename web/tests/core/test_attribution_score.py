@@ -99,6 +99,27 @@ class ScoreTest(TestCase):
         self.assertEqual(linked.confidence_detail['contributions'][0]['via'], 'strong.net')
         self.assertAlmostEqual(unlinked.confidence or 0.0, 0.0, places=4)  # weak.net scores 0 at hop 1
 
+    def test_hop2_ignores_dns_sourced_facts(self):
+        # A records are set by whoever owns the name: sharing one proves nothing
+        strong = self.cand('strong.net', ('cert', '102', 'crtsh'), ('mx', 'mail.example.com', 'dns'),
+                           ('ip', '198.51.100.20', 'dns'))
+        follower = self.cand('follower.net', ('ip', '198.51.100.20', 'dns'))
+        # nor may a candidate's own A record ride on a provider-reported fact of another
+        inventory.record_fact(strong, 'ip', '198.51.100.30', 'internetdb')
+        rider = self.cand('rider.net', ('ip', '198.51.100.30', 'dns'))
+        attribution.score_project(self.p)
+        follower.refresh_from_db(); rider.refresh_from_db()
+        self.assertEqual(follower.confidence_detail['contributions'], [])
+        self.assertEqual(rider.confidence_detail['contributions'], [])
+
+    def test_hop2_via_is_lowest_id_reviewable_candidate(self):
+        first = self.cand('zzz.net', ('cert', '102', 'crtsh'), ('cert', '555', 'crtsh'))
+        self.cand('aaa.net', ('cert', '102', 'crtsh'), ('cert', '555', 'crtsh'))
+        linked = self.cand('linked.net', ('cert', '555', 'crtsh'))
+        attribution.score_project(self.p)
+        linked.refresh_from_db()
+        self.assertEqual(linked.confidence_detail['contributions'][0]['via'], first.value)
+
     def test_decided_assets_never_scored(self):
         rej = Asset.objects.create(project=self.p, kind='root_domain', value='nope.net', scope_tier='rejected')
         inventory.record_fact(rej, 'cert', '102', 'crtsh')

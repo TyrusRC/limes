@@ -80,6 +80,7 @@ def collect_dns(project, results_dir, run=commands.run):
 VERSION = 'attribution-v1'
 WEIGHTS = {'ns_control': 0.95, 'mx': 0.60, 'ip': 0.60, 'cert': 0.50, 'brand': 0.30}
 HOP2_FACTOR = 0.5
+HOP2_SOURCES = ('crtsh', 'internetdb')
 AUTO_CONFIRM = 0.90
 REVIEW = 0.40
 MIN_BRAND_LEN = 4  # NOTE: shorter keywords would match everything
@@ -158,22 +159,24 @@ def score_project(project):
         facts[aid].append((kind, value, source))
     hop1 = {c.id: _hop1(c, facts[c.id], roots, owned_ips, owned_certs, keywords) for c in cands}
     value_of = {c.id: c.value for c in cands}
-    sharing = defaultdict(set)  # (kind, value) -> candidate ids, for hop 2
-    for aid, fl in facts.items():
-        for kind, value, _ in fl:
-            if kind in ('cert', 'ip'):
-                sharing[(kind, value)].add(aid)
+    # hop 2 links only provider-reported facts: a DNS A record is set by whoever owns the name
+    shared = {aid: [(k, v) for k, v, src in fl if k in ('cert', 'ip') and src in HOP2_SOURCES]
+              for aid, fl in facts.items()}
+    sharing = defaultdict(set)  # (kind, value) -> candidate ids
+    for aid, fl in shared.items():
+        for key in fl:
+            sharing[key].add(aid)
     hop1_score = {cid: _combine(contribs) for cid, contribs in hop1.items()}
     for c in cands:
         contribs = list(hop1[c.id])
         seen = {(x['kind'], x['value']) for x in contribs}
-        for kind, value, _ in facts[c.id]:
-            if kind not in ('cert', 'ip') or (kind, value) in seen:
+        for kind, value in shared.get(c.id, []):
+            if (kind, value) in seen:
                 continue
-            via = sorted(o for o in sharing[(kind, value)] if o != c.id and hop1_score[o] >= REVIEW)
+            via = [o for o in sharing[(kind, value)] if o != c.id and hop1_score[o] >= REVIEW]
             if via:
                 seen.add((kind, value))
-                contribs.append({'kind': kind, 'value': value, 'via': value_of[via[0]],
+                contribs.append({'kind': kind, 'value': value, 'via': value_of[min(via)],
                                  'weight': WEIGHTS[kind] * HOP2_FACTOR, 'hop': 2,
                                  'control': False, 'corroborates': False})
         score = round(_combine(contribs), 4)
