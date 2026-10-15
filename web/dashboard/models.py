@@ -14,6 +14,7 @@ class Project(models.Model):
 	name = models.CharField(max_length=500)
 	slug = models.SlugField(unique=True)
 	insert_date = models.DateTimeField()
+	brand_keywords = models.JSONField(default=list, blank=True)
 
 	def __str__(self):
 		return self.slug

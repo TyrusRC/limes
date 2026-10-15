@@ -16,7 +16,7 @@ SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
 
-__all__ = ['Tag', 'Asset', 'ScanRun', 'ScanJob']
+__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob']
 
 
 class Tag(models.Model):
@@ -42,6 +42,8 @@ class Asset(models.Model):
 
     sources = models.JSONField(default=list, blank=True)
     enrichment = models.JSONField(default=dict, blank=True)
+    confidence = models.FloatField(null=True, blank=True)
+    confidence_detail = models.JSONField(null=True, blank=True)
     added_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     decision_reason = models.TextField(blank=True, default='')
 
@@ -93,6 +95,22 @@ class Asset(models.Model):
             if self.missed_count >= MISSING_THRESHOLD and self.state == 'active':
                 self.state = 'missing'
         self.save(update_fields=['missed_count', 'last_seen', 'state'])
+
+
+class AssetFact(models.Model):
+    """Typed ownership evidence attached to an asset (A3c attribution graph)."""
+    KINDS = [(k, k) for k in ('cert', 'ip', 'ns', 'mx')]
+
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='facts')
+    kind = models.CharField(max_length=10, choices=KINDS)
+    value = models.CharField(max_length=500)
+    source = models.CharField(max_length=50)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('asset', 'kind', 'value')
+        indexes = [models.Index(fields=['kind', 'value'], name='assetfact_kind_value_idx')]
 
 
 class ScanRun(models.Model):

@@ -29,6 +29,20 @@ def _append_source(asset, source, evidence, confidence=0.5):
     return asset
 
 
+def record_fact(asset, kind, value, source):
+    """Upsert one typed evidence fact on an asset; refreshes last_seen when it already exists."""
+    from startScan.models import AssetFact
+    value = (value or '').strip().lower()
+    if not value:
+        return None
+    fact, created = AssetFact.objects.get_or_create(asset=asset, kind=kind, value=value,
+                                                    defaults={'source': source})
+    if not created:
+        fact.last_seen = timezone.now()
+        fact.save(update_fields=['last_seen'])
+    return fact
+
+
 def upsert_root_asset(project, name, request_headers=None):
     value = normalize_host(name)
     if not value:
