@@ -79,6 +79,18 @@ function rescan_asset(id) {
 	asset_run_action('rescan', id);
 }
 
+function asset_confidence_html(a) {
+	var d = a.confidence_detail;
+	if (!d || !Array.isArray(d.contributions)) return '';
+	var rows = d.contributions.map(function(c) {
+		return '<tr><td>' + asset_esc(c.kind) + '</td><td>' + asset_esc(c.value) + '</td><td>' + asset_esc(c.via) +
+			'</td><td>' + asset_esc(c.weight) + '</td><td>' + asset_esc(c.hop) + '</td></tr>';
+	}).join('') || '<tr><td colspan="5" class="text-muted">No evidence yet.</td></tr>';
+	return '<h5>Confidence ' + asset_esc(Number(d.score).toFixed(2)) + ' <small class="text-muted">(' +
+		asset_esc(d.version) + ')</small></h5><table class="table table-sm"><thead><tr><th>Evidence</th><th>Value</th>' +
+		'<th>Via</th><th>Weight</th><th>Hop</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
 // "Why is this mine": follow parent links up to the root. Depth-capped so a bad cycle can't loop.
 function asset_parent_chain(asset) {
 	var chain = [asset];
@@ -130,7 +142,7 @@ function get_asset_modal(id) {
 			'<p><b>Kind</b> ' + asset_esc(a.kind) + ' &middot; <b>Scope</b> ' + asset_esc(a.scope_tier) +
 			' &middot; <b>State</b> ' + asset_esc(a.state) + ' &middot; <b>Vulnerabilities</b> ' + asset_esc(a.vuln_count) + '</p>' +
 			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
-			'<h5>Why is this mine</h5><p>' + path + '</p>' +
+			'<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
 			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
 			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
 		);

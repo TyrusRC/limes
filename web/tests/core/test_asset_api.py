@@ -31,6 +31,32 @@ class AssetListApiTest(TestCase):
     def _vals(self, **params):
         return {a['value'] for a in self._get(**params).json()}
 
+    def _scored(self, value, confidence):
+        return Asset.objects.create(project=self.p, kind='root_domain', value=value, scope_tier='candidate',
+                                    confidence=confidence,
+                                    confidence_detail={'version': 'attribution-v1', 'score': confidence, 'contributions': []})
+
+    def test_low_confidence_candidates_hidden_by_default(self):
+        self._scored('low.net', 0.2)
+        self._scored('mid.net', 0.6)
+        self.assertNotIn('low.net', self._vals(project='p1'))
+        self.assertIn('mid.net', self._vals(project='p1'))
+        self.assertIn('b.x.com', self._vals(project='p1'))  # unscored candidates still shown
+        self.assertIn('low.net', self._vals(project='p1', show_low='1'))
+
+    def test_hidden_candidate_still_retrievable(self):
+        low = self._scored('low.net', 0.2)
+        r = self.c.get(f'/api/listDatatableAsset/{low.id}/', {'project': 'p1'})
+        self.assertEqual((r.status_code, r.json()['confidence']), (200, 0.2))
+
+    def test_order_by_confidence_nulls_last(self):
+        self._scored('mid.net', 0.6)
+        self._scored('hi.net', 0.85)
+        r = self.c.get('/api/listDatatableAsset/', {'project': 'p1', 'no_page': '1',
+                                                    'order[0][column]': '10', 'order[0][dir]': 'desc'})
+        vals = [a['value'] for a in r.json()]
+        self.assertEqual(vals[:2], ['hi.net', 'mid.net'])
+
     def test_project_isolation(self):
         vals = self._vals(project='p1')
         self.assertIn('a.x.com', vals)
