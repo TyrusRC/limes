@@ -102,6 +102,44 @@ function set_asset_cadence(id) {
 	});
 }
 
+function asset_penalty_rows(rows, withAsset) {
+	return (rows || []).map(function(r) {
+		return '<tr>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
+			'</td><td>' + asset_esc(r.severity) + '</td><td>-' + asset_esc(r.points) + '</td></tr>';
+	}).join('');
+}
+
+// Risk section of the asset modal (limes.scoring); null for assets that are not scored.
+function asset_risk_html(risk) {
+	if (!risk) return '';
+	var rows = asset_penalty_rows(risk.penalties, false);
+	return '<h5>Risk ' + asset_esc(risk.score) + ' <span class="badge bg-soft-primary text-primary">' + asset_esc(risk.grade) +
+		'</span></h5>' + (rows ? '<table class="table table-sm"><thead><tr><th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' +
+		rows + '</tbody></table>' : '<p class="text-muted">No open findings in the latest vulnerability scan.</p>');
+}
+
+// Project score card above the Assets table.
+function load_asset_score() {
+	var box = document.getElementById('asset_score');
+	fetch('/api/asset_score/?project=' + encodeURIComponent(asset_project()), {credentials: 'same-origin'})
+		.then(function(r) { if (!r.ok) throw new Error('score'); return r.json(); })
+		.then(function(s) {
+			if (s.score === null) {
+				box.innerHTML = '<p class="text-muted mb-0">No owned assets to score yet.</p>';
+				return;
+			}
+			var cov = s.coverage === null ? 'n/a' : Math.round(Number(s.coverage) * 100) + '%';
+			var rows = asset_penalty_rows(s.top_penalties, true);
+			box.innerHTML = '<div class="d-flex align-items-baseline mb-1"><span class="h2 mb-0 me-2">' + asset_esc(s.score) +
+				'</span><span class="badge bg-soft-primary text-primary me-3">' + asset_esc(s.grade) + '</span>' +
+				'<small class="text-muted">' + asset_esc(cov) + ' of owned roots scanned for vulnerabilities in 30 days &middot; ' +
+				asset_esc(s.version) + '</small></div>' + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
+				'<th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' + rows + '</tbody></table>' : '');
+		}).catch(function() {
+			box.innerHTML = '<p class="text-muted mb-0">Score unavailable.</p>';
+		});
+}
+
 function asset_confidence_html(a) {
 	var d = a.confidence_detail;
 	if (!d || !Array.isArray(d.contributions)) return '';
@@ -173,7 +211,7 @@ function get_asset_modal(id) {
 			' &middot; <b>State</b> ' + asset_esc(a.state) + ' &middot; <b>Vulnerabilities</b> ' + asset_esc(a.vuln_count) + '</p>' +
 			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
 			asset_cadence_html(a) +
-			'<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
+			asset_risk_html(a.risk) + '<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
 			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
 			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
 		);
