@@ -61,3 +61,7 @@ class ClassifyEntryTest(SimpleTestCase):
         self.assertIsNone(r['kind'])
         self.assertIn('public suffix', r['error'])
         self.assertIsNone(classify_asset_entry('example.co.uk')['error'])
+
+    def test_private_suffix_is_not_a_root(self):
+        self.assertIsNotNone(classify_asset_entry('github.io')['error'])
+        self.assertIsNone(classify_asset_entry('myorg.github.io')['error'])

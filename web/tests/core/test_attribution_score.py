@@ -126,6 +126,11 @@ class ScoreTest(TestCase):
         linked.refresh_from_db()
         self.assertEqual(linked.confidence_detail['contributions'][0]['via'], first.value)
 
+    def test_private_suffix_owned_root_never_vouches(self):
+        Asset.objects.create(project=self.p, kind='root_domain', value='github.io', scope_tier='owned_root')
+        a = self.cand('tenant-site.net', ('ns', 'ns1.someone.github.io', 'dns'))
+        self.assertIsNone(self.score(a)[1].get('ns'))
+
     def test_decided_assets_never_scored(self):
         rej = Asset.objects.create(project=self.p, kind='root_domain', value='nope.net', scope_tier='rejected')
         inventory.record_fact(rej, 'cert', '102', 'crtsh')
