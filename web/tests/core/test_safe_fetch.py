@@ -5,6 +5,7 @@ import socket
 import ssl
 import tempfile
 import threading
+import time
 from unittest import mock
 
 import dns.resolver
@@ -268,8 +269,9 @@ class RebindingTest(TestCase):
 
 class _Server:
     """A local HTTP(S) server on 127.0.0.1 answering 200 to every request; records Host headers."""
-    def __init__(self, context=None, set_cookie=False):
+    def __init__(self, context=None, set_cookie=False, body=b'', keep_alive=False, drip=False):
         self.context, self.hosts, self.errors, self.cookies, self.set_cookie = context, [], [], [], set_cookie
+        self.body, self.keep_alive, self.drip = body, keep_alive, drip
         self.sock = socket.socket()
         self.sock.bind(('127.0.0.1', 0))
         self.sock.listen(8)
@@ -300,9 +302,16 @@ class _Server:
                         self.hosts.append(line[5:].strip().decode())
                     if line.lower().startswith(b'cookie:'):
                         self.cookies.append(line[7:].strip().decode())
-                if data:
+                if data and self.drip:  # headers that never end, one byte at a time, until the client gives up
+                    conn.sendall(b'HTTP/1.1 200 OK\r\nX-Drip: ')
+                    for _ in range(500):
+                        conn.sendall(b'a')
+                        time.sleep(0.01)
+                elif data:
                     cookie = b'Set-Cookie: s=1; Path=/\r\n' if self.set_cookie else b''
-                    conn.sendall(b'HTTP/1.1 200 OK\r\n' + cookie + b'Content-Length: 0\r\nConnection: close\r\n\r\n')
+                    close = b'keep-alive' if self.keep_alive else b'close'
+                    conn.sendall(b'HTTP/1.1 200 OK\r\n' + cookie + b'Content-Length: %d\r\nConnection: %s\r\n\r\n'
+                                 % (len(self.body), close) + self.body)
             except (OSError, ssl.SSLError) as e:  # the client refused our certificate: expected in the mismatch case
                 self.errors.append(e)
             finally:
@@ -505,3 +514,64 @@ class DeadlineTest(SimpleTestCase):
         with self.assertRaises(TimeoutError):
             tls('h.example.com')
         self.assertEqual(seen, [3])  # past the deadline: never dialled
+
+
+class DeadlineSocketRealTest(SimpleTestCase):
+    """The deadline wrapper against real sockets: bodies survive Connection: close, and TLS drips are cut."""
+    def test_full_body_is_read_with_connection_close_and_keep_alive(self):
+        from limes import safe_fetch
+        body = b'x' * 200000
+        for keep_alive in (False, True):
+            srv = _Server(body=body, keep_alive=keep_alive)
+            self.addCleanup(srv.close)
+            r = safe_fetch.pinned_get('good.test', '127.0.0.1')(f'http://good.test:{srv.port}/', timeout=5)
+            self.assertEqual((r.status_code, len(r.content)), (200, 200000), keep_alive)
+            r.close()
+
+    def test_https_drip_is_cut_at_the_deadline(self):
+        from limes import safe_fetch
+        from limes.checks import collect
+        from limes.identity import ScanIdentity
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        ca, cert, key = _ca_and_leaf(tmp.name, 'good.test')
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        srv = _Server(ctx, drip=True)
+        self.addCleanup(srv.close)
+
+        class Ticking:  # every look at the clock costs 4 s: the deadline runs out after a few reads
+            t = -4
+
+            def __call__(self):
+                self.t += 4
+                return self.t
+        clock = Ticking()
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1', deadline=safe_fetch.Deadline(30, clock))
+        started = time.monotonic()
+        with self.assertRaises(requests.exceptions.RequestException):
+            get(f'https://good.test:{srv.port}/', verify=ca, timeout=5)
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertGreaterEqual(clock.t, 30)
+        self.assertEqual(collect._guard(lambda: get(f'https://good.test:{srv.port}/', verify=ca)), 'error')
+
+    def test_exhausted_deadline_is_an_error_not_nothing_listening(self):
+        from limes import safe_fetch
+        from limes.checks import collect
+        from limes.identity import ScanIdentity
+        clock = Clock()
+        deadline = safe_fetch.Deadline(30, clock)
+        clock.t = 31
+        dialled = []
+        with mock.patch('urllib3.util.connection.create_connection', lambda *a, **kw: dialled.append(a)):
+            obs = collect.observe_http('h.example.com', ScanIdentity(headers=[]),
+                                       get=safe_fetch.pinned_get('h.example.com', PUBLIC, deadline=deadline))
+        self.assertEqual((obs['https'], obs['http']), ('error', 'error'))
+        self.assertEqual(dialled, [])
+        # the deadline running out between the check above and the dial is a timeout too, never a refusal
+        late = safe_fetch.Deadline(30, Clock())
+        get = safe_fetch.pinned_get('h.example.com', PUBLIC, deadline=late)
+        with mock.patch.object(late, 'expired', return_value=False), \
+                mock.patch.object(late, 'timeout', side_effect=TimeoutError('host check deadline reached')):
+            with self.assertRaises(requests.exceptions.Timeout):
+                get('http://h.example.com/')

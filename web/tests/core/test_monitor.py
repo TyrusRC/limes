@@ -351,6 +351,22 @@ class TickTest(Base):
         self.assertEqual(monitor.due_assets(later)[0], never)
         self.assertEqual(set(monitor.due_assets(later)[1:]), {s, f})
 
+    def test_out_of_time_check_never_reads_as_nothing_listening(self):
+        from limes import safe_fetch
+        h = self.asset('hostname', 'late.other.com', last_resolved_at=self.now - 40 * DAY)
+        RiskCheck.objects.create(asset=h, check_id='web.http_no_redirect', status='fail', severity=2,
+                                 last_checked=self.now - 40 * DAY)
+        ticks = itertools.chain([0], itertools.repeat(100))  # the deadline is gone before the first request
+        with mock.patch.object(safe_fetch, '_monotonic', lambda: next(ticks)), \
+                mock.patch('urllib3.util.connection.create_connection', side_effect=AssertionError('dialled')), \
+                mock.patch.object(safe_fetch, 'pinned_tls_connect', functools.partial(
+                    safe_fetch.pinned_tls_connect, create_connection=mock.Mock(side_effect=AssertionError('dialled')))):
+            out = monitor.check_asset(h, now=self.now, resolve=stub(public('late.other.com')), get=Get())
+        self.assertEqual(out['status'], 'timeout')
+        row = h.risk_checks.get(check_id='web.http_no_redirect')
+        self.assertEqual(row.status, 'error')  # unknown: never not_applicable over the earlier fail
+        self.assertFalse(h.risk_checks.filter(status='not_applicable', check_id__startswith='web.').exists())
+
     def test_tick_budget_stops_between_assets(self):
         for i in range(3):
             self.asset('hostname', f'h{i}.other.com')
