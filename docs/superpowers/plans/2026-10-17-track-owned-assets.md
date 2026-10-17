@@ -124,6 +124,8 @@
     - `8.8.0.0-8.8.16.0` (4,097 addresses) is an error;
     - `8.8.0.0/20` is ok;
     - a v6 range of 4,097 addresses is an error.
+  - Update the existing `test_rejects_ipv6_ranges_that_reach_private_space` assertion `2606:4700::/32` → `2606:4700::/116` (a /32 is now over the cap).
+  - `test_enumeration_off_warning`: with `RANGE_ENUMERATION=False`, adding a CIDR or an ASN returns a warning saying enumeration is off until the operator enables it.
   - `test_range_touching_reserved_refused`: `192.0.1.0-192.0.2.255` is an error; nothing is partially accepted.
   - `AddAssetsApiTest.test_every_entry_accounted`:
     - the text `8.8.8.1-8.8.8.6\nexample.co.uk\nAS12345\n12345\n8.8.8.2/31` gives `added == 6` (4 CIDRs + root + ASN), `skipped == 1` and `existing == 1`;
@@ -198,7 +200,7 @@
 
 **Interfaces:**
 - Produces:
-  - `ratelimit.reserve(provider: str, interval: float, now: float, cache=default_cache) -> float`, the seconds to wait.
+  - `ratelimit.reserve(provider: str, interval: float, now: float, cache=default_cache) -> float`, the seconds to wait. `now` is wall time: `get_json`'s default `clock` becomes `time.time`, because `time.monotonic` is not comparable across processes.
     - It claims the first free slot `floor(now / interval) + k` with `cache.add('limes:rl:<provider>:<slot>', 1, timeout)` for k in 0..119; when all are full it returns the wait to the last one.
     - On a cache error it falls back to process-local spacing and logs once.
     - `NOTE:` it assumes worker clocks agree to within an interval. The upgrade path is a Redis Lua token bucket on Redis `TIME`.
@@ -214,7 +216,8 @@
     - `take_daily` is True 5000 times and then False;
     - a new day resets it;
     - `per_tick(5000) == 4` and `per_tick(10000) == 7`.
-  - The existing `test_min_interval_per_provider` still passes against the cache.
+  - Update `GetJsonTest.setUp` to `cache.clear()`. Expect `test_min_interval_per_provider` to still see a 5.0 sleep (two calls at t=0 take slots 0 and 1); update its numbers only if slot spacing makes them differ.
+  - Every module in this plan that touches `reserve` or `take_daily` calls `cache.clear()` in `setUp`, because fakeredis persists across tests.
   - `test_rules` gains:
     - `is_immediate('asset_new', 'net.exposed_rdp', None)` is True;
     - `is_immediate('asset_new', None, None)` is False;
@@ -255,6 +258,7 @@
   - `resolve_ptr(ip: str, resolve=collect._resolve) -> list[str]` uses `dns.reversename`. Names are kept only when `normalize_host` and `validators.domain` accept them. NXDOMAIN gives `[]`; a DNS error gives `None` (retried later).
   - `place_names(project, names, ip_value, evidence) -> list[Asset]`:
     - a name under an owned root becomes `upsert_hostname_asset(parent=root, source='cidr', evidence=...)`;
+    - a name equal to an owned root is skipped (no duplicate hostname row);
     - other names become `upsert_candidate(project, 'root_domain', registrable(name), 'cidr', evidence)`;
     - it returns the newly created owned hostnames. Task 5 reuses it for InternetDB hostnames.
   - `enumerate_step(asset, idb_budget: int, ptr_budget: int, get=..., resolve=..., now=None) -> {'internetdb': n, 'ptr': n, 'new': n}`:
@@ -331,6 +335,10 @@
     - It accepts only URLs whose host is `host`; anything else raises `requests.exceptions.InvalidURL`.
     - It connects to `ip` (bracketed for v6) with `Host: host`, and an HTTPAdapter whose pool manager gets `server_hostname=host` and `assert_hostname=host`. TLS verification stays on.
   - `safe_fetch.pinned_tls_connect(ip: str, create_connection=socket.create_connection)` returns `connect(host, legacy=None)` for `collect.observe_tls`. It dials `(ip, 443)` with `server_hostname=host`.
+  - **Scan path (`run_checks`):**
+    - Each host step calls `safe_fetch.resolve_vetted` once and builds pinned http/tls observers from that one IP. Injected `observers` still override them, keeping their 2-argument signatures.
+    - On refusal it writes no rows, so the old rows go stale and never pass, and it logs the reason.
+    - `test_risk_checks` gets a `setUp` patch of `limes.checks.run.safe_fetch.resolve_vetted` returning `('93.184.216.34', None)`.
   - `checks.run.run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve) -> {'checked', 'failed', 'http_live': bool, 'refused': str | None}`:
     - hostname and root kinds get web+tls through the pinned observers (headers holder: the asset, else its owned root via `_root_of`, else none);
     - `root_domain` also gets email+dns;
@@ -341,8 +349,9 @@
     - `off` gives None;
     - with `cadence_explicit`, `CADENCE_INTERVALS[tier]`;
     - otherwise ACTIVE if `enrichment['monitor']['active']`, else INACTIVE.
-  - `monitor.monitored(project=None) -> QuerySet`: owned tiers; kinds `hostname`, `ip` and `root_domain`; not retired; not off; excluding roots where `has_scan_target`.
+  - `monitor.monitored(project=None) -> QuerySet`: owned tiers; kinds `hostname`, `ip` and `root_domain`; not off; excluding roots where `has_scan_target`. Retired assets stay in at `INACTIVE_INTERVAL`, so a sighting can revive them.
   - `monitor.due_assets(now, limit=MAX_PER_TICK) -> list[Asset]`:
+    - DB prefilter: `last_resolved_at IS NULL OR < now - ACTIVE_INTERVAL`, then `effective_interval` in Python (`NOTE:` this loads every prefiltered row; the upgrade is to store `next_due_at`);
     - due when `last_resolved_at` is null or older than `effective_interval`;
     - never-checked first, then oldest;
     - skips hostnames whose owned root has a `ScanHistory` in progress;
@@ -352,6 +361,7 @@
     - names: resolves A/AAAA/CNAME, writes answers with `record_resolution`, then `mark_missing_or_seen(answered)`; new owned IPs found this way, and new owned hostnames from `place_names`, get `record_asset_new`;
     - refreshes InternetDB for each owned IP when it is not `_fresh` and `take_daily` allows; owned IPs' InternetDB hostnames go through `place_names`;
     - runs `run_asset_checks`, and treats MX as present when `observe_mail_dns`/`resolve(value, 'MX')` returns records;
+    - `ip` lifecycle: seen when InternetDB reports ports or hostnames, or PTR returns names; a miss otherwise; no change when the provider failed or the budget is spent;
     - stamps `last_resolved_at = now` for every kind (IPs included; it is the "Last checked" field);
     - stores `enrichment['monitor'] = {'checked_at', 'active': ports or http_live or mx, 'status': 'ok'|'refused'|'unresolved', 'reason'}`.
   - The `monitor_assets()` task holds `MONITOR_LOCK`, respects `CONTINUOUS_SCANS`, works through `due_assets` within `TICK_BUDGET`, then runs `sync_issues`, `deliver_immediate` and `invalidate` for each touched project.
@@ -362,8 +372,8 @@
     - A `['93.184.216.34', '10.0.0.1']` is refused;
     - `localhost`-style and internal TLDs are refused.
   - `test_rebinding_uses_vetted_ip`:
-    - the resolver stub returns a public IP on its 1st call and `10.0.0.1` on its 2nd;
-    - `resolve_vetted` is called once;
+    - the resolver stub is keyed by `(name, rdtype)`: the 1st `A` query returns `93.184.216.34`, later `A` queries return `10.0.0.1`, and `AAAA` returns `[]`;
+    - one host check (http and tls) makes exactly one `A` query;
     - the fake session and fake `create_connection` saw only the public IP;
     - Host and SNI equal the hostname.
   - `test_pinned_get_refuses_other_hosts_and_caps_redirects`:
@@ -410,7 +420,8 @@
     - no queries;
     - `next_due = last_resolved_at + interval`;
     - roots with a scan target use `CADENCE_INTERVALS`;
-    - cidr/asn rows read `enum`/`asn` status and reason.
+    - cidr/asn rows read `enum`/`asn` status and reason. With `RANGE_ENUMERATION` off, a `cidr` row shows `status='enumeration_off'` and the reason "Enumeration off (operator setting)".
+  - `AssetDatatableViewSet.get_queryset` annotates `has_target=Exists(Domain.objects.filter(project=OuterRef('project'), name=OuterRef('value')))`, and `monitor_state` reads `asset.has_target`, so there is no per-row query.
   - The list endpoint accepts `?source=<label>`, an OR of `sources__contains=[{'source': raw}]` over the raw names for that label. An unknown label returns an empty result.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -442,7 +453,7 @@
   - **Actions:**
     - Stop monitoring makes the row show "off";
     - adding `8.8.8.1-8.8.8.6` reports added 4;
-    - `AS 1` is reported with a reason.
+    - bare `12345` and `AS 64512` are reported with a reason.
   - **Console:** no console errors.
   - **Checks:** run `node --check static/custom/asset.js` and the full `tests.core`.
 - [ ] **Step 5: Write the deploy notes in the commit body** (operator-facing, no secrets):
