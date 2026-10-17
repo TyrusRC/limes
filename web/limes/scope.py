@@ -19,6 +19,17 @@ RESERVED_NETWORKS = [ipaddress.ip_network(c) for c in (
     '64:ff9b::/96', '64:ff9b:1::/48', '2002::/16', '2001::/23', '100::/64', '5f00::/16',
 )]
 
+# Names that only resolve inside a network (mDNS, RFC 2606/6761/8375, common internal zones).
+INTERNAL_TLDS = ('local', 'internal', 'localhost', 'test', 'invalid', 'example', 'lan', 'corp')
+INTERNAL_SUFFIXES = ('home.arpa',)
+
+
+def is_internal_name(host):
+    """True for a single-label name or one under an internal-only TLD or suffix."""
+    host = (host or '').rstrip('.').lower()
+    return ('.' not in host or host.rsplit('.', 1)[-1] in INTERNAL_TLDS
+            or any(host == x or host.endswith('.' + x) for x in INTERNAL_SUFFIXES))
+
 
 def parse_ip(value):
     """ip_address for value, IPv4-mapped IPv6 collapsed to IPv4; None if not an IP."""

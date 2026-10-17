@@ -455,10 +455,19 @@ class AssetCadenceApiTest(TestCase):
             self.assertEqual(self.tier(self.root), tier)
 
     def test_rejects_unknown_tier_and_non_roots(self):
+        cand = Asset.objects.create(project=self.p, kind='hostname', value='c.y.com', scope_tier='candidate')
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='93.184.216.0/28', scope_tier='owned_host')
         for body in ({'asset_id': self.root.id, 'cadence_tier': 'hourly'}, {'asset_id': self.root.id},
-                     {'asset_id': self.root.id, 'cadence_tier': ['off']}, {'asset_id': self.host.id, 'cadence_tier': 'off'}):
+                     {'asset_id': self.root.id, 'cadence_tier': ['off']}, {'asset_id': cand.id, 'cadence_tier': 'off'}):
             self.assertFalse(self._post(self.admin, **body).json()['status'], body)
-        self.assertEqual((self.tier(self.root), self.tier(self.host)), ('standard', 'standard'))
+        self.assertEqual((self.tier(self.root), self.tier(cand)), ('standard', 'standard'))
+        self.assertTrue(self._post(self.admin, asset_id=cidr.id, cadence_tier='inactive').json()['status'])
+
+    def test_hostname_cadence_is_explicit(self):
+        r = self._post(self.admin, asset_id=self.host.id, cadence_tier='off').json()
+        self.assertEqual(r, {'status': True, 'message': 'cadence set to off'})
+        self.host.refresh_from_db()
+        self.assertEqual((self.host.cadence_tier, self.host.enrichment['cadence_explicit']), ('off', True))
 
     def test_needs_scan_permission(self):
         r = self._post(self.auditor, asset_id=self.root.id, cadence_tier='off')
