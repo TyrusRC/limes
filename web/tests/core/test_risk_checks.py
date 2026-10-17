@@ -207,3 +207,246 @@ class NetworkEvalTest(SimpleTestCase):
         res = network.evaluate(None)
         self.assertEqual(len(res), 14)
         self.assertEqual({r.status for r in res}, {'error'})
+
+
+class _Resp:
+    def __init__(self, status=200, headers=None, cookies=None):
+        self.status_code = status
+        self.headers = headers or {}
+        self.cookies_raw = cookies or []
+        self.raw = type('Raw', (), {'headers': type('H', (), {'getlist': lambda s, k: cookies or []})()})()
+
+    def close(self):
+        pass
+
+
+class CollectTest(SimpleTestCase):
+    def ident(self, *headers):
+        from limes.identity import ScanIdentity
+        return ScanIdentity(headers=list(headers))
+
+    def test_redirect_is_followed_within_host_only(self):
+        from limes.checks import collect
+        seen = []
+
+        def get(url, **kw):
+            seen.append(url)
+            if url == 'https://h/':
+                return _Resp(301, {'Location': 'https://h/a'})
+            if url == 'https://h/a':
+                return _Resp(200, {'Strict-Transport-Security': 'x'})
+            return _Resp(404)
+        obs = collect.observe_http('h', self.ident(), get=get)
+        self.assertEqual(obs['https']['status'], 200)
+        self.assertIn('strict-transport-security', obs['https']['headers'])
+
+        def away(url, **kw):
+            return _Resp(301, {'Location': 'https://evil.example/'}) if url.startswith('https') else _Resp(404)
+        obs = collect.observe_http('h', self.ident(), get=away)
+        self.assertEqual(obs['https']['status'], 301)
+
+    def test_tls_verify_codes_are_classified(self):
+        import ssl
+        from limes.checks import collect
+
+        def raising(code):
+            def connect(host, legacy=None):
+                e = ssl.SSLCertVerificationError(code, 'x')
+                e.verify_code = code
+                raise e
+            return connect
+        c = collect.observe_tls('h', connect=raising(10))['cert']
+        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok'], c['not_after']), (True, True, True, None))
+        c = collect.observe_tls('h', connect=raising(18))['cert']
+        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok']), (False, False, True))
+        c = collect.observe_tls('h', connect=raising(62))['cert']
+        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok']), (False, True, False))
+
+        def legacy_with(exc):
+            def connect(host, legacy=None):
+                if legacy is None:
+                    return {'notAfter': 'Jun  1 12:00:00 2099 GMT'}
+                raise exc
+            return collect.observe_tls('h', connect=connect)['legacy']
+        cert_err = ssl.SSLCertVerificationError(18, 'x')
+        cert_err.verify_code = 18
+        self.assertEqual(legacy_with(cert_err), {'TLSv1': True, 'TLSv1_1': True})
+        self.assertEqual(legacy_with(ConnectionResetError()), {'TLSv1': False, 'TLSv1_1': False})
+        self.assertEqual(legacy_with(ssl.SSLError('alert')), {'TLSv1': False, 'TLSv1_1': False})
+        self.assertEqual(legacy_with(TimeoutError()), {'TLSv1': None, 'TLSv1_1': None})
+        self.assertEqual(legacy_with(collect.ContextRefused()), {'TLSv1': None, 'TLSv1_1': None})
+
+    def test_good_cert_parses_not_after_aware(self):
+        from limes.checks import collect
+        c = collect.observe_tls('h', connect=lambda host, legacy=None: {'notAfter': 'Jun  1 12:00:00 2099 GMT'})['cert']
+        self.assertEqual(c['not_after'].year, 2099)
+        self.assertIsNotNone(c['not_after'].tzinfo)
+        self.assertTrue(c['trusted'] and c['hostname_ok'] and not c['expired'])
+
+    def test_timeouts_become_error_not_pass(self):
+        import requests
+        from limes.checks import collect, web
+
+        def slow(url, **kw):
+            raise requests.exceptions.ReadTimeout()
+        obs = collect.observe_http('h', self.ident(), get=slow)
+        self.assertEqual(obs['https'], 'error')
+        obs = collect.observe_http('h', self.ident(), get=lambda url, **kw: (_ for _ in ()).throw(requests.exceptions.SSLError()))
+        self.assertEqual(obs['https'], 'error')
+        res = {r.check: r.status for r in web.evaluate(obs)}
+        self.assertNotIn('pass', [res[c] for c in res if c != 'web.http_no_redirect'])
+        refused = collect.observe_http('h', self.ident(), get=lambda url, **kw: (_ for _ in ()).throw(requests.exceptions.ConnectionError()))
+        self.assertEqual(refused, {'https': None, 'http': None})
+
+    def test_evidence_never_contains_request_secrets(self):
+        from limes.checks import collect
+        from limes.identity import Header
+        sent = []
+
+        def get(url, headers=None, **kw):
+            sent.append(headers)
+            return _Resp(200, {'Server': 'nginx'})
+        obs = collect.observe_http('h', self.ident(Header('X-Key', 's3cr3t', True)), get=get)
+        self.assertEqual(sent[0]['X-Key'], 's3cr3t')
+        self.assertNotIn('s3cr3t', repr(obs))
+
+    def test_mail_dns_null_mx_and_errors(self):
+        import dns.resolver
+        from limes.checks import collect
+
+        def resolve(name, rdtype):
+            if rdtype == 'MX':
+                return ['0 .']
+            if rdtype == 'TXT' and name.startswith('_dmarc'):
+                raise dns.resolver.NXDOMAIN()
+            if rdtype == 'TXT':
+                return ['v=spf1 -all']
+            if rdtype == 'CAA':
+                raise dns.resolver.NoAnswer()
+            raise dns.resolver.NoNameservers()
+        mail, d = collect.observe_mail_dns('x.com', resolve=resolve)
+        self.assertEqual(mail, {'txt': ['v=spf1 -all'], 'dmarc': [], 'mx': []})
+        self.assertEqual(d, {'ds': 'error', 'caa': False})
+
+
+class PortsTest(TestCase):
+    def test_ports_union_and_freshness(self):
+        from datetime import timedelta
+        from limes.checks import collect
+        from startScan.models import IpAddress, Port
+        project = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        now = timezone.now()
+        a = Asset.objects.create(project=project, kind='ip', value='93.184.216.34', scope_tier='owned_host',
+                                 enrichment={'internetdb': {'ports': [3389], 'fetched_at': (now - timedelta(days=5)).isoformat()}})
+        ip = IpAddress.objects.create(address='93.184.216.34')
+        ip.ports.add(Port.objects.create(number=6379))
+        IpAddress.objects.create(address='93.184.216.34')  # a second scan's row, no ports
+        got = collect.ports_for_ip(a, now)
+        self.assertEqual(got[6379], ['naabu'])
+        self.assertEqual(list(got), [3389, 6379])
+        self.assertTrue(got[3389][0].startswith('internetdb '))
+        b = Asset.objects.create(project=project, kind='ip', value='93.184.216.35', scope_tier='owned_host',
+                                 enrichment={'internetdb': {'ports': [3389], 'fetched_at': (now - timedelta(days=40)).isoformat()}})
+        self.assertIsNone(collect.ports_for_ip(b, now))
+
+
+class RunTest(TestCase):
+    def setUp(self):
+        from startScan.models import IpAddress
+        self.project = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.root = Asset.objects.create(project=self.project, kind='root_domain', value='x.com', scope_tier='owned_root')
+        self.host = Asset.objects.create(project=self.project, kind='hostname', value='a.x.com', scope_tier='owned_host')
+        for i, a in enumerate((self.root, self.host)):
+            ip = IpAddress.objects.create(address=f'93.184.216.{10 + i}')
+            a.ip_addresses.add(ip)
+        self.calls = []
+        self.hsts = False
+
+    def observers(self):
+        def http(host, ident):
+            self.calls.append(host)
+            h = {'strict-transport-security': 'max-age=1'} if self.hsts else {}
+            return {'https': {'status': 200, 'url': f'https://{host}/', 'headers': h, 'cookies': []},
+                    'http': {'status': 301, 'location': f'https://{host}/'}}
+
+        def tls(host):
+            return {'cert': {'not_after': timezone.now() + timezone.timedelta(days=90), 'expired': False,
+                             'hostname_ok': True, 'trusted': True},
+                    'legacy': {'TLSv1': False, 'TLSv1_1': False}}
+        return {'http': http, 'tls': tls,
+                'mail_dns': lambda root: ({'txt': ['v=spf1 -all'], 'dmarc': ['v=DMARC1; p=reject'], 'mx': []},
+                                          {'ds': False, 'caa': True}),
+                'ports': lambda asset, now: None}
+
+    def test_writes_one_row_per_check_and_updates_in_place(self):
+        from limes.checks import run
+        out = run.run_checks(self.project, self.root, observers=self.observers())
+        self.assertEqual(out['failed'], 0)
+        ids = lambda a, p: set(a.risk_checks.filter(check_id__startswith=p).values_list('check_id', flat=True))
+        for a in (self.root, self.host):
+            self.assertEqual(len(ids(a, 'web.')), 8)
+            self.assertEqual(len(ids(a, 'tls.')), 5)
+        self.assertEqual(len(ids(self.root, 'email.')), 5)
+        self.assertEqual(len(ids(self.root, 'dns.')), 2)
+        self.assertEqual(ids(self.host, 'email.') | ids(self.host, 'dns.'), set())
+        row = self.host.risk_checks.get(check_id='web.hsts_missing')
+        self.assertEqual((row.status, row.severity), ('fail', 2))
+        first, checked = row.first_seen, row.last_checked
+        self.hsts = True
+        run.run_checks(self.project, self.root, observers=self.observers())
+        row2 = self.host.risk_checks.get(check_id='web.hsts_missing')
+        self.assertEqual((row2.id, row2.status, row2.first_seen), (row.id, 'pass', first))
+        self.assertGreater(row2.last_checked, checked)
+        self.assertEqual(self.host.risk_checks.filter(check_id='web.hsts_missing').count(), 1)
+
+    def test_refused_host_is_never_contacted(self):
+        from unittest import mock
+        from limes.checks import run
+        real = scope_may_contact()
+
+        def refuse(project, targets):
+            allowed, refused = real(project, targets)
+            return ([t for t in allowed if t != 'a.x.com'], refused + [('a.x.com', 'test')])
+        with mock.patch('limes.scope.may_contact', refuse):
+            run.run_checks(self.project, self.root, observers=self.observers())
+        self.assertNotIn('a.x.com', self.calls)
+        self.assertEqual(self.host.risk_checks.count(), 0)
+        self.assertTrue(self.root.risk_checks.filter(check_id__startswith='web.').exists())
+
+    def test_cap_checks_oldest_first(self):
+        from unittest import mock
+        from limes.checks import run
+        from startScan.models import IpAddress
+        self.root.ip_addresses.clear()  # root refused (unresolved): only the two hosts compete
+        old = Asset.objects.create(project=self.project, kind='hostname', value='b.x.com', scope_tier='owned_host')
+        old.ip_addresses.add(IpAddress.objects.create(address='93.184.216.30'))
+        RiskCheck.objects.create(asset=old, check_id='web.hsts_missing', status='pass', severity=2,
+                                 last_checked=timezone.now() - timezone.timedelta(days=1))
+        with mock.patch.object(run, 'MAX_HOSTS', 1):
+            run.run_checks(self.project, self.root, observers=self.observers())
+        self.assertEqual(self.calls, ['a.x.com'])
+
+    def test_only_owned_assets_under_this_root(self):
+        from limes.checks import run
+        from startScan.models import IpAddress
+        for kind_tier, v in (('candidate', 'c.x.com'), ('co_brand', 'd.x.com'), ('owned_host', 'e.y.com')):
+            a = Asset.objects.create(project=self.project, kind='hostname', value=v, scope_tier=kind_tier)
+            a.ip_addresses.add(IpAddress.objects.create(address='93.184.216.99'))
+        run.run_checks(self.project, self.root, observers=self.observers())
+        self.assertEqual(sorted(self.calls), ['a.x.com', 'x.com'])
+        self.assertEqual(RiskCheck.objects.filter(asset__value__in=['c.x.com', 'd.x.com', 'e.y.com']).count(), 0)
+
+    def test_owned_ips_checked_once_for_first_root_only(self):
+        from limes.checks import run
+        ip = Asset.objects.create(project=self.project, kind='ip', value='93.184.216.50', scope_tier='owned_host')
+        second = Asset.objects.create(project=self.project, kind='root_domain', value='y.com', scope_tier='owned_root')
+        run.run_checks(self.project, second, observers=self.observers())
+        self.assertEqual(ip.risk_checks.count(), 0)
+        run.run_checks(self.project, self.root, observers=self.observers())
+        self.assertEqual(ip.risk_checks.count(), 14)
+        self.assertEqual({r.status for r in ip.risk_checks.all()}, {'error'})
+
+
+def scope_may_contact():
+    from limes import scope
+    return scope.may_contact
