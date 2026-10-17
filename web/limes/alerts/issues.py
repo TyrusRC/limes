@@ -8,6 +8,14 @@ from limes.checks.catalogue import CHECKS
 from startScan.models import Asset, IssueSyncState, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
+IP_BUCKET = '#ips'
+
+
+def _bucket(asset, roots):
+    """The first-sync unit an asset belongs to: its owned root, one shared bucket for IPs, else itself."""
+    if asset.kind == 'ip':
+        return IP_BUCKET
+    return scoring._root_of(asset.value, roots) or asset.value
 
 
 def _event(project, kind, row, asset):
@@ -21,16 +29,20 @@ def _event(project, kind, row, asset):
 
 def sync_issues(project, now=None):
     """Bring TrackedIssue in line with the current issues; return the events recorded.
-    The first sync for a project creates rows silently. A finding is fixed only if its asset is still assessed;
+    The first sync for a project, or for a root (IPs share one bucket), creates rows silently. A finding is fixed only if its asset is still assessed;
     a check only when its own row is fresh and passing (error, not_applicable, stale or missing leave it open)."""
     now = now or timezone.now()
     with transaction.atomic():
         # locks the project's sync row so concurrent syncs serialize; created means first sync, which is silent
-        first = IssueSyncState.objects.select_for_update().get_or_create(
-            project=project, defaults={'first_synced_at': now})[1]
+        state, first = IssueSyncState.objects.select_for_update().get_or_create(
+            project=project, defaults={'first_synced_at': now})
         issues, assessed = scoring.current_issues(project, now=now)
         rows = {(r.asset_id, r.key): r for r in TrackedIssue.objects.filter(project=project)}
         assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed)}
+        roots = list(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
+                     .values_list('value', flat=True))
+        buckets = {a.id: _bucket(a, roots) for a in assets.values()}
+        synced = set(state.roots)
         passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
         out = []
         for asset_id, keys in issues.items():
@@ -42,7 +54,7 @@ def sync_issues(project, now=None):
                 if row is None:
                     row = TrackedIssue.objects.create(project=project, asset=asset, key=key, severity=sev, first_seen=now,
                                                       last_seen=now, source='check' if key in CHECKS else 'finding')
-                    if not first:
+                    if not first and buckets[asset_id] in synced:  # a root's first sync is silent too
                         out.append(_event(project, 'issue_new', row, asset))
                     continue
                 kind = None
@@ -61,4 +73,7 @@ def sync_issues(project, now=None):
                 row.status, row.fixed_at = 'fixed', now
                 row.save()
                 out.append(_event(project, 'issue_fixed', row, assets[asset_id]))
+        if not synced >= set(buckets.values()):
+            state.roots = sorted(synced | set(buckets.values()))
+            state.save(update_fields=['roots'])
         return out

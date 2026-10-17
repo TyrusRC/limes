@@ -211,3 +211,4 @@ class IssueSyncState(models.Model):
     """Exists once a project's issues have been synced, whether or not it had any (first sync is silent)."""
     project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name='issue_sync')
     first_synced_at = models.DateTimeField(default=timezone.now)
+    roots = models.JSONField(default=list)  # root values already synced ('#ips' for IP assets); a new one is silent

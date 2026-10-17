@@ -95,6 +95,20 @@ class SyncTest(TestCase):
         (e,) = self.sync({self.a.id: {'t1': 3}})
         self.assertEqual((e.kind, e.immediate), ('issue_new', True))
 
+    def test_first_sync_of_a_new_root_is_silent(self):
+        Asset.objects.create(project=self.p, kind='root_domain', value='x.com', scope_tier='owned_root')
+        ip = Asset.objects.create(project=self.p, kind='ip', value='192.0.2.1', scope_tier='owned_host')
+        self.sync({self.a.id: {'t1': 1}, ip.id: {'t1': 1}}, assessed={self.a.id, ip.id})
+        Asset.objects.create(project=self.p, kind='root_domain', value='y.com', scope_tier='owned_root')
+        b = Asset.objects.create(project=self.p, kind='hostname', value='b.y.com', scope_tier='owned_host')
+        ip2 = Asset.objects.create(project=self.p, kind='ip', value='192.0.2.2', scope_tier='owned_host')
+        old = {self.a.id: {'t1': 1}, ip.id: {'t1': 1}, b.id: {'h1': 3, 'h2': 3, 'h3': 3}}
+        everyone = {self.a.id, ip.id, b.id, ip2.id}
+        self.assertEqual(self.sync(old, assessed=everyone), [])
+        got = self.sync({**old, b.id: {'h1': 3, 'h2': 3, 'h3': 3, 'h4': 3}, ip2.id: {'t2': 3}}, assessed=everyone)
+        self.assertEqual(sorted((e.kind, e.asset_id, e.detail['key']) for e in got),
+                         sorted([('issue_new', b.id, 'h4'), ('issue_new', ip2.id, 't2')]))
+
     def test_failed_sync_leaves_no_partial_change(self):
         self.sync({self.a.id: {'t1': 1}})
         with mock.patch('limes.alerts.events.record', side_effect=RuntimeError('boom')):
