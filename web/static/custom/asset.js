@@ -45,7 +45,7 @@ function asset_owned(a) {
 }
 
 function asset_when(iso) {
-	return iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
+	return iso ? String(iso).slice(0, 16).replace('T', ' ') + ' UTC' : '';
 }
 
 // "Monitored" cell: interval and next due, "off", or the refusal/limit reason. Everything goes through asset_esc.
@@ -54,6 +54,7 @@ function asset_monitor_html(a) {
 	var m = a.monitor || {};
 	if (a.cadence_tier === 'off') return 'off';
 	if (m.status === 'refused') return '<span class="l-monitor-bad">Refused: ' + asset_esc(m.reason || 'no reason given') + '</span>';
+	if (m.status === 'range_sweep') return '<span class="l-muted">Range sweep</span>';
 	if (m.status === 'enumeration_off') return '<span class="l-muted">' + asset_esc(m.reason) + '</span>';
 	if (!m.interval) return '';
 	var due = m.next_due ? 'next ' + asset_when(m.next_due) : 'not checked yet';
