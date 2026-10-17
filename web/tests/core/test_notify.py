@@ -23,3 +23,15 @@ class NotifyGateTest(TestCase):
             port_scan.scan_id = port_scan.engine_id = port_scan.subscan_id = None
             port_scan.notify(fields={'x': 'y'})
         delay.assert_not_called()
+
+
+class InAppDescriptionTest(TestCase):
+    def test_description_uses_plain_newlines_not_markup(self):
+        # The panel renders this as text, so separators must be newlines, never <br>.
+        from types import SimpleNamespace as NS
+        from limes.tasks import notifications
+        scan = NS(id=7, domain=NS(name='x.test', project=NS(slug='acme')))
+        with mock.patch.object(notifications, 'create_inappnotification') as create:
+            notifications.generate_inapp_notification(scan, None, 'SUCCESS', NS(engine_name='full'), {'Duration': '5s'})
+        self.assertEqual(create.call_args.kwargs['description'],
+                         'Scan was successful for x.test\nEngine: full\nCompleted in 5s')

@@ -24,3 +24,11 @@ def next(some_list, current_index):
         return some_list[int(current_index) + 1] # access the next element
     except:
         return '' # return empty string in case of exception
+
+
+@register.filter(name='http_href')
+def http_href(value):
+    """Href for a link built from scan data: only http(s) URLs pass, anything else
+    (e.g. a stored javascript: URL) becomes '#'. Autoescaping still applies."""
+    url = str(value or '').strip()
+    return url if url.lower().startswith(('http://', 'https://')) else '#'
