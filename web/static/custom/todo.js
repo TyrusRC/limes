@@ -89,7 +89,7 @@ function change_todo_priority(todo_id, imp_type){
 
 
 function list_subdomain_todos(subdomain_id, subdomain_name){
-  $('.modal-title').html(`Todos for subdomain ${subdomain_name}`);
+  $('.modal-title').html(`Todos for subdomain ${htmlEncode(subdomain_name)}`);
   $('#modal_dialog').modal('show');
   $('#modal-content').empty();
    $('#modal-footer').empty();
