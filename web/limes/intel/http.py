@@ -19,9 +19,12 @@ HEADERS = {'User-Agent': 'Limes-ASM'}
 
 
 def get_json(url, *, provider, session=requests, clock=time.time, sleep=time.sleep):
-    """(status, parsed JSON | None); (None, None) after retries. Never raises."""
+    """(status, parsed JSON | None); (None, None) after retries or when the provider is saturated. Never raises."""
     for attempt in range(RETRIES + 1):
         wait = ratelimit.reserve(provider, MIN_INTERVAL.get(provider, 1.0), clock())
+        if wait is None:  # provider saturated: same outcome as exhausted retries, without a long sleep
+            logger.warning(f'{provider}: rate-limit slots exhausted, skipping')
+            return None, None
         if wait > 0:
             sleep(wait)
         try:

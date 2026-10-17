@@ -38,6 +38,10 @@ class ImmediacyTest(SimpleTestCase):
         self.assertFalse(events.is_immediate('asset_missing', None, None))
         self.assertTrue(events.is_immediate('asset_new', 'net.exposed_rdp', None))
         self.assertFalse(events.is_immediate('asset_new', None, None))
+
+
+class RiskyCheckTest(SimpleTestCase):
+    def test_worst_port_then_lowest(self):
         self.assertEqual(network.risky_check([80, 3389, 21]), 'net.exposed_rdp')
         self.assertEqual(network.risky_check([21, 23]), 'net.exposed_telnet')
         self.assertEqual(network.risky_check([445, 3389]), 'net.exposed_smb')  # tie on severity: lowest port
