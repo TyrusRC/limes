@@ -9,6 +9,7 @@ from limes.celery import app
 
 
 def registered_tasks():
+    import limes.owned_ranges  # noqa: F401
     import limes.reaper  # noqa: F401
     import limes.tasks  # noqa: F401
     return {name for name in app.tasks if not name.startswith('celery.')}
@@ -59,3 +60,11 @@ class RedeliveryTest(SimpleTestCase):
         task.write_results()
         with open(path) as f:
             self.assertEqual(f.read(), '25')
+
+
+class RangeBeatTest(SimpleTestCase):
+    def test_beat_and_routing(self):
+        entry = settings.CELERY_BEAT_SCHEDULE['enumerate-ranges']
+        self.assertEqual((entry['task'], entry['schedule'], entry['options']), ('enumerate_ranges', 60.0, {'expires': 55}))
+        self.assertEqual(celery_routing.TASK_PLAN['enumerate_ranges'], (celery_routing.IO, 15 * celery_routing.MIN))
+        self.assertIn('limes.owned_ranges', settings.CELERY_IMPORTS)
