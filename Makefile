@@ -4,10 +4,15 @@ include .env
 # Credits: https://github.com/sherifabdlnaby/elastdocker/
 
 # This for future release of Compose that will use Docker Buildkit, which is much efficient.
-COMPOSE_PREFIX_CMD := COMPOSE_DOCKER_CLI_BUILD=1
+COMPOSE_PREFIX_CMD := COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 
 COMPOSE_ALL_FILES := -f docker-compose.yml
-SERVICES          := db redis pgbouncer migrate web worker-scan worker-io worker-orch beat proxy ollama
+SERVICES          := db redis pgbouncer migrate web worker-scan worker-io worker-orch beat proxy
+# The local LLM is optional and large: `make up LLM=1` adds it.
+ifeq ($(LLM), 1)
+SERVICES += ollama
+COMPOSE_ALL_FILES += --profile llm
+endif
 
 # Check if 'docker compose' command is available, otherwise use 'docker-compose'
 DOCKER_COMPOSE := $(shell if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
