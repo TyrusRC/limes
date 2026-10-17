@@ -292,7 +292,8 @@ function issue_bind_forms() {
 }
 
 function issue_is_ip(v) {
-	return /^[\d.]+(\/\d+)?$/.test(v) || String(v).indexOf(':') !== -1;
+	// IPv4 or IPv6, optionally with a prefix length; a hostname never matches
+	return /^[\d.]+(\/\d+)?$/.test(v) || /^[0-9a-f.]*:[0-9a-f:.]*(\/\d+)?$/i.test(String(v));
 }
 
 function issues_init() {
@@ -314,7 +315,7 @@ function issues_init() {
 		}},
 		columns: [
 			{data: 'id', orderable: false, searchable: false, className: 'l-col-check', render: function(d, t, row) {
-				return '<input type="checkbox" class="form-check-input issue_pick" value="' + Number(d) + '" aria-label="Select: ' + issue_esc(row.title) + '"' +
+				return '<input type="checkbox" class="form-check-input issue_pick" value="' + Number(d) + '" aria-label="Select: ' + issue_esc(row.title) + (row.waiver ? ' (waived)' : '') + '"' +
 					(row.waiver ? ' disabled title="Waived: already out of the headline score"' : '') + '>';
 			}},
 			{data: 'asset', className: 'l-col-wide', render: plain(function(d) {
