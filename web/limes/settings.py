@@ -30,6 +30,10 @@ LIMES_RECORD_ENABLED = env.bool('LIMES_RECORD_ENABLED', default=True)
 LIMES_RAISE_ON_ERROR = env.bool('LIMES_RAISE_ON_ERROR', default=False)
 # On: auto-confirm still needs a registry-verified delegation (limes.intel.delegation); false only flags
 ATTRIBUTION_AUTO_CONFIRM = env.bool('LIMES_ATTRIBUTION_AUTO_CONFIRM', default=True)
+# Change-alert webhook: signed JSON POST (HMAC-SHA256 in X-Limes-Signature); empty url or secret disables it
+ALERT_WEBHOOK_URL = env('LIMES_ALERT_WEBHOOK_URL', default='')
+ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
+ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 
