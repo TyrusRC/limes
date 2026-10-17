@@ -7,7 +7,7 @@ import requests
 
 from ipaddress import IPv4Network
 from django.db import transaction
-from django.db.models import CharField, Count, F, Prefetch, Q, Value
+from django.db.models import CharField, Count, Exists, F, OuterRef, Prefetch, Q, Value
 from django.utils import timezone
 from django.template.defaultfilters import slugify
 from datetime import datetime
@@ -2891,8 +2891,17 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			Asset.objects.filter(project__slug=project)
 			.select_related('parent')
 			.prefetch_related('technologies', 'ip_addresses', 'tags')
-			.annotate(vuln_count=Count('vulnerabilities', distinct=True))
+			.annotate(vuln_count=Count('vulnerabilities', distinct=True),
+					  has_target=Exists(Domain.objects.filter(project=OuterRef('project'), name=OuterRef('value'))))
 		)
+		source = params.get('source')
+		if source:
+			from limes.monitor import FOUND_BY
+			raw = [k for k, label in FOUND_BY.items() if label == source]
+			cond = Q(pk__in=[])  # an unknown label matches nothing
+			for name in raw:
+				cond |= Q(sources__contains=[{'source': name}])
+			qs = qs.filter(cond)
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
 			if value:
@@ -2914,10 +2923,10 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		direction = self.request.GET.get('order[0][dir]', 'asc')
 		# No checkbox column in A2: DataTables column index -> model field.
 		colmap = {'0': 'value', '1': 'kind', '2': 'scope_tier', '3': 'state',
-				  '4': 'http_status', '8': 'last_seen', '10': 'confidence'}
+				  '4': 'http_status', '8': 'last_seen', '10': 'confidence', '12': 'last_resolved_at'}
 		field = colmap.get(col, 'value')
-		if field == 'confidence':
-			f = F('confidence')
+		if field in ('confidence', 'last_resolved_at'):
+			f = F(field)
 			return qs.order_by(f.desc(nulls_last=True) if direction == 'desc' else f.asc(nulls_last=True), 'id')
 		return qs.order_by(('-' if direction == 'desc' else '') + field, 'id')
 

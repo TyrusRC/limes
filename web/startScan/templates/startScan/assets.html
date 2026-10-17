@@ -28,7 +28,7 @@ Assets
       <label for="f_kind">Kind</label>
       <select id="f_kind" class="form-select">
         <option value="">All kinds</option>
-        <option value="root_domain">Root domain</option><option value="hostname">Hostname</option><option value="ip">IP address</option><option value="cidr">CIDR</option>
+        <option value="root_domain">Root domain</option><option value="hostname">Hostname</option><option value="ip">IP address</option><option value="cidr">CIDR</option><option value="asn">ASN</option>
       </select>
     </div>
     <div class="l-field">
@@ -43,6 +43,13 @@ Assets
       <select id="f_state" class="form-select">
         <option value="">All states</option>
         <option value="active">Active</option><option value="missing">Missing</option><option value="stale">Stale</option><option value="retired">Retired</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_source">Found by</label>
+      <select id="f_source" class="form-select">
+        <option value="">Any source</option>
+        <option value="manual">Added by hand</option><option value="scan">Scan</option><option value="CT">Certificate transparency</option><option value="InternetDB">InternetDB</option><option value="CIDR">CIDR sweep</option><option value="ASN">ASN</option><option value="attribution">Attribution</option>
       </select>
     </div>
     <div class="l-field">
@@ -63,7 +70,7 @@ Assets
     <thead>
       <tr>
         <th>Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
-        <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th><span class="visually-hidden">Actions</span></th>
+        <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th>Monitored</th><th>Last checked</th><th>Found by</th><th><span class="visually-hidden">Actions</span></th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -85,14 +92,14 @@ $(document).ready(function() {
   var join = function(d) { return esc((d || []).join(', ')); };
   function assetUrl() {
     var u = '/api/listDatatableAsset/?project=' + encodeURIComponent(project) + '&format=datatables';
-    ['kind', 'scope_tier', 'state', 'tag'].forEach(function(k) {
+    ['kind', 'scope_tier', 'state', 'source', 'tag'].forEach(function(k) {
       var v = document.getElementById('f_' + k).value;
       if (v) u += '&' + k + '=' + encodeURIComponent(v);
     });
     if (document.getElementById('f_show_low').checked) u += '&show_low=1';
     return u;
   }
-  // NOTE: column order must match AssetDatatableViewSet.filter_queryset colmap (0..4, 8, 10).
+  // NOTE: column order must match AssetDatatableViewSet.filter_queryset colmap (0..4, 8, 10, 12).
   var table = $('#asset_results').DataTable({
     serverSide: true,
     processing: true,
@@ -103,7 +110,7 @@ $(document).ready(function() {
     ajax: { url: assetUrl() },
     columns: [
       {data: 'value', className: 'l-col-wide', render: function(d, t, row) {
-        var mono = row.kind === 'ip' || row.kind === 'cidr' ? ' mono' : '';
+        var mono = ['ip', 'cidr', 'asn'].indexOf(row.kind) !== -1 ? ' mono' : '';
         return '<button type="button" class="l-link-btn asset_open' + mono + '" data-id="' + Number(row.id) + '">' + esc(d) + '</button>';
       }},
       {data: 'kind', className: 'text-nowrap', render: esc}, {data: 'scope_tier', className: 'text-nowrap', render: esc}, {data: 'state', render: esc},
@@ -114,6 +121,10 @@ $(document).ready(function() {
       {data: 'last_seen', className: 'text-nowrap', render: function(d) { return esc(String(d || '').slice(0, 16).replace('T', ' ')); }},
       {data: 'tags', orderable: false, render: join},
       {data: 'confidence', render: function(d) { return d === null || d === undefined ? '' : esc(Number(d).toFixed(2)); }},
+      {data: 'monitor', orderable: false, className: 'l-col-monitor', render: function(d, t, row) { return asset_monitor_html(row); }},
+      {data: 'last_resolved_at', className: 'text-nowrap', render: function(d) { return asset_esc(asset_when(d)); }},
+      {data: 'found_by', orderable: false, render: function(d) { return (d || []).map(function(l) { return '<span class="badge l-badge-src">' + asset_esc(l) + '</span>'; }).join(' '); }},
+      {data: 'cadence_tier', visible: false, orderable: false, searchable: false},  // the datatables renderer only sends listed columns
       {data: 'id', orderable: false, searchable: false, className: 'l-col-actions', render: function(d, t, row) { return asset_actions(row); }}
     ],
     order: [[8, 'desc']]
@@ -121,7 +132,7 @@ $(document).ready(function() {
   $('#asset_results_filter input').attr('aria-label', 'Filter this list');
   $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });
-  ['kind', 'scope_tier', 'state', 'tag'].forEach(function(k) {
+  ['kind', 'scope_tier', 'state', 'source', 'tag'].forEach(function(k) {
     document.getElementById('f_' + k).addEventListener('change', function() {
       table.ajax.url(assetUrl()).load();
     });

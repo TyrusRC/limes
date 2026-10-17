@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest import mock
 from django.test import TestCase
 from django.contrib.auth.models import User
@@ -5,6 +6,7 @@ from django.contrib.auth.signals import user_logged_in
 from dashboard.views import on_user_logged_in
 from rest_framework.test import APIClient
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from dashboard.models import Project
 from startScan.models import Asset
 
@@ -98,6 +100,39 @@ class AssetListApiTest(TestCase):
         self.root.save()
         r = self.c.get(f'/api/listDatatableAsset/{self.root.id}/', {'project': 'p1'})
         self.assertEqual(r.json()['enrichment']['ripestat']['asn'], '13335')
+
+    def test_found_by_and_source_filter(self):
+        def host(value, src):
+            return Asset.objects.create(project=self.p, kind='hostname', value=value, scope_tier='owned_host',
+                                        sources=[{'source': src, 'evidence': 'e'}] if src else [])
+        host('ct.x.com', 'crtsh')
+        host('man.x.com', 'manual')
+        host('dns.x.com', 'dns')
+        host('weird.x.com', 'mystery')
+        self.assertEqual(self._vals(project='p1', source='CT'), {'ct.x.com'})
+        self.assertEqual(self._vals(project='p1', source='manual'), {'man.x.com'})
+        self.assertEqual(self._vals(project='p1', source='scan'), {'dns.x.com'})
+        self.assertEqual(self._vals(project='p1', source='nope'), set())
+        rows = {r['value']: r['found_by'] for r in self._get(project='p1').json()}
+        self.assertEqual((rows['ct.x.com'], rows['weird.x.com'], rows['a.x.com']), (['CT'], ['other'], ['target']))
+
+    def test_monitor_state_shape(self):
+        now = timezone.now()
+        Asset.objects.create(project=self.p, kind='hostname', value='live.x.com', scope_tier='owned_host',
+                             last_resolved_at=now - timedelta(hours=2),
+                             enrichment={'monitor': {'active': True, 'status': 'ok'}})
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS64500', scope_tier='owned_host',
+                                   enrichment={'asn': {'status': 'refused', 'reason': 'too many addresses'}})
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='203.0.113.0/24', scope_tier='owned_host', parent=asn)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        live = rows['live.x.com']
+        self.assertEqual(live['interval'], '24h')
+        due = parse_datetime(live['next_due']) - now
+        self.assertAlmostEqual(due.total_seconds() / 3600, 22, delta=0.1)
+        self.assertEqual((rows['AS64500']['status'], rows['AS64500']['reason']), ('refused', 'too many addresses'))
+        self.assertEqual(rows['203.0.113.0/24']['status'], 'enumeration_off')  # LIMES_RANGE_ENUMERATION defaults off
+        self.assertEqual(rows['a.x.com']['interval'], '30d')  # never active: monthly
+        self.assertEqual(rows['b.x.com']['interval'], None)  # a candidate is not monitored
 
     def test_no_n_plus_one(self):
         # session + user + asset(+parent join, vuln count) + 3 prefetches
