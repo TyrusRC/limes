@@ -281,11 +281,11 @@ $(document).ready(function(){
 		$.getJSON(`/api/listOrganizations?&format=json`, function(data) {
 			data = data['organizations']
 			for (organization in data) {
-				name = htmlEncode(data[organization]['name']);
+				name = data[organization]['name'];
 				select = document.getElementById('filterByOrganization');
 				var option = document.createElement('option');
 				option.value = name;
-				option.innerHTML = name;
+				option.textContent = name;
 				select.appendChild(option);
 			}
 		}).fail(function(){
@@ -294,11 +294,11 @@ $(document).ready(function(){
 		var a = document.getElementById('filterByOrganization');
 		a.addEventListener('click', function() {
 			table.search(this.value).draw();
-			document.getElementById('filteringText').innerHTML = `<span class="badge badge-primary m-2">Organization: ${this.value}
+			document.getElementById('filteringText').innerHTML = `<span class="badge badge-primary m-2">Organization: ${htmlEncode(this.value)}
 			<span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
 			</span>`;
 			Snackbar.show({
-				text: `Filtering by organization ${this.value}`,
+				text: `Filtering by organization ${htmlEncode(this.value)}`,
 				pos: 'top-center'
 			});
 		}, false);

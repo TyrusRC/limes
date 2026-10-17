@@ -108,7 +108,7 @@ Admin Settings
                   {% endif %}
                   <a href="#" onclick="update_user_modal({{muser.id}}, '{% if muser|has_role:'sys_admin' %}admin{% elif muser|has_role:'auditor'%}auditor{% elif muser|has_role:'penetration_tester'%}penetration_tester{%endif%}')" class="action-icon" id="change_user_details_btn" title="Update User Detail" data-bs-toggle="tooltip" data-bs-placement="bottom"> <i class="mdi mdi-account-edit"></i></a>
                   {% if user != muser %}
-                    <a href="#" onclick="delete_user({{muser.id}}, '{{muser.username}}')" class="action-icon" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Delete Account"> <i class="mdi mdi-trash-can"></i></a>
+                    <a href="#" onclick="delete_user({{muser.id}}, '{{ muser.username|escapejs }}')" class="action-icon" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Delete Account"> <i class="mdi mdi-trash-can"></i></a>
                   {% endif %}
                 </td>
               </tr>

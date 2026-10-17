@@ -52,7 +52,7 @@ All Projects
                       <span class="badge bg-info text-white">Current Project cannot be deleted.</span>
                       {% else %}
                         {% if request.user|can:'modify_targets' %}
-                          <a href="#" onclick="delete_project({{project.id}}, '{{project.name}}')" class="btn btn-xs btn-danger"><i class="mdi mdi-trash-can-outline"></i></a>
+                          <a href="#" onclick="delete_project({{project.id}}, '{{ project.name|escapejs }}')" class="btn btn-xs btn-danger"><i class="mdi mdi-trash-can-outline"></i></a>
                         {% else %}
                           <button class="btn btn-xs btn-danger" disabled data-toggle="tooltip" title="Not enough permission"><i class="mdi mdi-trash-can-outline"></i></button>
                         {% endif %}
@@ -75,7 +75,7 @@ All Projects
   function delete_project(id, project_name){
     const delAPI = "../../delete/project/" + id;
     swal.queue([{
-      title: 'Are you sure you want to delete '+ project_name +'?',
+      title: 'Are you sure you want to delete '+ htmlEncode(project_name) +'?',
       text: "You won't be able to revert this, all targets and scan results also will be deleted!",
       type: 'warning',
       showCancelButton: true,
