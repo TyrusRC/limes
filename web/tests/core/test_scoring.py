@@ -134,7 +134,7 @@ class BaselineTest(Base):
         a = self.host('a.x.com')
         self.vuln(self.scan(ago=timedelta(days=2)), a, 3)
         self.vuln(self.scan(ago=timedelta(hours=1)), a, 3)
-        self.assertEqual(scoring.asset_breakdown(a)['penalties'], [{'asset': 'a.x.com', 'issue': 't1', 'severity': 'high', 'points': 80, 'kind': 'finding'}])
+        self.assertEqual(scoring.asset_breakdown(a)['penalties'], [{'asset': 'a.x.com', 'issue': 't1', 'severity': 'high', 'points': 80, 'kind': 'finding', 'waived': False}])
 
     def test_only_owned_unretired_assets_count(self):
         s = self.scan()
@@ -168,7 +168,7 @@ class ProjectScoreTest(Base):
         self.vuln(s, a, 3)
         self.vuln(s, b, 2, template='t2')
         out = scoring.project_score(self.p)
-        self.assertEqual((out['version'], out['asset_count'], out['score'], out['grade']), ('limes-score-v2', 3, 799, 'B'))
+        self.assertEqual((out['version'], out['asset_count'], out['score'], out['grade']), ('limes-score-v3', 3, 799, 'B'))
         self.assertEqual([r['asset'] for r in out['top_penalties']], ['a.x.com', 'b.x.com'])
 
     def test_coverage_window(self):
@@ -211,4 +211,4 @@ class SnapshotTest(Base):
         scoring.snapshot_scores()
         snaps = ScoreSnapshot.objects.filter(project=self.p)
         self.assertEqual(snaps.count(), 1)
-        self.assertEqual((snaps[0].score, snaps[0].grade, snaps[0].version), (599, 'C', 'limes-score-v2'))
+        self.assertEqual((snaps[0].score, snaps[0].grade, snaps[0].version), (599, 'C', 'limes-score-v3'))

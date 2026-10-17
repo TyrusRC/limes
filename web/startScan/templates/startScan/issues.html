@@ -1,0 +1,57 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}
+Issues
+{% endblock title %}
+
+{% block main_content %}
+<div class="row justify-content-center">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="header-title mb-3">Issues</h4>
+        <div id="issue_score" class="mb-3"></div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <select id="f_severity" class="form-select form-select-sm">
+              <option value="">All severities</option>
+              <option value="4">critical</option><option value="3">high</option><option value="2">medium</option><option value="1">low</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <select id="f_source" class="form-select form-select-sm">
+              <option value="">All sources</option>
+              <option>check</option><option>finding</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <select id="f_waived" class="form-select form-select-sm">
+              <option value="">Waived and not waived</option>
+              <option value="true">Waived</option><option value="false">Not waived</option>
+            </select>
+          </div>
+        </div>
+        <div id="issue_forecast" class="alert alert-info py-2 mb-3" style="display:none"></div>
+        <div class="table-responsive">
+        <table id="issue_results" class="table table-hover table-striped w-100" data-project="{{ current_project.slug }}" data-can-write="{% if user|can:'modify_targets' %}1{% else %}0{% endif %}">
+          <thead>
+            <tr>
+              <th></th><th>Asset</th><th>Issue</th><th>Severity</th><th>Source</th><th>First seen</th><th>Waiver</th><th>Notes</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'custom/issues.js' %}"></script>
+<script type="text/javascript">
+$(document).ready(function() { issues_init(); });
+</script>
+{% endblock page_level_script %}

@@ -31,6 +31,7 @@ Dashboard
           <div class="d-flex align-items-baseline">
             <span class="display-5 me-2">{{ risk.score }}</span>
             <span class="badge bg-soft-primary text-primary font-16">{{ risk.grade }}</span>
+            {% if risk.raw_score != risk.score %}<small class="text-muted">raw {{ risk.raw_score }} {{ risk.raw_grade }}</small>{% endif %}
           </div>
           <p class="text-muted mb-2">
             {% if risk.coverage is not None %}{% widthratio risk.coverage 1 100 %}%{% else %}n/a{% endif %} of owned roots scanned for vulnerabilities in 30 days

@@ -105,7 +105,7 @@ function set_asset_cadence(id) {
 function asset_penalty_rows(rows, withAsset) {
 	return (rows || []).map(function(r) {
 		return '<tr>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
-			'</td><td>' + asset_esc(r.severity) + '</td><td>-' + asset_esc(r.points) + '</td></tr>';
+			'</td><td>' + asset_esc(r.severity) + '</td><td>' + (r.waived ? '<span class="badge bg-soft-secondary text-secondary">waived</span>' : '-' + asset_esc(r.points)) + '</td></tr>';
 	}).join('');
 }
 
@@ -152,6 +152,7 @@ function load_asset_score() {
 				asset_esc(Math.round(Number(s.check_coverage) * 100) + '% of owned assets checked in 30 days') + '</small></p>';
 			box.innerHTML = '<div class="d-flex align-items-baseline mb-1"><span class="h2 mb-0 me-2">' + asset_esc(s.score) +
 				'</span><span class="badge bg-soft-primary text-primary me-3">' + asset_esc(s.grade) + '</span>' +
+				(s.raw_score !== s.score ? '<small class="text-muted me-3">raw ' + asset_esc(s.raw_score) + ' ' + asset_esc(s.raw_grade) + '</small>' : '') +
 				'<small class="text-muted">' + asset_esc(cov) + ' of owned roots scanned for vulnerabilities in 30 days &middot; ' +
 				asset_esc(s.version) + pending + '</small></div>' + chk + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
 				'<th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' + rows + '</tbody></table>' : '');
