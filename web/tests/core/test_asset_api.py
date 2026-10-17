@@ -445,7 +445,7 @@ class AssetScoreApiTest(TestCase):
         r = self.c.get('/api/asset_score/', {'project': 'p1'})
         self.assertEqual(r.status_code, 200)
         d = r.json()
-        self.assertEqual((d['score'], d['grade'], d['version'], d['coverage'], d['asset_count']), (799, 'B', 'limes-score-v1', 1.0, 2))
+        self.assertEqual((d['score'], d['grade'], d['version'], d['coverage'], d['asset_count']), (799, 'B', 'limes-score-v2', 1.0, 2))
         self.assertEqual(d['top_penalties'][0]['issue'], '<img src=x onerror=alert(1)>')
         self.assertEqual(d['history'], [])
 

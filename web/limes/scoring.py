@@ -1,9 +1,10 @@
-"""Published, explainable risk score (A4, model limes-score-v1).
+"""Published, explainable risk score (A4, model limes-score-v2).
 
 Asset score: 950 minus one penalty per distinct issue (template, else name) at its worst severity,
 floored at 0, then capped by the worst severity present. Project score: nearest-rank P10 of owned
 asset scores (weakest-link). Findings count only from each root's latest scan whose vulnerability
 stage succeeded, so a fix confirmed by a rescan recovers at once and old scans never double-count.
+Failed risk checks (RiskCheck) last checked within CHECK_FRESH add one penalty each, at their own asset only.
 """
 import math
 from datetime import timedelta
@@ -12,16 +13,18 @@ from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from limes.celery import app
+from limes.checks.catalogue import CHECKS
 from limes.definitions import NOTHING_ASSESSED, SUCCESS_TASK
-from startScan.models import Asset, ScanActivity, ScanHistory, ScoreSnapshot, SubScan, Vulnerability
+from startScan.models import Asset, RiskCheck, ScanActivity, ScanHistory, ScoreSnapshot, SubScan, Vulnerability
 from targetApp.models import Domain
 
-VERSION = 'limes-score-v1'
+VERSION = 'limes-score-v2'
 MAX_SCORE = 950
 PENALTY = {4: 200, 3: 80, 2: 25, 1: 5}  # critical, high, medium, low; info (0) and unknown (-1) cost nothing
 CEILING = {4: 599, 3: 799}  # any critical caps at grade C, any high at grade B
 GRADES = [(800, 'A'), (600, 'B'), (400, 'C'), (200, 'D'), (0, 'F')]
 COVERAGE_WINDOW = timedelta(days=30)
+CHECK_FRESH = timedelta(days=30)
 TOP_PENALTIES = 5
 SEVERITY_NAMES = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 
@@ -34,7 +37,7 @@ def grade(score):
 
 def scored_assets(project):
     return Asset.objects.filter(project=project, scope_tier__in=('owned_root', 'owned_host'),
-                                kind__in=('root_domain', 'hostname')).exclude(state='retired')
+                                kind__in=('root_domain', 'hostname', 'ip')).exclude(state='retired')
 
 
 def _owned_domains(project):
@@ -73,15 +76,34 @@ def _root_of(value, roots):
     return next((r for r in sorted(roots, key=len, reverse=True) if value == r or value.endswith('.' + r)), None)
 
 
-def assessed_assets(project, base=None):
-    """{asset_id: value} of scored assets whose owned root has a baseline: only these get a score.
-    An asset never vulnerability-scanned is unassessed, not clean."""
+def _fresh_checks(project, now=None):
+    """RiskCheck rows on scored assets whose last_checked is within CHECK_FRESH."""
+    now = now or timezone.now()
+    return RiskCheck.objects.filter(asset__in=scored_assets(project), last_checked__gte=now - CHECK_FRESH)
+
+
+def assessed_assets(project, base=None, now=None):
+    """{asset_id: value} of scored assets that are assessed: their owned root has a baseline, or a risk
+    check passed/failed on them recently. An asset with neither is unassessed, not clean."""
     base = baselines(project) if base is None else base
-    return {a: v for a, v in scored_assets(project).values_list('id', 'value') if _root_of(v, base)}
+    checked = set(_fresh_checks(project, now).filter(status__in=('pass', 'fail')).values_list('asset_id', flat=True))
+    return {a: v for a, v in scored_assets(project).values_list('id', 'value') if a in checked or _root_of(v, base)}
 
 
-def _penalties(project, asset_ids=None, base=None):
-    """{asset_id: {category: severity}} from the baseline scans, worst severity per category."""
+def _check_penalties(project, now=None, asset_ids=None):
+    """{asset_id: {check_id: severity}} from fresh failed checks. Only 'fail' ever scores."""
+    rows = _fresh_checks(project, now).filter(status='fail')
+    if asset_ids is not None:
+        rows = rows.filter(asset_id__in=asset_ids)
+    out = {}
+    for asset_id, check_id, severity in rows.values_list('asset_id', 'check_id', 'severity'):
+        out.setdefault(asset_id, {})[check_id] = severity
+    return out
+
+
+def _penalties(project, asset_ids=None, base=None, now=None):
+    """{asset_id: {category: severity}} from the baseline scans (worst severity per category) plus fresh
+    failed checks (category = check_id, whose 'group.' prefix never collides with a finding template)."""
     base = baselines(project) if base is None else base
     scans = [s.id for s in base.values()]
     vulns = Vulnerability.objects.filter(scan_history_id__in=scans, open_status=True, severity__gte=1,
@@ -93,6 +115,8 @@ def _penalties(project, asset_ids=None, base=None):
         category = template_id or name
         per_asset = out.setdefault(asset_id, {})
         per_asset[category] = max(severity, per_asset.get(category, severity))
+    for asset_id, checks in _check_penalties(project, now, asset_ids).items():
+        out.setdefault(asset_id, {}).update(checks)
     return out
 
 
@@ -103,7 +127,8 @@ def _score(categories):
 
 
 def _rows(value, categories):
-    return [{'asset': value, 'issue': c, 'severity': SEVERITY_NAMES[s], 'points': PENALTY[s]}
+    return [{'asset': value, 'issue': c, 'severity': SEVERITY_NAMES[s], 'points': PENALTY[s],
+             'kind': 'check' if c in CHECKS else 'finding'}
             for c, s in sorted(categories.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
@@ -142,8 +167,11 @@ def project_score(project):
     rows = [r for a, cats in penalties.items() if a in assets for r in _rows(assets[a], cats)]
     rows.sort(key=lambda r: (-r['points'], r['asset'], r['issue']))
     score = p10(scores)
+    scored = scored_assets(project).count()
+    fresh = _fresh_checks(project).filter(status__in=('pass', 'fail')).values('asset_id').distinct().count()
     return {'version': VERSION, 'score': score, 'grade': grade(score), 'coverage': coverage(project, base=base),
-            'asset_count': len(assets), 'unassessed': scored_assets(project).count() - len(assets),
+            'check_coverage': fresh / scored if scored else None,
+            'asset_count': len(assets), 'unassessed': scored - len(assets),
             'top_penalties': rows[:TOP_PENALTIES]}
 
 

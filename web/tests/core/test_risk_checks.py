@@ -473,3 +473,132 @@ class RunTest(TestCase):
 def scope_may_contact():
     from limes import scope
     return scope.may_contact
+
+
+class StageTest(TestCase):
+    def setUp(self):
+        from unittest import mock
+        from limes.celery_custom_task import LimesTask
+        p = mock.patch.object(LimesTask, 'notify')
+        p.start()
+        self.addCleanup(p.stop)
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+
+    def _ctx(self, tier):
+        import tempfile
+        from scanEngine.models import EngineType
+        from startScan.models import ScanHistory
+        from targetApp.models import Domain
+        domain = Domain.objects.create(name='x.com', project=self.p, insert_date=timezone.now())
+        Asset.objects.create(project=self.p, kind='root_domain', value='x.com', scope_tier=tier)
+        eng = EngineType.objects.create(engine_name='e', yaml_configuration='{}')
+        scan = ScanHistory.objects.create(scan_type=eng, domain=domain, start_scan_date=timezone.now(),
+                                          results_dir=tempfile.mkdtemp())
+        return {'scan_history_id': scan.id, 'results_dir': scan.results_dir, 'track': False}
+
+    def test_workflow_places_risk_checks(self):
+        from limes.tasks import control
+
+        def names(sig):
+            tasks = getattr(sig, 'tasks', None)
+            return [sig.task.rsplit('.', 1)[-1]] if tasks is None else [n for t in tasks for n in names(t)]
+        self.assertEqual(names(control.build_workflow({}, 'asm')),
+                         ['subdomain_discovery', 'passive_intel', 'risk_checks', 'screenshot'])
+        full = names(control.build_workflow({}, 'full'))
+        self.assertEqual(full[full.index('port_scan') + 1], 'risk_checks')
+
+    def test_runs_for_owned_root(self):
+        from unittest import mock
+        from limes.tasks import stages
+        with mock.patch('limes.checks.run.run_checks', return_value={'checked': 2, 'failed': 1}) as m:
+            out = stages.risk_checks(ctx=self._ctx('owned_root'))
+        self.assertEqual(out, {'checked': 2, 'failed': 1})
+        self.assertEqual(m.call_args[0][1].value, 'x.com')
+
+    def test_skipped_unless_owned_root(self):
+        from unittest import mock
+        from limes.tasks import stages
+        with mock.patch('limes.checks.run.run_checks') as m:
+            out = stages.risk_checks(ctx=self._ctx('discovered'))
+        self.assertEqual(out, {})
+        m.assert_not_called()
+
+
+class ScoreV2Test(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from limes.definitions import SUCCESS_TASK
+        from scanEngine.models import EngineType
+        from startScan.models import ScanActivity, ScanHistory
+        from targetApp.models import Domain
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.now = timezone.now()
+        self.root = self.asset('root_domain', 'x.com', 'owned_root')
+        self.host = self.asset('hostname', 'a.x.com')
+        self.timedelta = timedelta
+        domain = Domain.objects.create(project=self.p, name='x.com', insert_date=self.now)
+        eng = EngineType.objects.create(engine_name='e', yaml_configuration='{}')
+        self.scan = ScanHistory.objects.create(domain=domain, scan_type=eng, start_scan_date=self.now)
+        ScanActivity.objects.create(scan_of=self.scan, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK)
+
+    def asset(self, kind, value, tier='owned_host'):
+        return Asset.objects.create(project=self.p, kind=kind, value=value, scope_tier=tier)
+
+    def check(self, asset, check_id, status='fail', sev=2, ago=None):
+        RiskCheck.objects.create(asset=asset, check_id=check_id, status=status, severity=sev,
+                                 last_checked=self.now - (ago or self.timedelta()))
+
+    def breakdown(self, asset):
+        from limes import scoring
+        return scoring.asset_breakdown(asset)
+
+    def test_failed_check_costs_points(self):
+        from startScan.models import ScanHistory
+        ScanHistory.objects.all().delete()  # no vulnerability baseline
+        self.check(self.host, 'web.hsts_missing')
+        b = self.breakdown(self.host)
+        self.assertEqual((b['score'], b['assessed']), (925, True))
+
+    def test_ceiling_applies_to_checks(self):
+        self.check(self.host, 'tls.cert_expired', sev=3)
+        self.assertEqual(self.breakdown(self.host)['score'], 799)
+
+    def test_root_and_ip_results_are_not_inherited(self):
+        ip = self.asset('ip', '203.0.113.9')
+        self.check(self.root, 'email.dmarc_missing')
+        self.check(ip, 'net.exposed_redis', sev=3)
+        self.assertEqual(self.breakdown(self.root)['score'], 925)
+        self.assertEqual(self.breakdown(self.host)['score'], 950)
+        self.assertEqual(self.breakdown(ip)['score'], 799)
+
+    def test_stale_error_and_na_never_score(self):
+        from startScan.models import ScanHistory
+        ScanHistory.objects.all().delete()
+        other = self.asset('hostname', 'b.x.com')
+        self.check(self.host, 'web.hsts_missing', ago=self.timedelta(days=31))
+        self.check(self.root, 'web.csp_missing', status='error', sev=1)
+        self.check(other, 'web.csp_missing', status='not_applicable', sev=1)
+        from limes import scoring
+        self.assertEqual(self.breakdown(self.host)['assessed'], False)
+        self.assertEqual(self.breakdown(self.root)['assessed'], False)
+        self.assertEqual(scoring.project_score(self.p)['score'], None)
+        self.check(self.host, 'web.csp_missing', status='pass', sev=1)
+        b = self.breakdown(self.host)
+        self.assertEqual((b['score'], b['assessed']), (950, True))
+
+    def test_checks_and_findings_add_up(self):
+        from startScan.models import Vulnerability
+        Vulnerability.objects.create(scan_history=self.scan, asset=self.host, name='n', template_id='t1',
+                                     severity=3, http_url='https://h/', open_status=True)
+        self.check(self.host, 'web.csp_missing', sev=1)
+        b = self.breakdown(self.host)
+        self.assertEqual(b['score'], min(950 - 80 - 5, 799))
+        self.assertEqual(sorted(r['kind'] for r in b['penalties']), ['check', 'finding'])
+
+    def test_check_coverage(self):
+        from limes import scoring
+        self.check(self.host, 'web.csp_missing', status='pass', sev=1)
+        self.check(self.root, 'web.csp_missing', status='error', sev=1)
+        self.assertEqual(scoring.project_score(self.p)['check_coverage'], 0.5)
+        self.assertEqual(scoring.VERSION, 'limes-score-v2')

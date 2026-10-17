@@ -126,11 +126,11 @@ def _task_names(sig):
 class WorkflowSplitTest(TestCase):
     def test_asm_chain_is_passive_only(self):
         self.assertEqual(_task_names(control.build_workflow({}, 'asm')),
-                         {'subdomain_discovery', 'passive_intel', 'screenshot'})
+                         {'subdomain_discovery', 'passive_intel', 'risk_checks', 'screenshot'})
 
     def test_full_chain_has_all_stages(self):
         self.assertEqual(_task_names(control.build_workflow({}, 'full')),
-                         {'subdomain_discovery', 'passive_intel', 'port_scan', 'fetch_url',
+                         {'subdomain_discovery', 'passive_intel', 'risk_checks', 'port_scan', 'fetch_url',
                           'vulnerability_scan', 'screenshot', 'code_audit'})
 
 
