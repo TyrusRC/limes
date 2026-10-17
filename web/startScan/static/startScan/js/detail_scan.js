@@ -809,7 +809,7 @@ function get_endpoint_modal(project, scan_id, subdomain_id, subdomain_name){
 	}
 
 	Swal.fire({
-		title: `Fetching Endpoints for ${subdomain_name}...`
+		title: `Fetching Endpoints for ${htmlEncode(subdomain_name)}...`
 	});
 	swal.showLoading();
 
@@ -823,7 +823,7 @@ function get_endpoint_modal(project, scan_id, subdomain_id, subdomain_name){
 	}).then(response => response.json()).then(function(response) {
 		console.log(response);
 		swal.close();
-		$('#xl-modal_title').html(`${subdomain_name}`);
+		$('#xl-modal_title').html(`${htmlEncode(subdomain_name)}`);
 		render_endpoint_in_xlmodal(response['count'], subdomain_name, response['results'])
 	});
 	$('#modal_xl_scroll_dialog').modal('show');
