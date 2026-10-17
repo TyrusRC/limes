@@ -151,6 +151,45 @@ class AddAssetsApiTest(TestCase):
         self._post(self.admin, **body)
         self.assertEqual(Asset.objects.filter(project=self.p, value='c.x.com').count(), 1)
 
+    def test_every_entry_accounted(self):
+        text = '8.8.8.1-8.8.8.6\nexample.co.uk\nAS12345\n12345\n8.8.8.2/31'
+        msg = self._post(self.admin, project='p1', text=text, tier='owned_root').json()['message']
+        self.assertEqual((msg['added'], msg['skipped'], msg['existing']), (6, 1, 1))
+        self.assertEqual(msg['added'] + msg['existing'] + msg['skipped'], 8)
+        self.assertTrue(any('AS12345' in w for w in msg['warnings']))
+        self.assertEqual(Asset.objects.filter(project=self.p, kind='cidr').count(), 4)
+        self.assertTrue(Asset.objects.filter(project=self.p, kind='asn', value='AS12345').exists())
+        self.assertTrue(Asset.objects.filter(project=self.p, kind='root_domain', value='example.co.uk').exists())
+
+    def test_project_range_cap(self):
+        from django.test import override_settings
+        Asset.objects.create(project=self.p, kind='cidr', value='8.8.0.0/21', scope_tier='owned_root')
+        with override_settings(RANGE_ADDRESS_CAP=4096):
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/20'], tier='owned_root').json()['message']
+            self.assertEqual((msg['added'], msg['skipped']), (0, 1))
+            self.assertIn('4096', msg['warnings'][0])
+            self.assertIn('2048', msg['warnings'][0])
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/22', '9.9.4.0/22', '9.9.8.0/22'],
+                             tier='owned_root').json()['message']
+            self.assertEqual((msg['added'], msg['skipped']), (2, 1))  # 2048 in use + two /22 fill the cap; the third is refused
+
+    def test_range_addresses_counts_owned_live_cidrs(self):
+        from limes.owned_ranges import addresses, range_addresses
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS1', scope_tier='owned_root')
+        mk = lambda v, **kw: Asset.objects.create(project=self.p, kind='cidr', value=v, **{'scope_tier': 'owned_root', **kw})
+        mk('8.8.0.0/24'); mk('8.8.1.0/24', parent=asn); mk('8.8.2.0/24', state='retired')
+        mk('8.8.3.0/24', scope_tier='candidate')
+        self.assertEqual(range_addresses(self.p), 512)
+        self.assertEqual(range_addresses(self.p, exclude_parent=asn), 256)
+        self.assertEqual((addresses('8.8.8.8'), addresses('2606:4700::/120')), (1, 256))
+
+    def test_manual_source_recorded(self):
+        self._post(self.admin, project='p1', entries=['d.x.com'], reason='because')
+        a = Asset.objects.get(project=self.p, value='d.x.com')
+        self.assertEqual((a.sources[0]['source'], a.sources[0]['evidence']), ('manual', 'because'))
+        self._post(self.admin, project='p1', entries=['e.x.com'])
+        self.assertEqual(Asset.objects.get(value='e.x.com').sources[0]['evidence'], 'added by adm')
+
     def test_readding_a_dependency_ip_promotes_it(self):
         Asset.objects.create(project=self.p, kind='ip', value='8.8.8.8', scope_tier='dependency')
         msg = self._post(self.admin, project='p1', entries=['8.8.8.8'], tier='owned_host').json()['message']
