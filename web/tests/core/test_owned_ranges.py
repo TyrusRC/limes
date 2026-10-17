@@ -120,11 +120,46 @@ class AsnTest(Base):
     def test_provider_failure_changes_nothing(self):
         a = self.asn()
         r.refresh_asn(a, get=Get(['203.0.114.0/28']), now=self.now)
-        before = Asset.objects.get(pk=a.pk).enrichment
+        before = Asset.objects.get(pk=a.pk).enrichment['asn']
         self.assertEqual(r.refresh_asn(a, get=Get(ripe_status=500), now=self.now), {})
         self.assertEqual(r.refresh_asn(a, get=lambda url, provider: (None, None), now=self.now), {})
-        self.assertEqual(Asset.objects.get(pk=a.pk).enrichment, before)
+        after = Asset.objects.get(pk=a.pk).enrichment['asn']
+        self.assertEqual({k: v for k, v in after.items() if k != 'attempted_at'}, before)
+        self.assertIn('attempted_at', after)
         self.assertEqual(Asset.objects.get(value='203.0.114.0/28').missed_count, 0)
+
+    def test_ipv6_skipped_and_reported(self):
+        a = self.asn()
+        with override_settings(RANGE_ADDRESS_CAP=16):
+            out = r.refresh_asn(a, get=Get(['203.0.114.0/28', '2606:4700::/48']), now=self.now)
+            self.assertEqual((out['status'], out['skipped_v6'], out['skipped_v6_examples']), ('ok', 1, ['2606:4700::/48']))
+            self.assertEqual(list(Asset.objects.filter(kind='cidr').values_list('value', flat=True)), ['203.0.114.0/28'])
+            b = self.asn('AS2')
+            out = r.refresh_asn(b, get=Get(['2606:4700::/48', '2001:4860::/32']), now=self.now)
+            self.assertEqual((out['status'], out['prefixes'], out['skipped_v6']), ('ok', [], 2))
+            self.assertEqual(Asset.objects.filter(parent=b).count(), 0)
+
+    def test_more_specifics_collapse(self):
+        a = self.asn()
+        with override_settings(RANGE_ADDRESS_CAP=1024):
+            out = r.refresh_asn(a, get=Get(['8.8.0.0/22', '8.8.1.0/24', '8.8.2.0/24']), now=self.now)
+        self.assertEqual(out['prefixes'], ['8.8.0.0/22'])
+        self.assertEqual(Asset.objects.filter(parent=a).count(), 1)
+
+    def test_prefixes_already_held_are_not_counted_or_reparented(self):
+        mine = self.cidr('203.0.114.0/28')
+        a = self.asn()
+        with override_settings(RANGE_ADDRESS_CAP=32):
+            out = r.refresh_asn(a, get=Get(['203.0.114.0/28', '198.51.101.0/28']), now=self.now)
+        self.assertEqual(out['status'], 'ok')
+        self.assertEqual(out['prefixes'], ['198.51.101.0/28'])
+        self.assertIsNone(Asset.objects.get(pk=mine.pk).parent)
+
+    def test_failed_lookup_backs_off(self):
+        a = self.asn()
+        r.refresh_asn(a, get=Get(ripe_status=500), now=self.now)
+        self.assertEqual(r.due_ranges(self.now + timedelta(hours=5)), [])
+        self.assertEqual([x.pk for x in r.due_ranges(self.now + timedelta(hours=7))], [a.pk])
 
     def test_rejected_asn_untouched(self):
         a = self.asn()
@@ -262,6 +297,45 @@ class EnumTest(Base):
         self.assertEqual(sync([one]), [])
         self.assertIn(f'cidr:{c.value}', IssueSyncState.objects.get(project=self.p).roots)
         self.assertEqual([e.kind for e in sync([one, two])], ['issue_new'])  # a pass-1 find is announced
+
+    def test_units_are_taken_just_before_their_call(self):
+        c = self.cidr('203.0.114.0/30')
+        order = []
+        real = ratelimit.take_daily
+        g = Get()
+        res = resolver()
+
+        def get(url, *, provider):
+            order.append('idb-call')
+            return g(url, provider=provider)
+
+        def resolve(name, rdtype):
+            order.append('ptr-call')
+            return res(name, rdtype)
+        with mock.patch.object(ratelimit, 'take_daily', side_effect=lambda p, *a, **k: order.append('take-' + p) or True):
+            self.step(c, idb=1, ptr=1, get=get, resolve=resolve)
+        self.assertEqual(order, ['take-internetdb', 'idb-call', 'take-ptr', 'ptr-call'])
+        # PTR unit refused: no PTR call, no PTR unit spent, the address is not a miss
+        order.clear()
+        with mock.patch.object(ratelimit, 'take_daily', side_effect=lambda p, *a, **k: p != 'ptr'):
+            out = self.step(c, idb=4, ptr=4, get=get, resolve=resolve)
+        self.assertEqual((out['internetdb'], out['ptr'], order), (1, 0, ['idb-call']))
+
+    def test_bucket_released_when_enumeration_off(self):
+        c = self.cidr('203.0.114.0/30')
+        Asset.objects.filter(pk=c.pk).update(enrichment={'enum': {'cursor': 2, 'pass': 0, 'status': 'running'}})
+        mk = lambda v: Asset.objects.create(project=self.p, kind='ip', value=v, scope_tier='owned_host', parent=c)
+        one, two = mk('203.0.114.0'), mk('203.0.114.1')
+
+        def sync(found):
+            with mock.patch('limes.scoring.current_issues', return_value=({a.id: {'net.exposed_rdp': 3} for a in found},
+                                                                            {a.id for a in found})):
+                return issues.sync_issues(self.p)
+        sync([])
+        with override_settings(RANGE_ENUMERATION=False):
+            self.assertEqual(sync([one]), [])  # the released bucket's own first sync is still a silent baseline
+            self.assertIn(f'cidr:{c.value}', IssueSyncState.objects.get(project=self.p).roots)
+            self.assertEqual([e.kind for e in sync([one, two])], ['issue_new'])
 
     def test_stopped_or_rejected_untouched(self):
         c = self.cidr('203.0.114.0/30')
