@@ -1,6 +1,9 @@
 """Run the risk checks for one owned root: collect, evaluate, upsert. Honors the scope guard."""
 import logging
+import time
+from datetime import timedelta
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.db.models import Max, Q
 from django.utils import timezone
 
@@ -16,6 +19,9 @@ log = logging.getLogger(__name__)
 # NOTE: ceiling of web/tls hosts contacted per run, oldest-checked first. Upgrade path:
 # a per-project setting or a rolling cursor if inventories outgrow it.
 MAX_HOSTS = 200
+# NOTE: wall-clock budget for the contact phase; the stage runs under a 1-hour Celery limit.
+# Hosts not reached keep their old rows and go first next run (oldest-checked first).
+RUN_BUDGET = timedelta(minutes=45)
 OWNED = ('owned_root', 'owned_host')
 
 
@@ -50,7 +56,10 @@ def _web_hosts(project, root, hosts_cap):
     return picked[:hosts_cap]
 
 
-def run_checks(project, root, now=None, observers=None):
+def run_checks(project, root, now=None, observers=None, clock=time.monotonic):
+    if root.scope_tier != 'owned_root':
+        return {'checked': 0, 'failed': 0}
+    start = clock()
     now = now or timezone.now()
     obs = {**_defaults(), **(observers or {})}
     done = {'checked': 0, 'failed': 0}
@@ -59,11 +68,15 @@ def run_checks(project, root, now=None, observers=None):
         try:
             _write(asset, produce(), now)
             done['checked'] += 1
+        except SoftTimeLimitExceeded:
+            raise
         except Exception:
             log.exception('risk check failed for %s', asset.value)
             done['failed'] += 1
 
     for a in _web_hosts(project, root, MAX_HOSTS):
+        if clock() - start > RUN_BUDGET.total_seconds():
+            break
         holder = a if a.request_headers else root
         def host_checks(a=a, holder=holder):
             ident = ScanIdentity.for_domain(holder)
