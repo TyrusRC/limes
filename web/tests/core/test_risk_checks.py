@@ -149,6 +149,23 @@ class TlsEvalTest(SimpleTestCase):
         self.assertEqual(res['tls.legacy_protocol'].status, 'fail')
         self.assertEqual(res['tls.legacy_protocol'].evidence, {'accepted': ['TLSv1']})
 
+    def test_good_verified_cert_passes(self):
+        res = self.ev(self.cert(), {'TLSv1': False, 'TLSv1_1': False})
+        for c in ('cert_hostname_mismatch', 'cert_untrusted', 'legacy_protocol', 'cert_expired', 'cert_expiring'):
+            self.assertEqual(res['tls.' + c].status, 'pass', c)
+
+    def test_unknown_after_failed_verification_is_error(self):
+        unknown = {'unknown': 'certificate failed verification (code 18)'}
+        res = self.ev(self.cert(not_after=None, expired=None, hostname_ok=None, trusted=False, verify_code=18))
+        self.assertEqual(res['tls.cert_untrusted'].status, 'fail')
+        for c in ('cert_expired', 'cert_expiring', 'cert_hostname_mismatch'):
+            self.assertEqual((res['tls.' + c].status, res['tls.' + c].evidence), ('error', unknown), c)
+        res = self.ev(self.cert(not_after=None, expired=None, hostname_ok=False, trusted=None, verify_code=62))
+        self.assertEqual(res['tls.cert_hostname_mismatch'].status, 'fail')
+        for c in ('cert_expired', 'cert_expiring', 'cert_untrusted'):
+            self.assertEqual(res['tls.' + c].status, 'error', c)
+        self.assertEqual(res['tls.cert_untrusted'].evidence, {'unknown': 'certificate failed verification (code 62)'})
+
     def test_legacy_context_refused_is_error(self):
         res = self.ev(self.cert(), {'TLSv1': None, 'TLSv1_1': False})
         self.assertEqual(res['tls.legacy_protocol'].status, 'error')
@@ -309,10 +326,11 @@ class CollectTest(SimpleTestCase):
             return connect
         c = collect.observe_tls('h', connect=raising(10))['cert']
         self.assertEqual((c['expired'], c['trusted'], c['hostname_ok'], c['not_after']), (True, True, True, None))
-        c = collect.observe_tls('h', connect=raising(18))['cert']
-        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok']), (False, False, True))
+        for code in (18, 19, 20, 21):
+            c = collect.observe_tls('h', connect=raising(code))['cert']
+            self.assertEqual((c['expired'], c['trusted'], c['hostname_ok'], c['verify_code']), (None, False, None, code))
         c = collect.observe_tls('h', connect=raising(62))['cert']
-        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok']), (False, True, False))
+        self.assertEqual((c['expired'], c['trusted'], c['hostname_ok'], c['verify_code']), (None, None, False, 62))
 
         def legacy_with(exc):
             def connect(host, legacy=None):
