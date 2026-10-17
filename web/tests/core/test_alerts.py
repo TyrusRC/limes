@@ -620,3 +620,16 @@ class WiringTest(TestCase):
         self.assertEqual(settings.CELERY_BEAT_SCHEDULE['send-digest']['schedule'], 86400.0)
         self.assertEqual(celery_routing.TASK_PLAN['send_digest'], (celery_routing.ORCHESTRATE, 15 * celery_routing.MIN))
         self.assertIn('limes.alerts.digest', settings.CELERY_IMPORTS)
+
+
+class TelegramTest(TestCase):
+    def test_markdown_specials_are_escaped_and_text_is_a_param(self):
+        from limes import common_func
+        from scanEngine.models import Notification
+        Notification.objects.create(send_to_telegram=True, telegram_bot_token='tok', telegram_bot_chat_id='42')
+        with mock.patch.object(common_func.requests, 'get') as get:
+            common_func.send_telegram_message('New issue net.exposed_redis on *a* `b` [c]&d=1')
+        (call,) = get.call_args_list
+        self.assertEqual(call.kwargs['params']['text'], r'New issue net.exposed\_redis on \*a\* \`b\` \[c]&d=1')
+        self.assertEqual(call.kwargs['params']['parse_mode'], 'Markdown')
+        self.assertNotIn('net.exposed', call.args[0])
