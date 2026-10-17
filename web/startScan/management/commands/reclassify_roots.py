@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+from django.db import IntegrityError, transaction
 
 from limes.intel.domains import registrable
 from limes.scan_target import ensure_scan_target, has_scan_target
@@ -20,11 +21,16 @@ class Command(BaseCommand):
                 self.stdout.write(f'skip {a.value} (project {a.project_id}): discovered under another asset, not added by a user')
             else:
                 a.kind = 'root_domain'
-                a.save(update_fields=['kind'])
+                try:
+                    with transaction.atomic():
+                        a.save(update_fields=['kind'])
+                except IntegrityError:
+                    self.stdout.write(f'skip {a.value} (project {a.project_id}): a root_domain row appeared meanwhile')
+                    continue
                 changed += 1
                 self.stdout.write(f'reclassified {a.value} (project {a.project_id}) as root_domain')
         linked = 0
-        for a in Asset.objects.filter(kind='root_domain', scope_tier='owned_root').order_by('id'):
+        for a in Asset.objects.filter(kind='root_domain', scope_tier='owned_root').exclude(state='retired').order_by('id'):
             if has_scan_target(a):
                 continue
             domain, warning = ensure_scan_target(a)

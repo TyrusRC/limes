@@ -81,7 +81,7 @@ class ScanTargetTest(Base):
         self.assertEqual((d.name, w, Domain.objects.count()), ('x.com', None, 1))
 
 
-class WiredPathsTest(Base):
+class WiredBase(Base):
     def setUp(self):
         super().setUp()
         self.admin = User.objects.create_user('adm', password='p')
@@ -89,7 +89,7 @@ class WiredPathsTest(Base):
         user_logged_in.disconnect(on_user_logged_in)
         self.addCleanup(user_logged_in.connect, on_user_logged_in)
         p = mock.patch('dashboard.stats.invalidate')
-        p.start()
+        self.inv = p.start()
         self.addCleanup(p.stop)
         self.c = APIClient()
         self.c.force_login(self.admin)
@@ -97,6 +97,8 @@ class WiredPathsTest(Base):
     def post(self, url, **body):
         return self.c.post(url, body, format='json').json()
 
+
+class WiredPathsTest(WiredBase):
     def test_add_assets_creates_target_and_warns_on_clash(self):
         Domain.objects.create(name='taken.com', project=self.b, insert_date=timezone.now())
         msg = self.post('/api/add/assets/', project='alpha-corp', entries=['new.com', 'taken.com', 'h.new.com'],
@@ -145,6 +147,67 @@ class WiredPathsTest(Base):
         self.assertFalse(Domain.objects.filter(name='race.net').exists())
 
 
+class FailureIsolationTest(WiredBase):
+    def boom(self):
+        return mock.patch.object(scan_target.Domain.objects, 'create', side_effect=RuntimeError('db detail'))
+
+    def test_ensure_never_raises(self):
+        with self.boom():
+            d, msg = ensure_scan_target(self.root())
+        self.assertIsNone(d)
+        self.assertEqual(msg, scan_target.FAILED_MSG.format(value='x.com'))
+        self.assertNotIn('db detail', msg)
+
+    def test_add_assets_still_adds(self):
+        with self.boom():
+            r = self.post('/api/add/assets/', project='alpha-corp', entries=['new.com'], tier='owned_root')
+        self.assertTrue(r['status'])
+        self.assertEqual(r['message']['added'], 1)
+        self.assertIn(scan_target.FAILED_MSG.format(value='new.com'), r['message']['warnings'])
+        self.assertEqual(Asset.objects.get(value='new.com').scope_tier, 'owned_root')
+        self.inv.assert_called_with(self.a.id)
+
+    def test_confirm_still_confirms(self):
+        cand = Asset.objects.create(project=self.a, kind='root_domain', value='c.com', scope_tier='candidate')
+        with self.boom():
+            r = self.post('/api/action/asset/confirm/', project='alpha-corp', asset_id=cand.id, tier='owned_root')
+        self.assertTrue(r['status'])
+        self.assertIn('could not create a scan target', r['message'])
+        cand.refresh_from_db()
+        self.assertEqual(cand.scope_tier, 'owned_root')
+        self.inv.assert_called_with(self.a.id)
+
+    @override_settings(ATTRIBUTION_AUTO_CONFIRM=True)
+    def test_apply_decisions_loop_continues(self):
+        inventory.record_fact(self.root('example.com'), 'cert', '102', 'crtsh')
+        cands = [Asset.objects.create(project=self.a, kind='root_domain', value=v, scope_tier='candidate')
+                 for v in ('one.net', 'two.net')]
+        for a in cands:
+            inventory.record_fact(a, 'ns', 'ns1.example.com', 'dns')
+            inventory.record_fact(a, 'cert', '102', 'crtsh')
+            inventory.record_fact(a, 'delegation', 'ns1.example.com', 'parent')
+        attribution.score_project(self.a)
+        with self.boom(), mock.patch('limes.alerts.events.safe_record') as rec:
+            self.assertEqual(attribution.apply_decisions(self.a)['auto_confirmed'], 2)
+        self.assertEqual(rec.call_count, 2)
+        self.inv.assert_called_with(self.a.id)
+        self.assertEqual(Asset.objects.filter(value__in=('one.net', 'two.net'), scope_tier='owned_root').count(), 2)
+
+
+class RetiredAndReaddTest(WiredBase):
+    def test_retired_owned_root_gets_no_domain(self):
+        self.assertEqual(ensure_scan_target(self.root(state='retired')), (None, None))
+        self.assertEqual(Domain.objects.count(), 0)
+
+    def test_readding_an_existing_root_links_it_after_a_clash_clears(self):
+        Domain.objects.create(name='x.com', project=self.b, insert_date=timezone.now())
+        self.post('/api/add/assets/', project='alpha-corp', entries=['x.com'], tier='owned_root')
+        Domain.objects.all().delete()  # the other project's target is removed
+        msg = self.post('/api/add/assets/', project='alpha-corp', entries=['x.com'], tier='owned_root')['message']
+        self.assertEqual((msg['added'], msg['existing']), (0, 1))
+        self.assertTrue(Domain.objects.filter(name='x.com', project=self.a).exists())
+
+
 class MigrationTest(Base):
     def test_link_migration_function(self):
         mod = importlib.import_module('startScan.migrations.0025_link_owned_roots')
@@ -154,12 +217,14 @@ class MigrationTest(Base):
         self.root('elsewhere.com')
         Domain.objects.create(name='elsewhere.com', project=self.b, insert_date=timezone.now())
         self.root('cand.com', scope_tier='candidate')
+        self.root('old.com', state='retired')
         mod.link_owned_roots(apps, None)
         mod.link_owned_roots(apps, None)  # safe to run twice
         self.assertEqual(Domain.objects.get(name='plain.com').project_id, self.a.id)
         self.assertEqual(Domain.objects.filter(name='linked.com').count(), 1)
         self.assertEqual(Domain.objects.get(name='elsewhere.com').project_id, self.b.id)
         self.assertFalse(Domain.objects.filter(name='cand.com').exists())
+        self.assertFalse(Domain.objects.filter(name='old.com').exists())
 
 
 class ReclassifyTest(Base):
