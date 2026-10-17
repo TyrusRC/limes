@@ -509,6 +509,11 @@ def remove_ansi_escape_sequences(text):
 # NOTIFICATION UTILS #
 #--------------------#
 
+def escape_telegram_markdown(text):
+	"""Escape Telegram Markdown (v1) specials, so a key like net.exposed_redis is not read as an unclosed italic."""
+	return re.sub(r'([_*`\[])', r'\\\1', text)
+
+
 def send_telegram_message(message):
 	"""Send Telegram message.
 
@@ -525,8 +530,11 @@ def send_telegram_message(message):
 		return
 	telegram_bot_token = notif.telegram_bot_token
 	telegram_bot_chat_id = notif.telegram_bot_chat_id
-	send_url = f'https://api.telegram.org/bot{telegram_bot_token}/sendMessage?chat_id={telegram_bot_chat_id}&parse_mode=Markdown&text={message}'
-	requests.get(send_url)
+	send_url = f'https://api.telegram.org/bot{telegram_bot_token}/sendMessage'
+	params = {'chat_id': telegram_bot_chat_id, 'parse_mode': 'Markdown', 'text': escape_telegram_markdown(message)}
+	resp = requests.get(send_url, params=params, timeout=10)
+	if not resp.ok:  # status only: the URL carries the bot token
+		logger.warning('Telegram answered %s', resp.status_code)
 
 
 def send_slack_message(message):
