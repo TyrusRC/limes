@@ -94,7 +94,7 @@ RUN pip3 install --upgrade setuptools==72.1.0
 RUN pip3 install -r /tmp/requirements.txt --no-cache-dir
 # mantis-sast 0.2.0 is not on PyPI; pinned by commit of the public repo (needs opengrep on PATH, installed above)
 # NOTE: Ubuntu's pip 22.0 mis-builds PEP 621 projects as UNKNOWN-0.0.0, so a newer pip is used for this one install.
-RUN pip3 install --no-cache-dir --upgrade pip && python3 -m pip install --no-cache-dir 'https://github.com/TyrusRC/mantis/archive/a0da662b58e0ea725d3b4a05d421cbac8c183439.tar.gz'
+RUN pip3 install --no-cache-dir --upgrade pip && python3 -m pip install --no-cache-dir 'mantis-sast @ git+https://github.com/TyrusRC/mantis.git@a0da662b58e0ea725d3b4a05d421cbac8c183439'
 
 RUN sed -i 's/purge()/truncate()/g' /usr/local/lib/python3.10/dist-packages/whatportis/cli.py \
     && (yes | whatportis --update)
