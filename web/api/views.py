@@ -832,6 +832,149 @@ class AssetScore(APIView):
 		return Response(data)
 
 
+def _load_issue(request, data):
+	"""The issue must belong to the project named in the request: ids alone must not cross projects."""
+	if not isinstance(data, dict):
+		return None
+	project, issue_id = data.get('project'), data.get('issue_id')
+	if not isinstance(project, str) or isinstance(issue_id, bool):
+		return None
+	try:
+		return TrackedIssue.objects.filter(id=int(issue_id), project__slug=project).select_related('asset').first()
+	except (TypeError, ValueError, OverflowError):
+		return None
+
+
+def _waiver_json(w):
+	return {'kind': w.kind, 'reason': w.reason, 'expires_at': w.expires_at, 'created_by': w.created_by.username if w.created_by else None, 'created_at': w.created_at}
+
+
+class IssueList(APIView):
+	"""Open issues of a project, worst first, with their active waiver and note count."""
+
+	def get(self, request):
+		from limes.checks.catalogue import CHECKS
+		from limes.waivers import active_waiver
+		q = request.query_params
+		issues = TrackedIssue.objects.filter(project__slug=q.get('project') or '', status='open').select_related('asset')
+		if q.get('severity') in ('1', '2', '3', '4'):
+			issues = issues.filter(severity=int(q['severity']))
+		if q.get('source') in ('check', 'finding'):
+			issues = issues.filter(source=q['source'])
+		now = timezone.now()
+		if q.get('waived') in ('true', 'false'):
+			ids = IssueWaiver.objects.filter(revoked_at__isnull=True).filter(
+				Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values('issue_id')
+			issues = issues.filter(id__in=ids) if q['waived'] == 'true' else issues.exclude(id__in=ids)
+		out = []
+		for i in issues.annotate(note_count=Count('notes', distinct=True)).order_by('-severity', 'first_seen', 'id'):
+			w = active_waiver(i, now)
+			check = CHECKS.get(i.key) if i.source == 'check' else None
+			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
+						'source': i.source, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
+						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count})
+		return Response(out)
+
+
+class WaiveIssue(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+
+	def post(self, request):
+		from django.utils.dateparse import parse_datetime
+		from limes import waivers
+		issue = _load_issue(request, request.data)
+		if not issue:
+			return Response({'status': False, 'message': 'issue not found'})
+		data = request.data
+		if not isinstance(data.get('kind'), str) or not isinstance(data.get('reason'), str):
+			return Response({'status': False, 'message': 'kind and reason must be text'})
+		expires_at = data.get('expires_at')
+		if expires_at in (None, ''):
+			expires_at = None
+		else:
+			try:
+				expires_at = parse_datetime(expires_at) if isinstance(expires_at, str) else None
+			except ValueError:
+				expires_at = None
+			if expires_at is None:
+				return Response({'status': False, 'message': 'expires_at must be an ISO-8601 datetime'})
+			if timezone.is_naive(expires_at):
+				expires_at = timezone.make_aware(expires_at)
+		try:
+			w = waivers.create_waiver(issue, data['kind'], data['reason'], request.user, expires_at)
+		except waivers.WaiverError as e:
+			return Response({'status': False, 'message': str(e)})
+		return Response({'status': True, 'message': 'waived', 'waiver': _waiver_json(w)})
+
+
+class RevokeIssueWaiver(APIView):
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+
+	def post(self, request):
+		from limes import waivers
+		issue = _load_issue(request, request.data)
+		if not issue:
+			return Response({'status': False, 'message': 'issue not found'})
+		if not waivers.revoke_waiver(issue, request.user):
+			return Response({'status': False, 'message': 'no active waiver'})
+		return Response({'status': True, 'message': 'revoked'})
+
+
+class IssueNotes(APIView):
+	"""Reading notes is login-only; adding one needs PERM_MODIFY_TARGETS (the auditor role holds PERM_MODIFY_SCAN_RESULTS, so that one cannot gate writes)."""
+
+	def get_permissions(self):
+		if self.request.method == 'POST':
+			self.permission_required = PERM_MODIFY_TARGETS
+			return [HasPermission()]
+		return super().get_permissions()
+
+	def get(self, request):
+		issue = _load_issue(request, request.query_params)
+		if not issue:
+			return Response({'status': False, 'message': 'issue not found'}, status=404)
+		return Response([{'author': n.author.username if n.author else None, 'text': n.text, 'created_at': n.created_at}
+						 for n in issue.notes.select_related('author').order_by('created_at', 'id')])
+
+	def post(self, request):
+		from limes import waivers
+		issue = _load_issue(request, request.data)
+		if not issue:
+			return Response({'status': False, 'message': 'issue not found'})
+		if not isinstance(request.data.get('text'), str):
+			return Response({'status': False, 'message': 'text must be text'})
+		try:
+			waivers.add_note(issue, request.user, request.data['text'])
+		except waivers.WaiverError as e:
+			return Response({'status': False, 'message': str(e)})
+		return Response({'status': True, 'message': 'note added'})
+
+
+class ScoreForecast(APIView):
+	"""Adjusted score if the chosen issues were fixed."""
+
+	def post(self, request):
+		from limes import scoring
+		data = request.data if isinstance(request.data, dict) else {}
+		project = Project.objects.filter(slug=data.get('project') if isinstance(data.get('project'), str) else '').first()
+		if not project:
+			return Response({'status': False, 'message': 'project not found'})
+		raw = data.get('issues')
+		if not isinstance(raw, list):
+			return Response({'status': False, 'message': 'issues must be a list of ids'})
+		ids = []
+		for x in raw:
+			if isinstance(x, bool) or not isinstance(x, (int, str)):
+				return Response({'status': False, 'message': 'issues must be a list of ids'})
+			try:
+				ids.append(int(x))
+			except ValueError:
+				return Response({'status': False, 'message': 'issues must be a list of ids'})
+		return Response(scoring.forecast(project, [i for i in ids if abs(i) < 2 ** 63]))
+
+
 class AddTarget(APIView):
 	permission_classes = [HasPermission]
 	permission_required = PERM_MODIFY_TARGETS
