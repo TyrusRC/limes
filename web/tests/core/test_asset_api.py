@@ -134,6 +134,37 @@ class AssetListApiTest(TestCase):
         self.assertEqual(rows['a.x.com']['interval'], '30d')  # never active: monthly
         self.assertEqual(rows['b.x.com']['interval'], None)  # a candidate is not monitored
 
+    def test_monitor_state_root_scan_cadence_and_off(self):
+        from targetApp.models import Domain
+        now = timezone.now()
+        Domain.objects.create(project=self.p, name='x.com', insert_date=now)  # x.com now has a scan target
+        Asset.objects.filter(pk=self.root.pk).update(cadence_tier='standard', last_resolved_at=now - timedelta(days=1))
+        Asset.objects.create(project=self.p, kind='hostname', value='off.x.com', scope_tier='owned_host',
+                             cadence_tier='off', last_resolved_at=now)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        root = rows['x.com']
+        self.assertEqual(root['interval'], '7d')  # the scan cadence, not the monitor's active/inactive rule
+        self.assertAlmostEqual((parse_datetime(root['next_due']) - now).total_seconds() / 86400, 6, delta=0.01)
+        self.assertEqual((rows['off.x.com']['interval'], rows['off.x.com']['next_due']), (None, None))
+
+    def test_source_manual_includes_added_by_without_sources(self):
+        Asset.objects.create(project=self.p, kind='hostname', value='hand.x.com', scope_tier='owned_host', added_by=self.user)
+        self.assertIn('hand.x.com', self._vals(project='p1', source='manual'))
+        self.assertNotIn('a.x.com', self._vals(project='p1', source='manual'))
+        rows = {r['value']: r['found_by'] for r in self._get(project='p1').json()}
+        self.assertEqual(rows['hand.x.com'], ['manual'])
+
+    def test_swept_ip_is_a_range_sweep(self):
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='203.0.113.0/24', scope_tier='owned_host')
+        Asset.objects.create(project=self.p, kind='ip', value='203.0.113.9', scope_tier='owned_host', parent=cidr)
+        Asset.objects.create(project=self.p, kind='ip', value='203.0.113.10', scope_tier='owned_host',
+                             sources=[{'source': 'cidr', 'evidence': 'x'}])
+        Asset.objects.create(project=self.p, kind='ip', value='198.51.100.1', scope_tier='owned_host')
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        for v in ('203.0.113.9', '203.0.113.10'):
+            self.assertEqual((rows[v]['status'], rows[v]['interval']), ('range_sweep', None))
+        self.assertEqual(rows['198.51.100.1']['interval'], '30d')
+
     def test_no_n_plus_one(self):
         # session + user + asset(+parent join, vuln count) + 3 prefetches
         with self.assertNumQueries(6):

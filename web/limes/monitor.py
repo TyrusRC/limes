@@ -100,6 +100,10 @@ def monitor_state(asset):
         stamp = (info.get('refreshed_at') or info.get('checked_at')) if asset.kind == 'asn' else info.get('last_pass_at')
         last = last or (parse_datetime(stamp) if isinstance(stamp, str) else None)
         interval = CADENCE_INTERVALS.get(asset.cadence_tier)
+    elif asset.kind == 'ip' and (any(isinstance(x, dict) and x.get('source') == 'cidr' for x in asset.sources or [])
+                                 or (asset.parent_id is not None and asset.parent.kind == 'cidr')):
+        out['status'] = 'range_sweep'  # owned_ranges refreshes it, the light monitor does not (see monitored())
+        interval = None
     elif asset.kind in KINDS:
         has_target = getattr(asset, 'has_target', None)
         if asset.kind == 'root_domain' and (has_scan_target(asset) if has_target is None else has_target):

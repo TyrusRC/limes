@@ -2901,6 +2901,8 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			cond = Q(pk__in=[])  # an unknown label matches nothing
 			for name in raw:
 				cond |= Q(sources__contains=[{'source': name}])
+			if source == 'manual':  # the label rule of monitor.found_by: no sources and added by a user
+				cond |= Q(sources=[], added_by__isnull=False)
 			qs = qs.filter(cond)
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
