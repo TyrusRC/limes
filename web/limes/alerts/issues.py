@@ -1,4 +1,6 @@
 """Diff the current issues against TrackedIssue rows and record an event per change."""
+import hashlib
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -9,6 +11,15 @@ from startScan.models import Asset, IssueSyncState, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
 IP_BUCKET = '#ips'
+KEY_MAX = 255  # TrackedIssue.key max_length
+
+
+def issue_key(key):
+    """The stored TrackedIssue key: unchanged when it fits, else a readable prefix plus a hash of the whole key
+    (an untemplated finding's name can run to 2500 characters)."""
+    if len(key) <= KEY_MAX:
+        return key
+    return key[:190] + '#' + hashlib.sha256(key.encode()).hexdigest()[:64]
 
 
 def _bucket(asset, roots):
@@ -37,6 +48,7 @@ def sync_issues(project, now=None):
         state, first = IssueSyncState.objects.select_for_update().get_or_create(
             project=project, defaults={'first_synced_at': now})
         issues, assessed = scoring.current_issues(project, now=now)
+        issues = {a: {issue_key(k): sev for k, sev in keys.items()} for a, keys in issues.items()}
         rows = {(r.asset_id, r.key): r for r in TrackedIssue.objects.filter(project=project)}
         assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed)}
         roots = list(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')

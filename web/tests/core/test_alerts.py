@@ -16,7 +16,8 @@ from limes.definitions import FAILED_TASK, SUCCESS_TASK
 from limes.tasks import attribution, control, inventory
 from scanEngine.models import EngineType
 from targetApp.models import Domain
-from startScan.models import Asset, ChangeEvent, RiskCheck, ScanActivity, ScanHistory, ScanRun, ScoreSnapshot, TrackedIssue
+from startScan.models import (Asset, ChangeEvent, RiskCheck, ScanActivity, ScanHistory, ScanRun, ScoreSnapshot, TrackedIssue,
+                              Vulnerability)
 from tests.core.test_attribution_decisions import DecisionBase
 from tests.core.test_scoring import Base
 
@@ -159,6 +160,25 @@ class CheckFixedTest(Base):
         self.set_tls('pass')
         (e,) = issues.sync_issues(self.p)
         self.assertEqual((e.kind, e.detail['key']), ('issue_fixed', 'tls.cert_expired'))
+
+
+class LongKeyTest(Base):
+    def test_long_finding_name_syncs_stably(self):
+        s = self.scan()
+        h = self.host('a.x.com')
+        issues.sync_issues(self.p)
+        name = 'vulners ' + 'x' * 392
+        Vulnerability.objects.create(scan_history=s, asset=h, name=name, template_id=None, severity=3,
+                                     http_url='https://h/', open_status=True)
+        (e,) = issues.sync_issues(self.p)
+        self.assertEqual(e.kind, 'issue_new')
+        self.assertLessEqual(len(e.title), 300)
+        self.assertEqual(issues.sync_issues(self.p), [])
+        (row,) = TrackedIssue.objects.all()
+        self.assertLessEqual(len(row.key), 255)
+        self.assertEqual(row.key, issues.issue_key(name))
+        self.assertNotEqual(issues.issue_key(name), issues.issue_key(name[:-1] + 'y'))
+        self.assertEqual(issues.issue_key('t1'), 't1')
 
 
 class OtherEventsTest(Base):
