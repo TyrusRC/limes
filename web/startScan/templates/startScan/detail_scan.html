@@ -1385,7 +1385,7 @@ $(document).ready(function() {
 				},
 				"rowGroup": {
 					"startRender": function(rows, group) {
-						return group + ' (' + rows.count() + ' Vulnerabilities)';
+						return htmlEncode(group) + ' (' + rows.count() + ' Vulnerabilities)';
 					}
 				},
 				"order": [[ 6, "desc" ]],
@@ -1417,7 +1417,7 @@ $(document).ready(function() {
 					{
 						"render": function ( data, type, row ) {
 							if (data) {
-								return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${data.toUpperCase()}&nbsp;&nbsp;</span>`;
+								return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 							}
 						},
 						"targets": 1,
@@ -1425,7 +1425,7 @@ $(document).ready(function() {
 					{
 						"render": function ( data, type, row ) {
 							if (data) {
-								return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${data.toUpperCase()}&nbsp;&nbsp;</span>`;
+								return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 							}
 						},
 						"targets": 2,
@@ -1465,30 +1465,30 @@ $(document).ready(function() {
 							if (row['tags']) {
 								tags = '<div>';
 								row['tags'].forEach(tag => {
-									tags += `<span class="badge badge-${badge_color} me-1 mt-1" data-toggle="tooltip" data-placement="top" title="Tags">${tag.name}</span>`;
+									tags += `<span class="badge badge-${badge_color} me-1 mt-1" data-toggle="tooltip" data-placement="top" title="Tags">${htmlEncode(tag.name)}</span>`;
 								});
 								tags += '</div>';
 							}
 							if (row['cvss_metrics']) {
-								cvss_metrics_badge = `<div><span class="badge badge-outline-primary mt-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${row['cvss_metrics']}</span></div>`;
+								cvss_metrics_badge = `<div><span class="badge badge-outline-primary mt-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${htmlEncode(row['cvss_metrics'])}</span></div>`;
 							}
 							if (row['cve_ids'] || row['cwe_ids']) {
 								cve_cwe_badge += '<br>';
 							}
 							if (row['cve_ids']) {
 								row['cve_ids'].forEach(cve => {
-									cve_cwe_badge += `<a href="#" onclick="get_and_render_cve_details('${cve.name.toUpperCase()}')" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${cve.name.toUpperCase()}</a>`;
+									cve_cwe_badge += `<a href="#" onclick="get_and_render_cve_details('${jsEscape(cve.name.toUpperCase())}')" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${htmlEncode(cve.name.toUpperCase())}</a>`;
 								});
 							}
 							if (row['cwe_ids']) {
 								row['cwe_ids'].forEach(cwe => {
-									cve_cwe_badge += `<a href="https://google.com/search?q=${cwe.name.toUpperCase()}" target="_blank" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${cwe.name.toUpperCase()}</a>`;
+									cve_cwe_badge += `<a href="https://google.com/search?q=${encodeURIComponent(cwe.name.toUpperCase())}" target="_blank" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${htmlEncode(cwe.name.toUpperCase())}</a>`;
 								});
 							}
 							// if (cve_cwe_badge != "") {
 							// 	cve_cwe_badge
 							// }
-							return `<b class="text-${color}">` + data + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
+							return `<b class="text-${color}">` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
 						},
 						"targets": 3,
 					},
@@ -1513,7 +1513,7 @@ $(document).ready(function() {
 								else{
 									badge = 'danger';
 								}
-								return `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${data}</span>`;
+								return `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${htmlEncode(data)}</span>`;
 							}
 							return '';
 						},
@@ -1529,7 +1529,7 @@ $(document).ready(function() {
 											target="_blank" 
 											rel="noopener noreferrer" 
 											class="text-danger">
-											${split_into_lines(encodedURLData, 150)}
+											${split_into_lines(data, 150)}
 										</a>`;
 								}
 							}
@@ -1556,7 +1556,7 @@ $(document).ready(function() {
 								<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-more-horizontal"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
 								</a>
 								<div class="dropdown-menu" style="">
-								<a class="dropdown-item" href="javascript:fetch_gpt_vuln_details(${row['id']}, '${row['name']}');">Fetch GPT Vulnerability Details</a>
+								<a class="dropdown-item" href="javascript:fetch_gpt_vuln_details(${row['id']}, '${jsEscape(row['name'])}');">Fetch GPT Vulnerability Details</a>
 								<a class="text-danger dropdown-item" href="javascript:delete_vulnerability(${row['id']});">Delete Vulnerability</a>
 								</div>
 								</div>`;
@@ -1568,6 +1568,11 @@ $(document).ready(function() {
 							return htmlEncode(data);
 						},
 						"targets": 16,
+					},
+					{
+						// escape every column that has no render of its own
+						"render": $.fn.dataTable.render.text(),
+						"targets": "_all",
 					}
 				],
 				"initComplete": function(settings, json) {
@@ -1853,12 +1858,12 @@ $(document).ready(function() {
 
 
 							vuln_count_badge = '';
-							total_vuln_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-critical bs-tooltip badge-link' title="All Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=null, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['info_count'] + row['low_count'] + row['high_count'] + row['medium_count'] + row['critical_count']} <i class="fas fa-bug"></i></span>`;
-							info_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-info bs-tooltip badge-link' title="Informational Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=0, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['info_count']} Info</span>`;
-							low_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-low bs-tooltip badge-link' title=" Low Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=1, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['low_count']} Low</span>`;
-							medium_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-warning bs-tooltip badge-link' title="Medium Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=2, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['medium_count']} Med</span>`;
-							high_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-danger bs-tooltip badge-link' title="High Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=3, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['high_count']} High</span>`;
-							critical_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-critical bs-tooltip badge-link' title="Critical Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=4, subdomain_id=${row['id']}, subdomain_name='${row['name']}')">${row['critical_count']} Critical</span>`;
+							total_vuln_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-critical bs-tooltip badge-link' title="All Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=null, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['info_count'] + row['low_count'] + row['high_count'] + row['medium_count'] + row['critical_count']} <i class="fas fa-bug"></i></span>`;
+							info_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-info bs-tooltip badge-link' title="Informational Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=0, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['info_count']} Info</span>`;
+							low_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-low bs-tooltip badge-link' title=" Low Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=1, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['low_count']} Low</span>`;
+							medium_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-warning bs-tooltip badge-link' title="Medium Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=2, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['medium_count']} Med</span>`;
+							high_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-danger bs-tooltip badge-link' title="High Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=3, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['high_count']} High</span>`;
+							critical_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-critical bs-tooltip badge-link' title="Critical Vulnerabilities" onclick="get_vulnerability_modal(scan_id={{history.id}}, severity=4, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['critical_count']} Critical</span>`;
 							vuln_count_badge = `<div class="">` + (row['info_count'] > 0? info_badge : '') + (row['low_count'] > 0? low_badge : '') + (row['medium_count'] > 0? medium_badge : '') + (row['high_count'] > 0? high_badge : '') + (row['critical_count'] > 0? critical_badge : '') + `</div>`;
 
 							vuln_count_badge = (row['info_count'] + row['low_count'] + row['high_count'] + row['medium_count'] + row['critical_count'] > 0? total_vuln_badge : '') + vuln_count_badge;

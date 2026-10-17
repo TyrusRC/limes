@@ -99,10 +99,11 @@ def generate_inapp_notification(scan, subscan, status, engine, fields):
 		notif_status = 'error'
 		duration_msg = f'Failed in {fields.get("Duration")}'
 
-	description += f"<br>Engine: {engine.engine_name if engine else 'N/A'}"
+	# plain newlines: the panel renders text only, so markup here would show literally
+	description += f"\nEngine: {engine.engine_name if engine else 'N/A'}"
 	slug = scan.domain.project.slug if scan else subscan.history.domain.project.slug
 	if duration_msg:
-		description += f"<br>{duration_msg}"
+		description += f"\n{duration_msg}"
 
 	if status != 'RUNNING':
 		redirect_link = f"/scan/{slug}/detail/{scan.id}" if scan else None
