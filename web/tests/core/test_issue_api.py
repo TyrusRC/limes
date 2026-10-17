@@ -94,6 +94,17 @@ class IssueApiTest(TestCase):
             self.assertTrue(self.post(self.admin, url, issue_id=self.i1.id, **body).json()['status'])
             self.assertIsNone(cache.get(_key(self.p.id)), url)
 
+    def test_expiry_task_drops_the_cached_dashboard_stats(self):
+        from django.core.cache import cache
+        from dashboard.stats import _key
+        from limes.alerts import waiver_tasks
+        from limes import waivers
+        w = waivers.create_waiver(self.i1, 'false_positive', 'fp', self.admin)
+        IssueWaiver.objects.filter(pk=w.pk).update(expires_at=timezone.now() - timedelta(minutes=1))
+        cache.set(_key(self.p.id), {'stale': True})
+        self.assertEqual(waiver_tasks.expire_waivers()['expired'], 1)
+        self.assertIsNone(cache.get(_key(self.p.id)))
+
     def test_naive_expiry_accepted(self):
         exp = (timezone.now() + timedelta(days=5)).replace(tzinfo=None).isoformat()
         r = self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='false_positive',

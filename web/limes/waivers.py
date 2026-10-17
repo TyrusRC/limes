@@ -4,6 +4,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from dashboard.stats import invalidate
 from startScan.models import IssueNote, IssueWaiver, TrackedIssue
 
 KINDS = ('accepted_risk', 'false_positive')
@@ -43,8 +44,10 @@ def create_waiver(issue, kind, reason, user, expires_at=None, now=None):
     with transaction.atomic():
         TrackedIssue.objects.select_for_update().get(pk=issue.pk)
         issue.waivers.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).update(revoked_at=now, revoked_by=user)
-        return IssueWaiver.objects.create(issue=issue, kind=kind, reason=reason, created_by=user,
-                                          created_at=now, expires_at=expires_at)
+        w = IssueWaiver.objects.create(issue=issue, kind=kind, reason=reason, created_by=user,
+                                       created_at=now, expires_at=expires_at)
+    invalidate(issue.project_id)
+    return w
 
 
 def revoke_waiver(issue, user, now=None):
@@ -56,7 +59,8 @@ def revoke_waiver(issue, user, now=None):
             return False
         w.revoked_at, w.revoked_by = now, user
         w.save(update_fields=['revoked_at', 'revoked_by'])
-        return True
+    invalidate(issue.project_id)
+    return True
 
 
 def add_note(issue, user, text):
