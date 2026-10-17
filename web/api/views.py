@@ -7,7 +7,7 @@ import requests
 
 from ipaddress import IPv4Network
 from django.db import transaction
-from django.db.models import CharField, Count, F, Q, Value
+from django.db.models import CharField, Count, F, Prefetch, Q, Value
 from django.utils import timezone
 from django.template.defaultfilters import slugify
 from datetime import datetime
@@ -832,17 +832,23 @@ class AssetScore(APIView):
 		return Response(data)
 
 
+def _parse_id(value):
+	"""A row id from JSON or a query string: an int or a string of digits, within the DB range. Otherwise None."""
+	if isinstance(value, str) and value.isascii() and value.isdigit():
+		value = int(value)
+	if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < 2 ** 63:
+		return None
+	return value
+
+
 def _load_issue(request, data):
 	"""The issue must belong to the project named in the request: ids alone must not cross projects."""
-	if not isinstance(data, dict):
+	if not hasattr(data, 'get'):
 		return None
-	project, issue_id = data.get('project'), data.get('issue_id')
-	if not isinstance(project, str) or isinstance(issue_id, bool):
+	project, issue_id = data.get('project'), _parse_id(data.get('issue_id'))
+	if not isinstance(project, str) or issue_id is None:
 		return None
-	try:
-		return TrackedIssue.objects.filter(id=int(issue_id), project__slug=project).select_related('asset').first()
-	except (TypeError, ValueError, OverflowError):
-		return None
+	return TrackedIssue.objects.filter(id=issue_id, project__slug=project).select_related('asset').first()
 
 
 def _waiver_json(w):
@@ -854,7 +860,6 @@ class IssueList(APIView):
 
 	def get(self, request):
 		from limes.checks.catalogue import CHECKS
-		from limes.waivers import active_waiver
 		q = request.query_params
 		issues = TrackedIssue.objects.filter(project__slug=q.get('project') or '', status='open').select_related('asset')
 		if q.get('severity') in ('1', '2', '3', '4'):
@@ -867,8 +872,12 @@ class IssueList(APIView):
 				Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values('issue_id')
 			issues = issues.filter(id__in=ids) if q['waived'] == 'true' else issues.exclude(id__in=ids)
 		out = []
-		for i in issues.annotate(note_count=Count('notes', distinct=True)).order_by('-severity', 'first_seen', 'id'):
-			w = active_waiver(i, now)
+		live = IssueWaiver.objects.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+		live = live.select_related('created_by').order_by('-created_at', '-id')
+		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
+			Prefetch('waivers', queryset=live, to_attr='live_waivers'))
+		for i in issues.order_by('-severity', 'first_seen', 'id'):
+			w = i.live_waivers[0] if i.live_waivers else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
 						'source': i.source, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
@@ -964,15 +973,10 @@ class ScoreForecast(APIView):
 		raw = data.get('issues')
 		if not isinstance(raw, list):
 			return Response({'status': False, 'message': 'issues must be a list of ids'})
-		ids = []
-		for x in raw:
-			if isinstance(x, bool) or not isinstance(x, (int, str)):
-				return Response({'status': False, 'message': 'issues must be a list of ids'})
-			try:
-				ids.append(int(x))
-			except ValueError:
-				return Response({'status': False, 'message': 'issues must be a list of ids'})
-		return Response(scoring.forecast(project, [i for i in ids if abs(i) < 2 ** 63]))
+		ids = [_parse_id(x) for x in raw]
+		if None in ids:
+			return Response({'status': False, 'message': 'issues must be a list of ids'})
+		return Response({'status': True, **scoring.forecast(project, ids)})
 
 
 class AddTarget(APIView):

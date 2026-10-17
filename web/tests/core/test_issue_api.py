@@ -107,7 +107,8 @@ class IssueApiTest(TestCase):
         r = self.post(self.auditor, '/api/score_forecast/', issues=[self.i2.id, self.other.id])
         d = r.json()
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(d), {'score', 'grade', 'delta'})
+        self.assertEqual(set(d), {'status', 'score', 'grade', 'delta'})
+        self.assertIs(d['status'], True)
         for bad in ('x', [None], [{'a': 1}], ['abc'], [True], None, 5):
             r = self.post(self.admin, '/api/score_forecast/', issues=bad)
             self.assertEqual(r.status_code, 200, bad)
@@ -122,11 +123,43 @@ class IssueApiTest(TestCase):
         self.assertEqual(self.post(self.auditor, n, issue_id=self.i1.id, text='t').status_code, 403)
         body['issue_id'] = self.other.id
         self.assertFalse(self.post(self.admin, w, **body).json()['status'])
+        foreign = IssueWaiver.objects.create(issue=self.other, kind='false_positive', reason='x')
         self.assertFalse(self.post(self.admin, rv, issue_id=self.other.id).json()['status'])
+        foreign.refresh_from_db()
+        self.assertIsNone(foreign.revoked_at)
         self.assertFalse(self.post(self.admin, n, issue_id=self.other.id, text='t').json()['status'])
         self.assertFalse(self.post(self.admin, n, issue_id='zz', text='t').json()['status'])
-        self.assertFalse(IssueWaiver.objects.exists() or IssueNote.objects.exists())
+        self.assertEqual(IssueWaiver.objects.count(), 1)  # only the foreign fixture
+        self.assertFalse(IssueNote.objects.exists())
         got = self.as_user(self.admin).get(n, {'project': 'p1', 'issue_id': self.other.id})
-        self.assertEqual(got.json() if got.status_code == 200 else [], [])
+        self.assertEqual(got.status_code, 404)
         self.assertEqual(self.as_user(self.admin).get('/api/issues/', {'project': 'nope'}).json(), [])
         self.assertNotEqual(APIClient().get('/api/issues/', {'project': 'p1'}).status_code, 200)
+
+    def test_bad_ids_are_messages(self):
+        for bad in (1.9, '9' * 30, 10 ** 30, '1.5', '-1', True, None, [1]):
+            for url, extra in (('/api/action/issue/waive/', dict(kind='false_positive', reason='r')),
+                               ('/api/action/issue/revoke/', {}), ('/api/issue/notes/', dict(text='t'))):
+                r = self.post(self.admin, url, issue_id=bad, **extra)
+                self.assertEqual(r.status_code, 200, (url, bad))
+                self.assertFalse(r.json()['status'], (url, bad))
+            g = self.as_user(self.admin).get('/api/issue/notes/', {'project': 'p1', 'issue_id': str(bad)})
+            self.assertEqual(g.status_code, 404, bad)
+        for bad in ([1.9], ['9' * 30], [10 ** 30], ['-1']):
+            r = self.post(self.admin, '/api/score_forecast/', issues=bad)
+            self.assertFalse(r.json()['status'], bad)
+
+    def test_list_query_count_is_constant(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        def count():
+            with CaptureQueriesContext(connection) as c:
+                self.list()
+            return len(c)
+        self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='false_positive', reason='r')
+        few = count()
+        for n in range(5):
+            i = TrackedIssue.objects.create(project=self.p, asset=self.a, key=f'f{n}', source='finding', severity=3)
+            self.post(self.admin, '/api/action/issue/waive/', issue_id=i.id, kind='false_positive', reason='r')
+            IssueNote.objects.create(issue=i, text='n')
+        self.assertEqual(count(), few)
