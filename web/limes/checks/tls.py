@@ -22,18 +22,28 @@ def evaluate(obs, now):
     if cert is None or cert == 'error':
         st = 'error' if cert == 'error' else 'not_applicable'
         return [Result(i, st, {}) for i in IDS]
+    # None = verification stopped before this attribute was checked: unknown, never a pass
+    def unknown(cid):
+        return Result(cid, 'error', {'unknown': f"certificate failed verification (code {cert.get('verify_code')})"})
+
+    def flag(cid, ok):
+        return unknown(cid) if ok is None else Result(cid, 'pass' if ok else 'fail', {})
     na = cert.get('not_after')
-    expired = bool(cert.get('expired')) or (na is not None and na < now)
-    if na is None:
-        expiring = 'not_applicable'
+    if cert.get('expired') is None:
+        expiry = {c: unknown(c) for c in ('tls.cert_expired', 'tls.cert_expiring')}
     else:
-        expiring = 'fail' if not expired and na - now <= EXPIRING_WINDOW else 'pass'
-    ev = {'not_after': na.isoformat()} if na else {}
+        expired = bool(cert['expired']) or (na is not None and na < now)
+        if na is None:
+            expiring = 'not_applicable'
+        else:
+            expiring = 'fail' if not expired and na - now <= EXPIRING_WINDOW else 'pass'
+        ev = {'not_after': na.isoformat()} if na else {}
+        expiry = {'tls.cert_expired': Result('tls.cert_expired', 'fail' if expired else 'pass', ev if expired else {}),
+                  'tls.cert_expiring': Result('tls.cert_expiring', expiring, ev if expiring == 'fail' else {})}
     out = {
-        'tls.cert_expired': Result('tls.cert_expired', 'fail' if expired else 'pass', ev if expired else {}),
-        'tls.cert_expiring': Result('tls.cert_expiring', expiring, ev if expiring == 'fail' else {}),
-        'tls.cert_hostname_mismatch': Result('tls.cert_hostname_mismatch', 'pass' if cert.get('hostname_ok') else 'fail', {}),
-        'tls.cert_untrusted': Result('tls.cert_untrusted', 'pass' if cert.get('trusted') else 'fail', {}),
+        **expiry,
+        'tls.cert_hostname_mismatch': flag('tls.cert_hostname_mismatch', cert.get('hostname_ok')),
+        'tls.cert_untrusted': flag('tls.cert_untrusted', cert.get('trusted')),
         'tls.legacy_protocol': _legacy(obs.get('legacy') or {}),
     }
     return [out[i] for i in IDS]

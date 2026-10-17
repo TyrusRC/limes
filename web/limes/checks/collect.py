@@ -129,10 +129,14 @@ def _cert(host, connect):
     except ssl.SSLCertVerificationError as e:
         code = e.verify_code
         if code == 10:
-            return {**base, 'expired': True}  # trust is unknown, not "untrusted"
+            # validity time is checked last: chain and hostname already verified
+            return {**base, 'expired': True}
+        # OpenSSL stops at the first error. None = never checked (the evaluator reports error):
+        # expiry is checked after both of these, the hostname after chain building.
+        unknown = {**base, 'verify_code': code, 'expired': None}
         if code == 62:
-            return {**base, 'hostname_ok': False}
-        return {**base, 'trusted': False}  # 18/19/20/21 and anything else
+            return {**unknown, 'hostname_ok': False, 'trusted': None}  # signatures not yet verified
+        return {**unknown, 'trusted': False, 'hostname_ok': None}  # 18/19/20/21 and anything else
     except ConnectionRefusedError:
         return None
     except (OSError, ssl.SSLError):  # includes timeouts
