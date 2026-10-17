@@ -32,6 +32,11 @@ urlpatterns = [
     path('action/asset/rescan/', RescanAsset.as_view(), name='rescan_asset'),
     path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
     path('asset_score/', AssetScore.as_view(), name='asset_score'),
+    path('issues/', IssueList.as_view(), name='issues'),
+    path('action/issue/waive/', WaiveIssue.as_view(), name='waive_issue'),
+    path('action/issue/revoke/', RevokeIssueWaiver.as_view(), name='revoke_issue_waiver'),
+    path('issue/notes/', IssueNotes.as_view(), name='issue_notes'),
+    path('score_forecast/', ScoreForecast.as_view(), name='score_forecast'),
     path(
         'add/target/',
         AddTarget.as_view(),
