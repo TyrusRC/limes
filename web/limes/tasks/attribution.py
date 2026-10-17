@@ -16,6 +16,7 @@ from django.utils import timezone
 from limes import commands
 from limes.intel import delegation, domains
 from limes.pipeline import dnsx
+from limes.scan_target import ensure_scan_target
 from limes.tasks import inventory
 from startScan.models import Asset, AssetFact
 
@@ -267,7 +268,12 @@ def apply_decisions(project):
         done = Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
             scope_tier=tier, decision_reason=reason, sources=a.sources, added_by=None)
         auto += done
-        if done:  # 0 means a human decided first
+        if done and a.kind == 'root_domain':  # 0 means a human decided first
+            a.scope_tier = tier
+            warning = ensure_scan_target(a)[1]
+            if warning:
+                logger.warning('auto-confirmed root has no scan target: %s', warning)
+        if done:
             events.safe_record(project, 'asset_auto_confirmed', f'{a.value} auto-confirmed as an {tier.replace("_", " ")}',
                           asset=a, detail={'confidence': round(a.confidence, 2), 'ns': control['value']})
     if auto:
