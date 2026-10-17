@@ -25,6 +25,7 @@ from requests.adapters import HTTPAdapter
 from requests.cookies import RequestsCookieJar
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import ConnectTimeoutError
 
 from limes import scope
 from limes.checks import collect
@@ -55,12 +56,12 @@ class Deadline:
 
 
 class _DeadlineSocket:
-    """Wraps the socket of a pinned HTTP connection: every send and recv is armed with the deadline's timeout."""
-    _io_refs = 0
-    _closed = False
-
+    """Wraps the socket of a pinned HTTP connection: every send and recv is armed with the deadline's timeout.
+    Keeps socket.socket's file reference counting: the real socket closes only once the wrapper and every file
+    made from it are closed (http.client closes the connection before the body of a Connection: close reply)."""
     def __init__(self, sock, deadline):
         self._sock, self._deadline = sock, deadline
+        self._io_refs, self._closed = 0, False
 
     def _arm(self):
         self._sock.settimeout(self._deadline.timeout())
@@ -89,7 +90,15 @@ class _DeadlineSocket:
         return socket.socket.makefile(self, mode, buffering, **kw)
 
     def _decref_socketios(self):
-        pass
+        if self._io_refs > 0:
+            self._io_refs -= 1
+        if self._closed:
+            self.close()
+
+    def close(self):
+        self._closed = True
+        if self._io_refs <= 0:
+            self._sock.close()
 
     def __getattr__(self, name):
         return getattr(self._sock, name)
@@ -99,7 +108,10 @@ def _pools(deadline):
     """urllib3 pool classes whose connections dial with the deadline's timeout and wrap their socket in it.
     CPython bounds the whole TLS handshake by the socket timeout set at connect, so the handshake is covered too."""
     def connect(conn, parent):
-        conn.timeout = deadline.timeout()
+        try:
+            conn.timeout = deadline.timeout()
+        except TimeoutError:  # a timeout, never a refused connection ('nothing listening')
+            raise ConnectTimeoutError(conn, 'host check deadline reached')
         parent.connect(conn)
         conn.sock = _DeadlineSocket(conn.sock, deadline)
 
@@ -211,6 +223,8 @@ def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
         scheme = parts.scheme.lower()
         if scheme not in DEFAULT_PORTS or '@' in parts.netloc or scope.target_host(url) != host:
             raise bad
+        if deadline.expired():  # out of time: unknown ('error'), never a refused connection ('nothing listening')
+            raise requests.exceptions.Timeout('host check deadline reached')
         if not kw.get('verify', True):  # False, 0, '' or None would all turn verification off
             raise ValueError('TLS verification cannot be turned off')
         if port == DEFAULT_PORTS[scheme]:
