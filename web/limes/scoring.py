@@ -182,13 +182,35 @@ def project_score(project):
             'top_penalties': rows[:TOP_PENALTIES]}
 
 
+GRADE_ORDER = 'ABCDF'
+SCORE_DROP_POINTS = 50
+
+
+def score_event(prev, today):
+    """(kind, title) for a day-over-day score change, or None. A fall is a worse grade or >= 50 points."""
+    if prev is None or prev.score is None or today.score is None or prev.score == today.score:
+        return None
+    worse = GRADE_ORDER.find(today.grade) > GRADE_ORDER.find(prev.grade) >= 0
+    dropped = worse or prev.score - today.score >= SCORE_DROP_POINTS
+    verb = 'fell' if today.score < prev.score else 'rose'
+    return ('score_dropped' if dropped else 'score_changed',
+            f'Score {verb} from {prev.score} ({prev.grade}) to {today.score} ({today.grade})')
+
+
 @app.task(name='snapshot_scores', bind=False)
 def snapshot_scores():
     from dashboard.models import Project
+    from limes.alerts import events
     today = timezone.localdate()
     for project in Project.objects.all():
         s = project_score(project)
-        ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
+        snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
             'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'coverage': s['coverage'],
             'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
+        if created:  # a same-day rerun updates the row and must not alert twice
+            prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()
+            change = score_event(prev, snap)
+            if change:
+                events.record(project, change[0], change[1],
+                              detail={'from': prev.score, 'to': snap.score, 'grade': snap.grade})
     return {'projects': Project.objects.count()}

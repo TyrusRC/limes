@@ -244,6 +244,7 @@ def apply_decisions(project):
     With settings.ATTRIBUTION_AUTO_CONFIRM off no tier changes: qualifying candidates are only
     flagged 'would_auto_confirm' for a human to review."""
     from dashboard.stats import invalidate
+    from limes.alerts import events
     auto = would = 0
     fresh_after = timezone.now() - NS_FRESH
     # hostname candidates never get NS facts today, so they never qualify
@@ -263,8 +264,12 @@ def apply_decisions(project):
         a.sources = Asset.objects.filter(pk=a.pk).values_list('sources', flat=True).first() or []
         inventory._append_source(a, 'attribution', reason)
         tier = 'owned_root' if a.kind == 'root_domain' else 'owned_host'
-        auto += Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
+        done = Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(
             scope_tier=tier, decision_reason=reason, sources=a.sources, added_by=None)
+        auto += done
+        if done:  # 0 means a human decided first
+            events.record(project, 'asset_auto_confirmed', f'{a.value} auto-confirmed as an {tier.replace("_", " ")}',
+                          asset=a, detail={'confidence': round(a.confidence, 2), 'ns': control['value']})
     if auto:
         invalidate(project.id)
     return {'auto_confirmed': auto, 'would_auto_confirm': would}
