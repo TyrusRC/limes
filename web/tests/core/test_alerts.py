@@ -326,6 +326,13 @@ class DeliverTest(TestCase):
             notified_at=timezone.now() - timedelta(minutes=61))
         self.assertEqual(self.run_(), 2)
 
+    def test_over_cap_events_older_than_window_go_to_digest(self):
+        for _ in range(12):
+            self.ev()
+        self.assertEqual(self.run_(), 10)
+        self.assertEqual(self.run_(now=timezone.now() + timedelta(hours=2)), 0)
+        self.assertEqual(len(digest._pending(self.p)), 2)
+
     @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s3cr3t')
     def test_webhook_signature_verifies(self):
         self.ev()

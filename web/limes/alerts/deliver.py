@@ -16,6 +16,10 @@ from startScan.models import ChangeEvent
 
 logger = logging.getLogger(__name__)
 ALERT_HOURLY_CAP = 10
+# NOTE: immediate means now: an event the cap held back past this window is left to the daily digest instead of
+# trickling out hours late. Ceiling: a burst over the cap is reported once a day; upgrade path is a per-project
+# "N more changes" summary alert.
+ALERT_WINDOW = timedelta(hours=1)
 WEBHOOK_TIMEOUT = 5
 
 
@@ -61,7 +65,8 @@ def _webhook(event, post):
 
 
 def deliver_immediate(project, now=None, chat=None, post=None):
-    """Send undelivered, undigested immediate events (oldest first) up to the hourly cap; returns how many."""
+    """Send undelivered, undigested immediate events from the last ALERT_WINDOW (oldest first) up to the hourly cap;
+    returns how many."""
     if chat is None:
         from limes.tasks.notifications import send_notif as chat
     post = post or requests.post
@@ -71,7 +76,7 @@ def deliver_immediate(project, now=None, chat=None, post=None):
     if room <= 0:
         return 0
     pending = ChangeEvent.objects.filter(project=project, immediate=True, notified_at__isnull=True,
-                                         digested_at__isnull=True).select_related('project', 'asset') \
+                                         digested_at__isnull=True, created_at__gte=now - ALERT_WINDOW).select_related('project', 'asset') \
         .order_by('created_at', 'id')[:room]
     sent = 0
     # NOTE: after the first webhook failure the rest of this run skips it, bounding a dead endpoint to one
