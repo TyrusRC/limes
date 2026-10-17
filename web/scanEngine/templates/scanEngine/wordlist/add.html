@@ -78,7 +78,7 @@ shortName.addEventListener("input", function() {
 // custom file input
 $(".custom-file-input").on("change", function() {
   var fileName = $(this).val().split("\\").pop();
-  $(this).siblings(".custom-file-label").addClass("selected").html(fileName);
+  $(this).siblings(".custom-file-label").addClass("selected").text(fileName);
 });
 </script>
 {% endblock page_level_script %}

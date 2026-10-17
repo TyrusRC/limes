@@ -100,7 +100,7 @@ function populateTodofunction(project=null){
 
     '<div class="todo-content">'+
     '<h5 class="todo-heading">'+htmlEncode($_task)+'</h5>'+
-    '<p class="target">'+$_targetText+'</h5>'+
+    '<p class="target">'+htmlEncode($_targetText)+'</h5>'+
     "<p class='todo-text' >"+htmlEncode($_taskDescriptionText)+"</p>"+
     '</div>'+
 
@@ -370,7 +370,7 @@ function todoItem() {
     var $todoDescription = $(this).find('.todo-text').text();
 
     $('.task-heading').text($_taskTitle);
-    $('.task-text').html(`<span class="text-success">${$_taskTarget}</span><br>` + htmlEncode($todoDescription));
+    $('.task-text').html(`<span class="text-success">${htmlEncode($_taskTarget)}</span><br>` + htmlEncode($todoDescription));
 
     $('#todoShowListItem').modal('show');
   });
@@ -383,7 +383,7 @@ function populateScanHistory(project) {
       history_object = data[history];
       var option = document.createElement('option');
       option.value = history_object['id'];
-      option.innerHTML = history_object['domain']['name'] + ' - Scanned ' + moment.utc(history_object['start_scan_date']).fromNow();
+      option.textContent = history_object['domain']['name'] + ' - Scanned ' + moment.utc(history_object['start_scan_date']).fromNow();
       scan_history_select.appendChild(option);
     }
   });

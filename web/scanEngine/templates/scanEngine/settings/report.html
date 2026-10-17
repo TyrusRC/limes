@@ -156,7 +156,7 @@ const primary_pickr = Pickr.create({
     'rgb(255, 138, 101)',
   ],
 
-  default: '{{primary_color}}',
+  default: '{{ primary_color|escapejs }}',
 
   components: {
     // Main components
@@ -189,7 +189,7 @@ const secondary_pickr = Pickr.create({
     'rgb(44, 62, 80)',
   ],
 
-  default: '{{secondary_color}}',
+  default: '{{ secondary_color|escapejs }}',
 
   components: {
     // Main components

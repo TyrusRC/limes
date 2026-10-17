@@ -840,7 +840,7 @@ function stop_scan(scan_id=null, subscan_id=null, reload_scan_bar=true, reload_l
 					}, 1500);
 				} else {
 					Snackbar.show({
-						text: 'Oops! Could not abort the scan. ' + data.message,
+						text: 'Oops! Could not abort the scan. ' + htmlEncode(data.message),
 						pos: 'top-right',
 						duration: 1500
 					});
@@ -1307,16 +1307,16 @@ function fetch_whois(domain_name, force_reload_whois=false) {
 	fetch(url, {}).then(res => res.json())
 		.then(function(response) {
 			$("#whois_fetching_alert").hide();
-			document.getElementById('domain_age').innerHTML = response['domain']['domain_age'] + ' ' + response['domain']['date_created'];
-			document.getElementById('ip_address').innerHTML = response['domain']['ip_address'];
-			document.getElementById('ip_geolocation').innerHTML = response['domain']['geolocation'];
+			document.getElementById('domain_age').textContent = response['domain']['domain_age'] + ' ' + response['domain']['date_created'];
+			document.getElementById('ip_address').textContent = response['domain']['ip_address'];
+			document.getElementById('ip_geolocation').textContent = response['domain']['geolocation'];
 
-			document.getElementById('registrant_name').innerHTML = response['registrant']['name'];
+			document.getElementById('registrant_name').textContent = response['registrant']['name'];
 			console.log(response['registrant']['organization'])
-			document.getElementById('registrant_organization').innerHTML = response['registrant']['organization'] ? response['registrant']['organization'] : ' ';
-			document.getElementById('registrant_address').innerHTML = response['registrant']['address'] + ' ' + response['registrant']['city'] + ' ' + response['registrant']['state'] + ' ' + response['registrant']['country'];
-			document.getElementById('registrant_phone_numbers').innerHTML = response['registrant']['tel'];
-			document.getElementById('registrant_fax').innerHTML = response['registrant']['fax'];
+			document.getElementById('registrant_organization').textContent = response['registrant']['organization'] ? response['registrant']['organization'] : ' ';
+			document.getElementById('registrant_address').textContent = response['registrant']['address'] + ' ' + response['registrant']['city'] + ' ' + response['registrant']['state'] + ' ' + response['registrant']['country'];
+			document.getElementById('registrant_phone_numbers').textContent = response['registrant']['tel'];
+			document.getElementById('registrant_fax').textContent = response['registrant']['fax'];
 
 			Snackbar.show({
 				text: 'Whois Fetched...',
@@ -1467,60 +1467,60 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Domain</small>
-						<h5>${response.target}</h5>
+						<h5>${htmlEncode(response.target)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Dnssec</small>
-						<h5>${response.dnssec}</h5>
+						<h5>${htmlEncode(response.dnssec)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Geolocation</small>
-						<h5>${response.geolocation_iso}
-						<span class="ms-2 fi fi-${response.geolocation_iso}"></span></h5>
+						<h5>${htmlEncode(response.geolocation_iso)}
+						<span class="ms-2 fi fi-${htmlEncode(response.geolocation_iso)}"></span></h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Created</small>
-						<h5>${response.created}</h5>
+						<h5>${htmlEncode(response.created)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Updated</small>
-						<h5>${response.updated}</h5>
+						<h5>${htmlEncode(response.updated)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Expires</small>
-						<h5>${response.expires}</h5>
+						<h5>${htmlEncode(response.expires)}</h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-6">
 						<small class="sub-header">Whois Server</small>
-						<h5>${response.whois_server}</h5>
+						<h5>${htmlEncode(response.whois_server)}</h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Registrar Name</small>
-						<h5>${response.registrar.name}</h5>
+						<h5>${htmlEncode(response.registrar.name)}</h5>
 					</div>
 					<div class="col-4">
 						<smal class="sub-header"l>Registrar Phone</small>
-						<h5>${response.registrar.phone}</h5>
+						<h5>${htmlEncode(response.registrar.phone)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Registrar Email</small>
-						<h5>${response.registrar.email}</h5>
+						<h5>${htmlEncode(response.registrar.email)}</h5>
 					</div>
 				</div>`;
 
 				for (var status in response.status) {
 					var status_object = response.status[status];
 					if (status_object.includes('prohibited')) {
-						content += `<span class="badge badge-soft-danger me-1 mt-1">${status_object}</span>`;
+						content += `<span class="badge badge-soft-danger me-1 mt-1">${htmlEncode(status_object)}</span>`;
 					}
 					else {
-						content += `<span class="badge badge-soft-info mt-1 me-1">${status_object}</span>`;
+						content += `<span class="badge badge-soft-info mt-1 me-1">${htmlEncode(status_object)}</span>`;
 					}
 				}
 				content += `
@@ -1550,35 +1550,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.registrant.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.registrant.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.registrant.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.registrant.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.registrant.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.registrant.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.registrant.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.registrant.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.registrant.phone}
-												<span class="fe-printer"></span>&nbsp;${response.registrant.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.registrant.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.registrant.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.registrant.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.registrant.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.registrant.city} <b>State: </b>${response.registrant.state} <b>Zip Code: </b>${response.registrant.zipcode} <b>Country:
-											</b>${response.registrant.country} </td>
+											<td><b>City: </b>${htmlEncode(response.registrant.city)} <b>State: </b>${htmlEncode(response.registrant.state)} <b>Zip Code: </b>${htmlEncode(response.registrant.zipcode)} <b>Country:
+											</b>${htmlEncode(response.registrant.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1590,35 +1590,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.admin.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.admin.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.admin.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.admin.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.admin.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.admin.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.admin.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.admin.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.admin.phone}
-												<span class="fe-printer"></span>&nbsp;${response.admin.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.admin.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.admin.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.admin.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.admin.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.admin.city} <b>State: </b>${response.admin.state} <b>Zip Code: </b>${response.admin.zipcode} <b>Country:
-											</b>${response.admin.country} </td>
+											<td><b>City: </b>${htmlEncode(response.admin.city)} <b>State: </b>${htmlEncode(response.admin.state)} <b>Zip Code: </b>${htmlEncode(response.admin.zipcode)} <b>Country:
+											</b>${htmlEncode(response.admin.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1630,35 +1630,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.technical_contact.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.technical_contact.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.technical_contact.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.technical_contact.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.technical_contact.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.technical_contact.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.technical_contact.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.technical_contact.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.technical_contact.phone}
-												<span class="fe-printer"></span>&nbsp;${response.technical_contact.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.technical_contact.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.technical_contact.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.technical_contact.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.technical_contact.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.technical_contact.city} <b>State: </b>${response.technical_contact.state} <b>Zip Code: </b>${response.technical_contact.zipcode} <b>Country:
-											</b>${response.technical_contact.country} </td>
+											<td><b>City: </b>${htmlEncode(response.technical_contact.city)} <b>State: </b>${htmlEncode(response.technical_contact.state)} <b>Zip Code: </b>${htmlEncode(response.technical_contact.zipcode)} <b>Country:
+											</b>${htmlEncode(response.technical_contact.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1672,18 +1672,18 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					<h4>A Records</h4>`;
 					for (var a in response.dns.a) {
 						var a_object = response.dns.a[a];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${a_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(a_object)}</span>`;
 					}
 					content += `<h4>MX Records</h4>`;
 
 					for (var mx in response.dns.mx) {
 						var mx_object = response.dns.mx[mx];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${mx_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(mx_object)}</span>`;
 					}
 					content += `<h4>TXT Records</h4>`;
 					for (var txt in response.dns.txt) {
 						var txt_object = response.dns.txt[txt];
-						content += `<span class="badge badge-soft-secondary me-1 mt-1">${txt_object}</span>`;
+						content += `<span class="badge badge-soft-secondary me-1 mt-1">${htmlEncode(txt_object)}</span>`;
 					}
 					content += `</div>`;
 
@@ -1703,10 +1703,10 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 							for (var ip in response.historical_ips) {
 								var ip_object = response.historical_ips[ip];
 								content += `<tr>
-									<td><b>${ip_object.ip}</b></td>
-									<td>${ip_object.location}</td>
-									<td>${ip_object.owner}</td>
-									<td>${ip_object.last_seen}</td>
+									<td><b>${htmlEncode(ip_object.ip)}</b></td>
+									<td>${htmlEncode(ip_object.location)}</td>
+									<td>${htmlEncode(ip_object.owner)}</td>
+									<td>${htmlEncode(ip_object.last_seen)}</td>
 								</tr>`;
 							}
 
@@ -1721,7 +1721,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 
 					for (var ns in response.nameservers) {
 						var ns_object = response.nameservers[ns];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${ns_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(ns_object)}</span>`;
 					}
 
 					content += `</div><div class="tab-pane fade" id="v-pills-similar" role="tabpanel" aria-labelledby="v-pills-similar-tab" data-simplebar style="max-height: 300px; min-height: 300px;">`;
@@ -1729,7 +1729,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					if (response.related_tlds.length > 0) {
 						for (var domain in response.related_tlds) {
 							var dom_object = response.related_tlds[domain];
-							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${dom_object} as target." onclick="add_target('${dom_object}')">${dom_object}</span>`;
+							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${htmlEncode(dom_object)} as target." onclick="add_target('${jsEscape(dom_object)}')">${htmlEncode(dom_object)}</span>`;
 						}
 					}
 					else{
@@ -1743,7 +1743,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					if (response.related_domains.length > 0) {
 						for (var domain in response.related_domains) {
 							var dom_object = response.related_domains[domain];
-							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${dom_object} as target." onclick="add_target('${dom_object}')">${dom_object}</span>`;
+							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${htmlEncode(dom_object)} as target." onclick="add_target('${jsEscape(dom_object)}')">${htmlEncode(dom_object)}</span>`;
 						}
 					}
 					else{
@@ -1758,7 +1758,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 
 	if (show_add_target_btn) {
 		content += `<div class="text-center">
-			<button class="btn btn-primary float-end mt-4" type="submit" id="search_whois_toolbox_btn" onclick="add_target('${response['target']}')">Add ${response['target']} as target</button>
+			<button class="btn btn-primary float-end mt-4" type="submit" id="search_whois_toolbox_btn" onclick="add_target('${jsEscape(response['target'])}')">Add ${htmlEncode(response['target'])} as target</button>
 		</div>`
 	}
 
@@ -2424,7 +2424,7 @@ function get_and_render_cve_details(cve_id){
 			});
 		}
 		else{
-			swal.fire("Error!", response.message, "error", {
+			swal.fire("Error!", htmlEncode(response.message), "error", {
 				button: "Okay",
 			});
 		}
@@ -2656,7 +2656,7 @@ function add_project_modal(){
 		confirmButtonText: 'Create Project',
 		showLoaderOnConfirm: true,
 		preConfirm: (name) => {
-			return fetch(`/api/action/create/project?name=${name}`)
+			return fetch(`/api/action/create/project?name=${encodeURIComponent(name)}`)
 				.then(response => {
 					if (!response.ok) {
 						throw new Error(response.error)
@@ -2674,7 +2674,7 @@ function add_project_modal(){
 			console.log(result);
 			if (result.isConfirmed) {
 				Swal.fire({
-					title: `${result.value.project_name} is created.`,
+					title: `${htmlEncode(result.value.project_name)} is created.`,
 					onClose: reloadPage
 				})
 			}
@@ -3216,7 +3216,7 @@ function show_scan_configuration(starting_path, out_of_scope_subdomains, exclude
 	var content = `
 	<div class="scan-config-modal">
 		<div class="starting-path mb-3">
-			<h5>Starting Path: <code>${starting_path || '/'}</code></h5>
+			<h5>Starting Path: <code>${htmlEncode(starting_path || '/')}</code></h5>
 		</div>
 		<ul class="nav nav-tabs nav-bordered" role="tablist">
 			<li class="nav-item" role="presentation">
@@ -3238,17 +3238,17 @@ function show_scan_configuration(starting_path, out_of_scope_subdomains, exclude
 		<div class="tab-content">
 			<div class="tab-pane fade show active" id="outofscope" role="tabpanel">
 				<ul class="config-list">
-					${out_of_scope_subdomains.map(domain => `<li><code>${domain}</code></li>`).join('')}
+					${out_of_scope_subdomains.map(domain => `<li><code>${htmlEncode(domain)}</code></li>`).join('')}
 				</ul>
 			</div>
 			<div class="tab-pane fade" id="imported" role="tabpanel">
 				<ul class="config-list">
-					${imported_subdomains.map(domain => `<li><code>${domain}</code></li>`).join('')}
+					${imported_subdomains.map(domain => `<li><code>${htmlEncode(domain)}</code></li>`).join('')}
 				</ul>
 			</div>
 			<div class="tab-pane fade" id="excluded" role="tabpanel">
 				<ul class="config-list">
-					${excluded_paths.map(path => `<li><code>${path}</code></li>`).join('')}
+					${excluded_paths.map(path => `<li><code>${htmlEncode(path)}</code></li>`).join('')}
 				</ul>
 			</div>
 		</div>
