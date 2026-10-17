@@ -205,6 +205,7 @@ def score_event(prev, today):
 def snapshot_scores():
     from dashboard.models import Project
     from limes.alerts import events
+    from limes.alerts.deliver import deliver_immediate
     today = timezone.localdate()
     for project in Project.objects.all():
         try:
@@ -220,6 +221,7 @@ def snapshot_scores():
                     if change:
                         events.record(project, change[0], change[1],
                                       detail={'from': prev.score, 'to': snap.score, 'grade': snap.grade})
+            deliver_immediate(project)
         except SoftTimeLimitExceeded:
             raise
         except Exception:

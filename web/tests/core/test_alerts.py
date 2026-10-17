@@ -1,17 +1,22 @@
 import hmac
 import json
+import tempfile
 from datetime import timedelta
 from unittest import mock
 
 import requests
+from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from dashboard.models import InAppNotification, Project
-from limes import scoring
-from limes.alerts import deliver, events, issues
-from limes.tasks import attribution, inventory
-from startScan.models import Asset, ChangeEvent, RiskCheck, ScanRun, ScoreSnapshot, TrackedIssue
+from limes import celery_routing, scoring
+from limes.alerts import deliver, digest, events, issues
+from limes.definitions import FAILED_TASK, SUCCESS_TASK
+from limes.tasks import attribution, control, inventory
+from scanEngine.models import EngineType
+from targetApp.models import Domain
+from startScan.models import Asset, ChangeEvent, RiskCheck, ScanActivity, ScanHistory, ScanRun, ScoreSnapshot, TrackedIssue
 from tests.core.test_attribution_decisions import DecisionBase
 from tests.core.test_scoring import Base
 
@@ -395,3 +400,102 @@ class DeliverTest(TestCase):
         self.post.assert_called_once()
         e.refresh_from_db()
         self.assertIsNotNone(e.notified_at)
+
+
+class DigestTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.chat = mock.Mock()
+
+    def ev(self, project=None, immediate=False, **kw):
+        kw.setdefault('title', 't')
+        return ChangeEvent.objects.create(project=project or self.p, kind='issue_fixed', severity=2, detail={},
+                                          immediate=immediate, created_at=timezone.now(), **kw)
+
+    def asset(self, value, tier, age_hours=1):
+        return Asset.objects.create(project=self.p, kind='subdomain', value=value, scope_tier=tier,
+                                    first_seen=timezone.now() - timedelta(hours=age_hours))
+
+    def test_digest_includes_undigested_events_and_counts(self):
+        fixed = self.ev(title='fixed one')
+        capped = self.ev(title='capped one', immediate=True)
+        done = self.ev(title='already sent', immediate=True, notified_at=timezone.now())
+        self.asset('a.example.com', 'owned_host')
+        self.asset('b.example.com', 'owned_root')
+        self.asset('old.example.com', 'owned_host', age_hours=48)
+        self.asset('c.example.net', 'candidate')
+        msg = digest.build_digest(self.p)
+        for text in ('fixed one', 'capped one', '2 new owned assets', '1 new candidate'):
+            self.assertIn(text, msg)
+        self.assertNotIn('already sent', msg)
+        self.assertEqual(digest.send_digest(chat=self.chat), {'projects': 1, 'sent': 1})
+        self.assertEqual(self.chat.call_count, 1)
+        self.assertEqual(InAppNotification.objects.count(), 1)
+        for e in (fixed, capped, done):
+            e.refresh_from_db()
+        self.assertIsNotNone(fixed.digested_at)
+        self.assertIsNotNone(capped.digested_at)
+        self.assertIsNone(done.digested_at)
+        self.assertEqual(deliver.deliver_immediate(self.p, chat=self.chat, post=mock.Mock()), 0)
+
+    def test_empty_project_sends_nothing(self):
+        self.assertIsNone(digest.build_digest(self.p))
+        self.assertEqual(digest.send_digest(chat=self.chat), {'projects': 1, 'sent': 0})
+        self.chat.assert_not_called()
+
+    def test_digest_is_per_project(self):
+        q = Project.objects.create(name='q', slug='q', insert_date=timezone.now())
+        self.ev(title='mine')
+        self.ev(project=q, title='theirs')
+        self.assertEqual(digest.send_digest(chat=self.chat), {'projects': 2, 'sent': 2})
+        msgs = [c.args[0] for c in self.chat.call_args_list]
+        self.assertEqual(len(msgs), 2)
+        for m in msgs:
+            self.assertNotEqual('mine' in m, 'theirs' in m)
+
+
+class WiringTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.domain = Domain.objects.create(name='example.com', project=self.p, insert_date=timezone.now())
+        eng = EngineType.objects.create(engine_name='e', yaml_configuration='')
+        self.scan = ScanHistory.objects.create(
+            scan_type=eng, domain=self.domain, start_scan_date=timezone.now(), results_dir=tempfile.mkdtemp())
+
+    def report(self, failed=False, sync=None):
+        ctx = {'scan_history_id': self.scan.id}
+        control.start_scan_run(self.domain, self.scan, 'full', ctx)
+        if failed:
+            ScanActivity.objects.create(name='x', title='x', time=timezone.now(),
+                                        status=FAILED_TASK, scan_of=self.scan)
+        with mock.patch.object(control, 'send_scan_notif'), \
+                mock.patch('limes.alerts.issues.sync_issues', new=sync or mock.Mock()) as s, \
+                mock.patch('limes.alerts.deliver.deliver_immediate') as d:
+            control.report.run(ctx=ctx)
+        return s, d
+
+    def test_successful_report_syncs_and_delivers(self):
+        s, d = self.report()
+        s.assert_called_once_with(self.p)
+        d.assert_called_once_with(self.p)
+
+    def test_failed_scan_neither(self):
+        s, d = self.report(failed=True)
+        s.assert_not_called()
+        d.assert_not_called()
+
+    def test_sync_error_does_not_break_report(self):
+        s, d = self.report(sync=mock.Mock(side_effect=RuntimeError('x')))
+        run = ScanRun.objects.get()
+        self.assertEqual(run.status, SUCCESS_TASK)
+
+    def test_snapshot_scores_delivers(self):
+        with mock.patch('limes.alerts.deliver.deliver_immediate') as d:
+            scoring.snapshot_scores()
+        d.assert_called_once_with(self.p)
+
+    def test_beat_and_routing(self):
+        self.assertEqual(settings.CELERY_BEAT_SCHEDULE['send-digest']['task'], 'send_digest')
+        self.assertEqual(settings.CELERY_BEAT_SCHEDULE['send-digest']['schedule'], 86400.0)
+        self.assertEqual(celery_routing.TASK_PLAN['send_digest'], (celery_routing.ORCHESTRATE, 15 * celery_routing.MIN))
+        self.assertIn('limes.alerts.digest', settings.CELERY_IMPORTS)

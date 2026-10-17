@@ -1,4 +1,5 @@
 from limes.tasks.base import *
+from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks import resolution
 from limes.tasks.notifications import send_scan_notif
 from limes.tasks.persistence import save_endpoint, save_imported_subdomains, save_subdomain
@@ -378,6 +379,14 @@ def report(ctx={}, description=None):
 		if run and run.status == SUCCESS_TASK:  # failed scans must not age unseen hosts
 			from limes.tasks import inventory as inv
 			inv.finalize_lifecycle(run)
+			try:
+				from limes.alerts import deliver, issues
+				issues.sync_issues(run.project)
+				deliver.deliver_immediate(run.project)
+			except SoftTimeLimitExceeded:
+				raise
+			except Exception:
+				logger.exception('Change alerts failed for scan run %s', run.pk)
 	from dashboard.stats import invalidate
 	invalidate(scan.domain.project_id)
 
