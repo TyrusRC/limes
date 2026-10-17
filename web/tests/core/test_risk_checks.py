@@ -47,3 +47,102 @@ class RiskCheckModelTest(TestCase):
         RiskCheck.objects.create(asset=asset, check_id='web.hsts_missing', status='fail', severity=2)
         with self.assertRaises(IntegrityError), transaction.atomic():
             RiskCheck.objects.create(asset=asset, check_id='web.hsts_missing', status='pass', severity=2)
+
+
+def _by_id(results):
+    return {r.check: r for r in results}
+
+
+class WebEvalTest(SimpleTestCase):
+    GOOD = {
+        'status': 200, 'url': 'https://h/',
+        'headers': {'strict-transport-security': 'max-age=1', 'content-security-policy': "frame-ancestors 'self'",
+                    'x-content-type-options': 'nosniff'},
+        'cookies': ['a=1; Secure; HttpOnly; SameSite=Lax'],
+    }
+
+    def ev(self, https, http):
+        from limes.checks import web
+        return _by_id(web.evaluate({'https': https, 'http': http}))
+
+    def test_good_https_site_passes(self):
+        res = self.ev(self.GOOD, {'status': 301, 'location': 'https://h/'})
+        self.assertEqual(len(res), 8)
+        self.assertEqual({r.status for r in res.values()}, {'pass'})
+
+    def test_no_web_server_is_not_applicable(self):
+        res = self.ev(None, None)
+        self.assertEqual(len(res), 8)
+        self.assertEqual({r.status for r in res.values()}, {'not_applicable'})
+
+    def test_http_only_host(self):
+        res = self.ev(None, {'status': 200, 'location': None})
+        self.assertEqual(res['web.https_missing'].status, 'fail')
+        self.assertEqual(res['web.http_no_redirect'].status, 'fail')
+        for c in ('hsts_missing', 'csp_missing', 'frame_options_missing', 'content_type_options_missing',
+                  'cookie_flags_missing', 'version_disclosure'):
+            self.assertEqual(res['web.' + c].status, 'not_applicable', c)
+
+    def test_header_failures_carry_evidence(self):
+        https = {'status': 200, 'url': 'https://h/', 'headers': {'server': 'nginx/1.18.0'}, 'cookies': ['sid=x']}
+        res = self.ev(https, None)
+        self.assertEqual(res['web.version_disclosure'].status, 'fail')
+        self.assertEqual(res['web.version_disclosure'].evidence, {'server': 'nginx/1.18.0'})
+        self.assertEqual(res['web.cookie_flags_missing'].status, 'fail')
+        self.assertEqual(res['web.cookie_flags_missing'].evidence['cookies'], ['sid'])
+        for c in ('hsts_missing', 'csp_missing', 'frame_options_missing', 'content_type_options_missing'):
+            self.assertEqual(res['web.' + c].status, 'fail', c)
+
+    def test_redirect_to_other_host_fails(self):
+        res = self.ev(self.GOOD, {'status': 302, 'location': 'https://evil.example/'})
+        self.assertEqual(res['web.http_no_redirect'].status, 'fail')
+
+    def test_https_error_is_error(self):
+        res = self.ev('error', None)
+        for c in ('hsts_missing', 'csp_missing', 'frame_options_missing', 'content_type_options_missing',
+                  'cookie_flags_missing', 'version_disclosure', 'https_missing'):
+            self.assertEqual(res['web.' + c].status, 'error', c)
+
+
+class TlsEvalTest(SimpleTestCase):
+    NOW = timezone.now()
+
+    def ev(self, cert, legacy=None):
+        from limes.checks import tls
+        legacy = legacy or {'TLSv1': False, 'TLSv1_1': False}
+        return _by_id(tls.evaluate({'cert': cert, 'legacy': legacy}, self.NOW))
+
+    def cert(self, **kw):
+        base = {'not_after': self.NOW + timezone.timedelta(days=90), 'expired': False,
+                'hostname_ok': True, 'trusted': True}
+        base.update(kw)
+        return base
+
+    def test_expiry_windows(self):
+        d = timezone.timedelta
+        res = self.ev(self.cert(not_after=self.NOW + d(days=10)))
+        self.assertEqual((res['tls.cert_expiring'].status, res['tls.cert_expired'].status), ('fail', 'pass'))
+        res = self.ev(self.cert(not_after=self.NOW + d(days=30)))
+        self.assertEqual((res['tls.cert_expiring'].status, res['tls.cert_expired'].status), ('pass', 'pass'))
+        res = self.ev(self.cert(not_after=None, expired=True))
+        self.assertEqual(res['tls.cert_expired'].status, 'fail')
+        self.assertEqual(res['tls.cert_expiring'].status, 'not_applicable')
+
+    def test_mismatch_untrusted_legacy(self):
+        res = self.ev(self.cert(hostname_ok=False, trusted=False), {'TLSv1': True, 'TLSv1_1': False})
+        self.assertEqual(res['tls.cert_hostname_mismatch'].status, 'fail')
+        self.assertEqual(res['tls.cert_untrusted'].status, 'fail')
+        self.assertEqual(res['tls.legacy_protocol'].status, 'fail')
+        self.assertEqual(res['tls.legacy_protocol'].evidence, {'accepted': ['TLSv1']})
+
+    def test_legacy_context_refused_is_error(self):
+        res = self.ev(self.cert(), {'TLSv1': None, 'TLSv1_1': False})
+        self.assertEqual(res['tls.legacy_protocol'].status, 'error')
+
+    def test_no_tls_is_not_applicable(self):
+        res = self.ev(None)
+        self.assertEqual(len(res), 5)
+        self.assertEqual({r.status for r in res.values()}, {'not_applicable'})
+
+    def test_cert_error_is_error(self):
+        self.assertEqual({r.status for r in self.ev('error').values()}, {'error'})
