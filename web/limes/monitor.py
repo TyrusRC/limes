@@ -62,6 +62,10 @@ def monitored(project=None):
     (the same test as scan_target.has_scan_target, as one subquery)."""
     target = Domain.objects.filter(project_id=OuterRef('project_id'), name=OuterRef('value'))
     rows = Asset.objects.filter(scope_tier__in=OWNED, kind__in=KINDS).exclude(cadence_tier='off')
+    # NOTE: IPs a range sweep found (a 'cidr' source or a cidr parent) are left to owned_ranges, which owns their
+    # refresh and their InternetDB/PTR budget; with LIMES_RANGE_ENUMERATION off no such IPs are created. Upgrade
+    # path: hand them back to the monitor if a range stops being swept (set off or refused).
+    rows = rows.exclude(kind='ip', sources__contains=[{'source': 'cidr'}]).exclude(kind='ip', parent__kind='cidr')
     if project is not None:
         rows = rows.filter(project=project)
     return rows.annotate(has_target=Exists(target)).exclude(kind='root_domain', has_target=True)
@@ -159,6 +163,7 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     if a is None:
         return {'status': 'skipped'}
     resolve = _once(resolve)
+    baseline = a.last_resolved_at is None  # the first check records silently, like a range's first sweep
     status, reason, new = 'ok', None, []
     if a.kind != 'ip':
         status, reason, new = _names(a, resolve)
@@ -185,17 +190,19 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     if a.kind != 'ip':
         hosts = collect._mx_hosts(collect._lookup(resolve, a.value.rstrip('.').lower(), 'MX'))
         mx = hosts != 'error' and bool(hosts)
-    result = {'http_live': False}
-    if status == 'ok':
+    result = {'http_live': False, 'checked': 0}
+    if status == 'ok' or a.kind == 'root_domain':  # an unresolved root still gets its DNS-only email/dns checks
         result = run.run_asset_checks(a, now=now, observers=observers, resolve=resolve)
-        if result['refused']:
+        if result['refused'] and status == 'ok':
             status, reason = 'refused', result['refused']
-    for ip in new:
-        events.record_asset_new(a.project, ip, ports=open_ports.get(ip.value, ()))
-    for host in found_hosts:
-        events.record_asset_new(a.project, host)
+    if not baseline:
+        for ip in new:
+            events.record_asset_new(a.project, ip, ports=open_ports.get(ip.value, ()))
+        for host in found_hosts:
+            events.record_asset_new(a.project, host)
     monitor = {'checked_at': now.isoformat(), 'active': bool(ports) or result['http_live'] or mx,
-               'status': status, 'reason': reason}
+               'status': status, 'reason': reason,
+               'dns_only': a.kind == 'root_domain' and status != 'ok' and result['checked'] > 0}
     with transaction.atomic():  # locked like SetAssetCadence, so a cadence_explicit set meanwhile is kept
         row = Asset.objects.select_for_update().get(pk=a.pk)  # _store may also have written this very row (an ip)
         row.enrichment = {**(row.enrichment or {}), 'monitor': monitor}

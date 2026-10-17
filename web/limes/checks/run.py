@@ -130,8 +130,8 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
 
 def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
     """The risk checks for one monitored asset, outside any root scan. Hostnames and roots get web + tls on their
-    vetted IP (roots also email + dns); an ip gets the database-only network checks. A refused host gets no rows
-    and nothing is contacted."""
+    vetted IP (roots also email + dns); an ip gets the database-only network checks. A refused host is never
+    contacted and gets no web/tls rows; a refused root still gets email + dns, which only query DNS."""
     now = now or timezone.now()
     obs = {'mail_dns': lambda root: collect.observe_mail_dns(root, resolve=resolve), 'ports': collect.ports_for_ip,
            **(observers or {})}
@@ -144,8 +144,6 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
             value = _root_of(asset.value, list(roots.values_list('value', flat=True)))
             holder = roots.filter(value=value).first() if value else None
         step(asset, lambda: _host_checks(asset, holder, now, observers, resolve, done))
-        if done['refused']:
-            return done
     if asset.kind == 'root_domain':
         def root_checks():
             mail, dns_obs = obs['mail_dns'](asset.value)
