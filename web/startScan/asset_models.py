@@ -18,7 +18,7 @@ SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl
 
 
 __all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
-           'TrackedIssue', 'ChangeEvent']
+           'TrackedIssue', 'ChangeEvent', 'IssueSyncState']
 
 
 class Tag(models.Model):
@@ -205,3 +205,9 @@ class ChangeEvent(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['project', 'created_at'])]
+
+
+class IssueSyncState(models.Model):
+    """Exists once a project's issues have been synced, whether or not it had any (first sync is silent)."""
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name='issue_sync')
+    first_synced_at = models.DateTimeField(default=timezone.now)
