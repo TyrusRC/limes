@@ -292,8 +292,10 @@ function issue_bind_forms() {
 }
 
 function issue_is_ip(v) {
-	// IPv4 or IPv6, optionally with a prefix length; a hostname never matches
-	return /^[\d.]+(\/\d+)?$/.test(v) || /^[0-9a-f.]*:[0-9a-f:.]*(\/\d+)?$/i.test(String(v));
+	// IPv4 or IPv6, optionally with a prefix length; a hostname never matches.
+	// IPv6 needs '::' or at least two colons, so a hex host:port (cafe.be:443) is not one.
+	v = String(v);
+	return /^[\d.]+(\/\d+)?$/.test(v) || (/^[0-9a-f.:]+(\/\d+)?$/i.test(v) && /:.*:/.test(v));
 }
 
 function issues_init() {

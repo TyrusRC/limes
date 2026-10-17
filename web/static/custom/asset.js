@@ -129,12 +129,19 @@ function asset_penalty_rows(rows, withAsset) {
 	}).join('');
 }
 
+// Grade badge coloured like the Overview's; the class is built only from a checked A-F letter.
+function asset_grade_html(grade) {
+	var g = String(grade || '');
+	var cls = /^[A-F]$/.test(g) ? ' ov-grade-' + g.toLowerCase() : '';
+	return '<span class="ov-grade ov-grade-sm' + cls + '">' + asset_esc(g) + '</span>';
+}
+
 // Risk section of the asset modal (limes.scoring); null for assets that are not scored.
 function asset_risk_html(risk) {
 	if (!risk) return '';
 	if (risk.assessed === false) return asset_section('Risk', '<p class="l-hint mb-0">Not yet vulnerability-scanned: no score.</p>');
 	var rows = asset_penalty_rows(risk.penalties, false);
-	return asset_section('<span>Risk <span class="l-score-big">' + asset_esc(risk.score) + '</span> <span class="badge bg-soft-primary">' + asset_esc(risk.grade) + '</span></span>',
+	return asset_section('<span>Risk <span class="l-score-big">' + asset_esc(risk.score) + '</span> ' + asset_grade_html(risk.grade) + '</span>',
 		rows ? asset_table(['Issue', 'Severity', 'Points'], rows) : '<p class="l-hint mb-0">No open findings in the latest vulnerability scan.</p>');
 }
 
