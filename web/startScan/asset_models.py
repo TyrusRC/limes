@@ -18,7 +18,7 @@ SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl
 
 
 __all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
-           'TrackedIssue', 'ChangeEvent', 'IssueSyncState']
+           'TrackedIssue', 'ChangeEvent', 'IssueSyncState', 'IssueWaiver', 'IssueNote']
 
 
 class Tag(models.Model):
@@ -154,6 +154,7 @@ class ScoreSnapshot(models.Model):
     coverage = models.FloatField(null=True, blank=True)
     asset_count = models.IntegerField(default=0)
     top_penalties = models.JSONField(default=list)
+    raw_score = models.IntegerField(null=True, blank=True)  # score ignoring waivers
 
     class Meta:
         unique_together = ('project', 'date')
@@ -188,6 +189,26 @@ class TrackedIssue(models.Model):
 
     class Meta:
         unique_together = ('asset', 'key')
+
+
+class IssueWaiver(models.Model):
+    """A decision to stop counting an issue: accepted_risk | false_positive. Active = not revoked and not past expires_at."""
+    issue = models.ForeignKey(TrackedIssue, on_delete=models.CASCADE, related_name='waivers')
+    kind = models.CharField(max_length=16)
+    reason = models.TextField()
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    expiry_notified = models.BooleanField(default=False)
+
+
+class IssueNote(models.Model):
+    issue = models.ForeignKey(TrackedIssue, on_delete=models.CASCADE, related_name='notes')
+    author = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    text = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
 
 
 class ChangeEvent(models.Model):
