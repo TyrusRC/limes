@@ -282,13 +282,8 @@ def risk_checks(self, ctx={}, description=None):
 	if not project or not root or root.scope_tier != 'owned_root':
 		logger.warning('Risk checks: no owned root for this scan, skipping')
 		return {}
-	try:
-		counts = checks_run.run_checks(project, root)
-	except SoftTimeLimitExceeded:
-		raise
-	except Exception:
-		logger.exception('Risk checks failed')
-		return {}
+	# a crash propagates so LimesTask marks the stage FAILED; the chain still continues
+	counts = checks_run.run_checks(project, root)
 	try:
 		self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
 	except Exception:
