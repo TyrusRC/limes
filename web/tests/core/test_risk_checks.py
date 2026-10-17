@@ -342,7 +342,17 @@ class CollectTest(SimpleTestCase):
         cert_err.verify_code = 18
         self.assertEqual(legacy_with(cert_err), {'TLSv1': True, 'TLSv1_1': True})
         self.assertEqual(legacy_with(ConnectionResetError()), {'TLSv1': False, 'TLSv1_1': False})
-        self.assertEqual(legacy_with(ssl.SSLError('alert')), {'TLSv1': False, 'TLSv1_1': False})
+        self.assertEqual(legacy_with(ssl.SSLError('alert')), {'TLSv1': None, 'TLSv1_1': None})
+
+        def ssl_err(reason):
+            e = ssl.SSLError(1, f'[SSL: {reason}] x')
+            e.reason = reason
+            return e
+        for reason in collect.SERVER_REFUSALS:
+            self.assertEqual(legacy_with(ssl_err(reason)), {'TLSv1': False, 'TLSv1_1': False}, reason)
+        for reason in ('UNSAFE_LEGACY_RENEGOTIATION_DISABLED', 'DH_KEY_TOO_SMALL', 'NO_PROTOCOLS_AVAILABLE'):
+            self.assertEqual(legacy_with(ssl_err(reason)), {'TLSv1': None, 'TLSv1_1': None}, reason)
+        self.assertEqual(legacy_with(ssl.SSLEOFError()), {'TLSv1': None, 'TLSv1_1': None})
         self.assertEqual(legacy_with(TimeoutError()), {'TLSv1': None, 'TLSv1_1': None})
         no_ciphers = ssl.SSLError(1, '[SSL: NO_CIPHERS_AVAILABLE] no ciphers available')
         no_ciphers.reason = 'NO_CIPHERS_AVAILABLE'
