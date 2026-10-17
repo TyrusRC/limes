@@ -120,6 +120,13 @@ def _penalties(project, asset_ids=None, base=None, now=None):
     return out
 
 
+def current_issues(project, now=None):
+    """(asset_id -> {key: severity}, assessed asset ids) from the same inputs the score uses."""
+    base = baselines(project)
+    assessed = assessed_assets(project, base=base, now=now)
+    return _penalties(project, base=base, now=now), set(assessed)
+
+
 def _score(categories):
     score = max(0, MAX_SCORE - sum(PENALTY.get(s, 0) for s in categories.values()))
     worst = max(categories.values(), default=0)
