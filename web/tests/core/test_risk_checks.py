@@ -274,6 +274,9 @@ class CollectTest(SimpleTestCase):
         self.assertEqual(legacy_with(ConnectionResetError()), {'TLSv1': False, 'TLSv1_1': False})
         self.assertEqual(legacy_with(ssl.SSLError('alert')), {'TLSv1': False, 'TLSv1_1': False})
         self.assertEqual(legacy_with(TimeoutError()), {'TLSv1': None, 'TLSv1_1': None})
+        no_ciphers = ssl.SSLError(1, '[SSL: NO_CIPHERS_AVAILABLE] no ciphers available')
+        no_ciphers.reason = 'NO_CIPHERS_AVAILABLE'
+        self.assertEqual(legacy_with(no_ciphers), {'TLSv1': None, 'TLSv1_1': None})
         self.assertEqual(legacy_with(collect.ContextRefused()), {'TLSv1': None, 'TLSv1_1': None})
 
     def test_good_cert_parses_not_after_aware(self):
@@ -417,14 +420,34 @@ class RunTest(TestCase):
         from unittest import mock
         from limes.checks import run
         from startScan.models import IpAddress
-        self.root.ip_addresses.clear()  # root refused (unresolved): only the two hosts compete
-        old = Asset.objects.create(project=self.project, kind='hostname', value='b.x.com', scope_tier='owned_host')
-        old.ip_addresses.add(IpAddress.objects.create(address='93.184.216.30'))
-        RiskCheck.objects.create(asset=old, check_id='web.hsts_missing', status='pass', severity=2,
-                                 last_checked=timezone.now() - timezone.timedelta(days=1))
-        with mock.patch.object(run, 'MAX_HOSTS', 1):
+        self.root.ip_addresses.clear()  # root refused (unresolved): only the hosts compete
+        self.host.delete()
+        day = timezone.timedelta(days=1)
+        for name, age in (('b.x.com', 1), ('c.x.com', 3), ('z.x.com', None)):
+            a = Asset.objects.create(project=self.project, kind='hostname', value=name, scope_tier='owned_host')
+            a.ip_addresses.add(IpAddress.objects.create(address='93.184.216.30'))
+            if age:
+                RiskCheck.objects.create(asset=a, check_id='web.hsts_missing', status='pass', severity=2,
+                                         last_checked=timezone.now() - age * day)
+        with mock.patch.object(run, 'MAX_HOSTS', 2):
             run.run_checks(self.project, self.root, observers=self.observers())
-        self.assertEqual(self.calls, ['a.x.com'])
+        self.assertEqual(self.calls, ['z.x.com', 'c.x.com'])
+
+    def test_non_owned_root_gets_no_rows(self):
+        from limes.checks import run
+        self.root.scope_tier = 'candidate'
+        self.root.save()
+        self.assertEqual(run.run_checks(self.project, self.root, observers=self.observers()),
+                         {'checked': 0, 'failed': 0})
+        self.assertEqual(RiskCheck.objects.count(), 0)
+
+    def test_budget_overrun_stops_after_current_host(self):
+        import itertools
+        from limes.checks import run
+        ticks = itertools.chain([0, 100], itertools.repeat(3000))
+        out = run.run_checks(self.project, self.root, observers=self.observers(), clock=lambda: next(ticks))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(out['failed'], 0)
 
     def test_only_owned_assets_under_this_root(self):
         from limes.checks import run

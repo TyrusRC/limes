@@ -14,6 +14,7 @@ from django.utils import timezone
 TIMEOUT = 5
 MAX_REDIRECTS = 3
 FRESH = timedelta(days=30)
+LOCAL_REFUSALS = {'NO_PROTOCOLS_AVAILABLE', 'NO_CIPHERS_AVAILABLE'}
 LEGACY = ('TLSv1', 'TLSv1_1')
 
 
@@ -40,7 +41,7 @@ def _fetch_https(host, headers, get):
     """GET https://host/ following at most MAX_REDIRECTS same-host redirects."""
     url = f'https://{host}/'
     for _ in range(MAX_REDIRECTS + 1):
-        resp = get(url, headers=headers, timeout=TIMEOUT, allow_redirects=False)
+        resp = get(url, headers=headers, timeout=TIMEOUT, allow_redirects=False, stream=True)
         try:
             obs = _https_obs(resp, url)
         finally:
@@ -71,7 +72,7 @@ def observe_http(host, ident, get=requests.get):
     headers = {'User-Agent': ident.ua, **{h.name: h.value for h in ident.headers}}
 
     def plain():
-        resp = get(f'http://{host}/', headers=headers, timeout=TIMEOUT, allow_redirects=False)
+        resp = get(f'http://{host}/', headers=headers, timeout=TIMEOUT, allow_redirects=False, stream=True)
         try:
             return {'status': resp.status_code, 'location': resp.headers.get('Location', '')}
         finally:
@@ -85,6 +86,8 @@ def _tls_connect(host, legacy=None):
     """Verified handshake on 443; returns the peer cert. legacy pins TLS 1.0/1.1."""
     ctx = ssl.create_default_context()
     if legacy:
+        if not getattr(ssl, f'HAS_{legacy}', False):
+            raise ContextRefused(f'{legacy} not supported by this OpenSSL')
         try:
             ctx.set_ciphers('ALL:@SECLEVEL=0')
             ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion[legacy]
@@ -126,7 +129,10 @@ def _legacy(host, version, connect):
         return None
     except ssl.SSLCertVerificationError:
         return True  # got as far as certificate verification
-    except (ssl.SSLError, ConnectionResetError):
+    except ssl.SSLError as e:
+        # the local library cannot speak this protocol: unknown, not a refusal by the server
+        return None if getattr(e, 'reason', None) in LOCAL_REFUSALS else False
+    except ConnectionResetError:
         return False
     except OSError:  # timeouts, unreachable
         return None
