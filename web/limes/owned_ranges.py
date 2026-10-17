@@ -18,7 +18,7 @@ import dns.resolver
 import dns.reversename
 import validators
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
 from limes import scope
@@ -31,6 +31,7 @@ from limes.intel import domains, http, internetdb, ratelimit, ripestat
 from limes.tasks import inventory
 from limes.tasks.intel import _store
 from startScan.inventory_migrate import normalize_host
+from dashboard.models import Project
 from startScan.models import Asset, ChangeEvent
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ RANGE_LOCK = 0x4C494D46  # Postgres advisory lock key: one enumerate_ranges tick
 TICK_BUDGET = 45  # seconds of work per tick; beat expires at 55 and the next tick is 60 s away
 OWNED = ('owned_root', 'owned_host')
 MAX_STEP_FAILURES = 3  # InternetDB failing on the same address this many ticks in a row: skip it this pass
+ASN_RETRY_AFTER = timedelta(hours=6)  # after a failed RIPEstat lookup
 ASN_RE = re.compile(r'AS\d{1,10}')
 
 
@@ -91,32 +93,43 @@ def refresh_asn(asset, get=http.get_json, now=None):
     if asset is None or asset.kind != 'asn' or not ASN_RE.fullmatch(asset.value):
         return {}
     status, body = get(ripestat.announced_prefixes_url(asset.value), provider='ripestat')
-    if status != 200:
+    if status != 200:  # children and status stay as they were; only the attempt is noted so due_ranges backs off
+        _set(asset, 'asn', {**((asset.enrichment or {}).get('asn') or {}), 'attempted_at': _iso(now)})
         return {}
-    nets = [n for n in (ipaddress.ip_network(p) for p in ripestat.parse_announced_prefixes(body))
-            if not scope.is_reserved_network(n)]
+    # NOTE: v1 enumerates IPv4 only. Walking a v6 prefix per address is infeasible (a /48 holds 2^80 addresses), so
+    # IPv6 needs a different approach (sampling, CT logs, DNS); until then v6 prefixes are reported, never stored or counted.
+    parsed = [ipaddress.ip_network(p) for p in ripestat.parse_announced_prefixes(body)]
+    v6 = [str(n) for n in parsed if n.version == 6]
+    # more-specifics fold into their covering prefix, so a /22 announced with its /24s counts and enumerates once
+    nets = list(ipaddress.collapse_addresses(n for n in parsed if n.version == 4 and not scope.is_reserved_network(n)))
+    # prefixes the project already holds as owned ranges (user-added or another ASN's) are not ours to count or re-parent
+    held = set(Asset.objects.filter(project=asset.project, kind='cidr', scope_tier__in=OWNED)
+               .exclude(state='retired').exclude(parent=asset).values_list('value', flat=True))
+    nets = [n for n in nets if str(n) not in held]
+    skipped = {'skipped_v6': len(v6), 'skipped_v6_examples': v6[:3]}
     total = sum(n.num_addresses for n in nets)
     cap = settings.RANGE_ADDRESS_CAP
     free = cap - range_addresses(asset.project, exclude_parent=asset)
     if total > free:  # checked before any child is stored: an over-cap ASN stores nothing and counts toward no cap
-        out = {'status': 'refused', 'checked_at': _iso(now),
+        out = {'status': 'refused', 'checked_at': _iso(now), **skipped,
                'reason': f"{asset.value} announces {total} addresses, over this project's {cap}-address cap "
                          f"({max(free, 0)} still free): add the specific ranges you own instead"}
         _set(asset, 'asn', out)
         return out
     announced = {str(n) for n in nets}
-    for value in sorted(announced):
-        child, created = Asset.objects.get_or_create(project=asset.project, kind='cidr', value=value,
-                                                     defaults={'scope_tier': 'owned_host', 'parent': asset})
-        if child.scope_tier not in OWNED:
-            continue  # a candidate/rejected row of the same range is the user's decision
-        inventory._append_source(child, 'asn', asset.value)
-        child.save(update_fields=['sources'])
-        child.mark_missing_or_seen(True)
-    for child in Asset.objects.filter(parent=asset, kind='cidr', scope_tier__in=OWNED).exclude(value__in=announced):
-        child.mark_missing_or_seen(False)  # missing only after MISSING_THRESHOLD refreshes
-    out = {'status': 'ok', 'prefixes': sorted(announced), 'refreshed_at': _iso(now)}
-    _set(asset, 'asn', out)
+    with transaction.atomic():  # a killed task never leaves half-stored children behind a stale status
+        for value in sorted(announced):
+            child, created = Asset.objects.get_or_create(project=asset.project, kind='cidr', value=value,
+                                                         defaults={'scope_tier': 'owned_host', 'parent': asset})
+            if child.scope_tier not in OWNED:
+                continue  # a candidate/rejected row of the same range is the user's decision
+            inventory._append_source(child, 'asn', asset.value)
+            child.save(update_fields=['sources'])
+            child.mark_missing_or_seen(True)
+        for child in Asset.objects.filter(parent=asset, kind='cidr', scope_tier__in=OWNED).exclude(value__in=announced):
+            child.mark_missing_or_seen(False)  # missing only after MISSING_THRESHOLD refreshes
+        out = {'status': 'ok', 'prefixes': sorted(announced), 'refreshed_at': _iso(now), **skipped}
+        _set(asset, 'asn', out)
     return out
 
 
@@ -222,8 +235,6 @@ def _step(asset, idb_budget, ptr_budget, get, resolve, now):
         # fails closed: a False (budget spent, or cache down) ends this tick's work; the cursor stays put
         if not ratelimit.take_daily('internetdb', settings.INTERNETDB_DAILY_BUDGET):
             break
-        if not ratelimit.take_daily('ptr', settings.PTR_DAILY_BUDGET):
-            break
         status, body = get(internetdb.build_url(str(ip)), provider='internetdb')
         idb_budget, ptr_budget = idb_budget - 1, ptr_budget - 1
         used['internetdb'] += 1
@@ -236,8 +247,13 @@ def _step(asset, idb_budget, ptr_budget, get, resolve, now):
             cursor += 1
             continue
         enum['fails'] = 0
-        names = resolve_ptr(str(ip), resolve)
-        used['ptr'] += 1
+        # the PTR unit is taken only when the lookup is about to run; if it is refused the address is still
+        # processed from InternetDB alone (names unknown, retried next pass) and the tick ends
+        if ratelimit.take_daily('ptr', settings.PTR_DAILY_BUDGET):
+            names = resolve_ptr(str(ip), resolve)
+            used['ptr'] += 1
+        else:
+            names, ptr_budget = None, 0
         cursor += 1
         ptr_names = names or []
         live = bool(data and (data['ports'] or data['hostnames'])) or bool(ptr_names)
@@ -296,6 +312,9 @@ def due_ranges(now):
         if a.kind == 'cidr' and info.get('status') == 'refused':
             continue
         last = _stamp(info.get('refreshed_at') or info.get('checked_at') if a.kind == 'asn' else info.get('last_pass_at'))
+        tried = _stamp(info.get('attempted_at')) if a.kind == 'asn' else None
+        if tried is not None and tried > now - ASN_RETRY_AFTER:
+            continue
         if not running and last is not None and last > now - CADENCE_INTERVALS[a.cadence_tier]:
             continue
         due.append((not running, last or datetime.min.replace(tzinfo=dt_timezone.utc), a.id, a))
@@ -320,8 +339,8 @@ def enumerate_ranges():
 
     Daily budget arithmetic: a tick spends at most per_tick(daily) = ceil(daily * 60 / 86400) calls, i.e. 4
     InternetDB and 7 PTR with the defaults (5000 / 10000 per day); take_daily is the hard daily stop.
-    NOTE: the ASN list is oldest-first, so an ASN whose lookup keeps failing is retried first each tick. Upgrade
-    path: record the attempt time on failure."""
+    NOTE: a failed ASN lookup is not retried for ASN_RETRY_AFTER (6 h); a flat back-off, not exponential. Upgrade
+    path: back off per consecutive failure."""
     if not settings.CONTINUOUS_SCANS:
         return {'reason': 'disabled'}
     if not _lock():
@@ -358,5 +377,5 @@ def _tick():
         if not finished:
             break  # budget spent, a provider failed or take_daily said no: stop for this tick
     for pid in set(ChangeEvent.objects.filter(id__gt=last_event, kind='asset_new').values_list('project_id', flat=True)):
-        deliver_immediate(Asset.objects.filter(project_id=pid).first().project)
+        deliver_immediate(Project.objects.get(pk=pid))  # safe to repeat: each event is claimed once (notified_at)
     return out
