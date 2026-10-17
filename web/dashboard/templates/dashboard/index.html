@@ -150,10 +150,18 @@ Dashboard
 $(document).ready(function() {
   var trend = JSON.parse(document.getElementById('score_trend_data').textContent);
   if (trend.length < 2) return;
+  var marks = [];
+  for (var i = 1; i < trend.length; i++) {
+    if (trend[i].version !== trend[i - 1].version) {
+      marks.push({x: Date.parse(trend[i].date), label: {text: 'model ' + trend[i].version, style: {fontSize: '10px'}}});
+      break;
+    }
+  }
   new ApexCharts(document.getElementById('score_trend'), {
     chart: {type: 'line', height: 140, toolbar: {show: false}, sparkline: {enabled: false}},
-    series: [{name: 'Score', data: trend.map(function(p) { return {x: p.date, y: p.score}; })}],
-    xaxis: {type: 'category', labels: {show: false}},
+    series: [{name: 'Score', data: trend.map(function(p) { return {x: Date.parse(p.date), y: p.score}; })}],
+    xaxis: {type: 'datetime', labels: {show: false}},
+    annotations: {xaxis: marks},
     yaxis: {min: 0, max: 950},
     stroke: {width: 2}
   }).render();
