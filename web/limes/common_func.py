@@ -31,6 +31,7 @@ from limes.utilities import is_valid_url
 
 logger = get_task_logger(__name__)
 DISCORD_WEBHOOKS_CACHE = redis.Redis.from_url(CELERY_BROKER_URL)
+CHAT_TIMEOUT = 10  # seconds; a hung chat host must not hold a worker forever
 
 #------------------#
 # EngineType utils #
@@ -532,7 +533,11 @@ def send_telegram_message(message):
 	telegram_bot_chat_id = notif.telegram_bot_chat_id
 	send_url = f'https://api.telegram.org/bot{telegram_bot_token}/sendMessage'
 	params = {'chat_id': telegram_bot_chat_id, 'parse_mode': 'Markdown', 'text': escape_telegram_markdown(message)}
-	resp = requests.get(send_url, params=params, timeout=10)
+	try:
+		resp = requests.get(send_url, params=params, timeout=CHAT_TIMEOUT)
+	except requests.exceptions.RequestException as exc:
+		logger.warning('Telegram notification failed: %s', type(exc).__name__)  # class only: the URL carries the token
+		return
 	if not resp.ok:  # status only: the URL carries the bot token
 		logger.warning('Telegram answered %s', resp.status_code)
 
@@ -553,7 +558,10 @@ def send_slack_message(message):
 	if not do_send:
 		return
 	hook_url = notif.slack_hook_url
-	requests.post(url=hook_url, data=json.dumps(message), headers=headers)
+	try:
+		requests.post(url=hook_url, data=json.dumps(message), headers=headers, timeout=CHAT_TIMEOUT)
+	except requests.exceptions.RequestException as exc:
+		logger.warning('Slack notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
 
 def send_lark_message(message):
 	"""Send lark message.
@@ -571,7 +579,10 @@ def send_lark_message(message):
 	if not do_send:
 		return
 	hook_url = notif.lark_hook_url
-	requests.post(url=hook_url, data=json.dumps(message), headers=headers)
+	try:
+		requests.post(url=hook_url, data=json.dumps(message), headers=headers, timeout=CHAT_TIMEOUT)
+	except requests.exceptions.RequestException as exc:
+		logger.warning('Lark notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
 
 def send_discord_message(
 		message,
@@ -623,6 +634,7 @@ def send_discord_message(
 			url=notif.discord_hook_url,
 			rate_limit_retry=False,
 			content=message)
+	webhook.timeout = CHAT_TIMEOUT  # also for webhooks unpickled from the cache
 
 	# Get existing embed if found in cache
 	embed = None
@@ -683,10 +695,15 @@ def send_discord_message(
 			webhook.add_file(content, name)
 
 	# Edit webhook if it already existed, otherwise send new webhook
-	if cached_response:
-		response = webhook.edit(cached_response)
-	else:
-		response = webhook.execute()
+	try:
+		if cached_response:
+			response = webhook.edit(cached_response)
+		else:
+			response = webhook.execute()
+	except requests.exceptions.RequestException as exc:
+		logger.warning('Discord notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
+		return False
+	if not cached_response:
 		if use_discord_embed and response.status_code == 200:
 			DISCORD_WEBHOOKS_CACHE.set(title, pickle.dumps(response))
 
