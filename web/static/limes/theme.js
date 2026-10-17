@@ -19,8 +19,8 @@
   }
 
   function sync() {
-    var box = document.getElementById('dark-mode-check');
-    if (box) box.checked = current() === 'dark';
+    var btn = document.getElementById('theme-toggle');
+    if (btn) btn.setAttribute('aria-pressed', current() === 'dark' ? 'true' : 'false');
   }
 
   function apply(theme) {
@@ -40,8 +40,8 @@
   }
 
   document.addEventListener('DOMContentLoaded', sync);
-  document.addEventListener('change', function (e) {
-    if (e.target && e.target.id === 'dark-mode-check') set(e.target.checked ? 'dark' : 'light');
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.closest && e.target.closest('#theme-toggle')) set(current() === 'dark' ? 'light' : 'dark');
   });
 
   window.limesTheme = {

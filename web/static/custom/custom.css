@@ -173,10 +173,6 @@ table.domain_details_table td:nth-child(1) {
 }
 
 
-.navbar-custom .app-search{
-  max-width: 300px !important;
-}
-
 .offcanvas-size-lg {
   width: min(95vw, 700px) !important;
 }
