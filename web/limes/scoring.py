@@ -6,9 +6,12 @@ asset scores (weakest-link). Findings count only from each root's latest scan wh
 stage succeeded, so a fix confirmed by a rescan recovers at once and old scans never double-count.
 Failed risk checks (RiskCheck) last checked within CHECK_FRESH add one penalty each, at their own asset only.
 """
+import logging
 import math
 from datetime import timedelta
 
+from celery.exceptions import SoftTimeLimitExceeded
+from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
@@ -182,6 +185,7 @@ def project_score(project):
             'top_penalties': rows[:TOP_PENALTIES]}
 
 
+logger = logging.getLogger(__name__)
 GRADE_ORDER = 'ABCDF'
 SCORE_DROP_POINTS = 50
 
@@ -203,14 +207,21 @@ def snapshot_scores():
     from limes.alerts import events
     today = timezone.localdate()
     for project in Project.objects.all():
-        s = project_score(project)
-        snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
-            'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'coverage': s['coverage'],
-            'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
-        if created:  # a same-day rerun updates the row and must not alert twice
-            prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()
-            change = score_event(prev, snap)
-            if change:
-                events.record(project, change[0], change[1],
-                              detail={'from': prev.score, 'to': snap.score, 'grade': snap.grade})
+        try:
+            s = project_score(project)
+            # snapshot and event commit together: a failed event leaves no row, so the next run retries it
+            with transaction.atomic():
+                snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
+                    'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'coverage': s['coverage'],
+                    'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
+                if created:  # a same-day rerun updates the row and must not alert twice
+                    prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()
+                    change = score_event(prev, snap)
+                    if change:
+                        events.record(project, change[0], change[1],
+                                      detail={'from': prev.score, 'to': snap.score, 'grade': snap.grade})
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception:
+            logger.exception('Score snapshot failed for project %s', project.pk)
     return {'projects': Project.objects.count()}
