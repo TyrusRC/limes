@@ -16,7 +16,10 @@ from limes import scope
 TIMEOUT = 5
 MAX_REDIRECTS = 3
 FRESH = timedelta(days=30)
-LOCAL_REFUSALS = {'NO_PROTOCOLS_AVAILABLE', 'NO_CIPHERS_AVAILABLE'}
+# SSLError reasons that mean the server refused the legacy protocol. Anything else is unknown.
+SERVER_REFUSALS = {'UNSUPPORTED_PROTOCOL', 'TLSV1_ALERT_PROTOCOL_VERSION', 'WRONG_VERSION_NUMBER',
+                   'SSLV3_ALERT_HANDSHAKE_FAILURE', 'TLSV1_ALERT_INSUFFICIENT_SECURITY', 'NO_SHARED_CIPHER',
+                   'TLSV1_ALERT_HANDSHAKE_FAILURE'}
 LEGACY = ('TLSv1', 'TLSv1_1')
 
 
@@ -144,22 +147,18 @@ def _cert(host, connect):
 
 
 def _legacy(host, version, connect):
-    """True: protocol negotiated. False: refused. None: unknown."""
+    """True: protocol negotiated. False: refused by the server. None: unknown.
+    Allowlist: only explicit server refusals are False, so a local-side failure is never a pass."""
     try:
         connect(host, version)
         return True
-    except ContextRefused:
-        return None
     except ssl.SSLCertVerificationError:
         return True  # got as far as certificate verification
     except ssl.SSLError as e:
-        # the local library cannot speak this protocol: unknown, not a refusal by the server
-        return None if getattr(e, 'reason', None) in LOCAL_REFUSALS else False
+        return False if getattr(e, 'reason', None) in SERVER_REFUSALS else None
     except ConnectionResetError:
         return False
-    except OSError:  # timeouts, unreachable
-        return None
-    except ValueError:
+    except (ContextRefused, OSError, ValueError):  # local refusal, timeouts, unreachable
         return None
 
 
