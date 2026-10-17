@@ -39,9 +39,9 @@ $(document).ready(function() {
 	var is_subd_grouping = false;
 	var subd_grouping_col = 8;
 	{% if request.GET.ip_address %}
-	var url = '/api/listDatatableSubdomain/?&project={{current_project.slug}}&format=datatables&ip_address={{request.GET.ip_address}}';
+	var url = '/api/listDatatableSubdomain/?&project={{current_project.slug}}&format=datatables&ip_address={{request.GET.ip_address|urlencode}}';
 	{% elif request.GET.name %}
-	var url = '/api/listDatatableSubdomain/?&project={{current_project.slug}}&format=datatables&name={{request.GET.name}}';
+	var url = '/api/listDatatableSubdomain/?&project={{current_project.slug}}&format=datatables&name={{request.GET.name|urlencode}}';
 	{% else %}
 	var url = '/api/listDatatableSubdomain/?&project={{current_project.slug}}&format=datatables';
 	{% endif %}
