@@ -61,9 +61,9 @@ class WebEvalTest(SimpleTestCase):
         'cookies': ['a=1; Secure; HttpOnly; SameSite=Lax'],
     }
 
-    def ev(self, https, http):
+    def ev(self, https, http, host='h'):
         from limes.checks import web
-        return _by_id(web.evaluate({'https': https, 'http': http}))
+        return _by_id(web.evaluate({'host': host, 'https': https, 'http': http}))
 
     def test_good_https_site_passes(self):
         res = self.ev(self.GOOD, {'status': 301, 'location': 'https://h/'})
@@ -96,6 +96,20 @@ class WebEvalTest(SimpleTestCase):
     def test_redirect_to_other_host_fails(self):
         res = self.ev(self.GOOD, {'status': 302, 'location': 'https://evil.example/'})
         self.assertEqual(res['web.http_no_redirect'].status, 'fail')
+
+    def test_redirect_host_is_checked_when_https_is_unknown(self):
+        for https in (None, 'error'):
+            for loc, want in (('https://evil.example/', 'fail'), ('https://evil.example\\@h/', 'fail'),
+                              ('https://h:8443/', 'fail'), ('https://H/login', 'pass')):
+                res = self.ev(https, {'status': 301, 'location': loc})
+                self.assertEqual(res['web.http_no_redirect'].status, want, (https, loc))
+        self.assertEqual(self.ev(None, {'status': 301, 'location': 'https://h/'}, host=None)
+                         ['web.http_no_redirect'].status, 'error')
+
+    def test_collector_records_the_probed_host(self):
+        from limes.checks import collect
+        from limes.identity import ScanIdentity
+        self.assertEqual(collect.observe_http('h', ScanIdentity(headers=[]), get=lambda url, **kw: _Resp(404))['host'], 'h')
 
     def test_https_error_is_error(self):
         res = self.ev('error', None)
@@ -337,7 +351,7 @@ class CollectTest(SimpleTestCase):
         res = {r.check: r.status for r in web.evaluate(obs)}
         self.assertNotIn('pass', [res[c] for c in res if c != 'web.http_no_redirect'])
         refused = collect.observe_http('h', self.ident(), get=lambda url, **kw: (_ for _ in ()).throw(requests.exceptions.ConnectionError()))
-        self.assertEqual(refused, {'https': None, 'http': None})
+        self.assertEqual(refused, {'host': 'h', 'https': None, 'http': None})
 
     def test_evidence_never_contains_request_secrets(self):
         from limes.checks import collect
