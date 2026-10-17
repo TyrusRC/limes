@@ -1,4 +1,5 @@
-from unittest import mock
+import os
+from unittest import mock, skipUnless
 
 from django.test import SimpleTestCase
 
@@ -26,3 +27,36 @@ class MantisMapTest(SimpleTestCase):
             out = mantis.audit_dir('/code', packs=['secrets', 'web'])
         m.assert_called_once()
         self.assertEqual(len(out), 1)
+
+    def test_rule_id_drops_install_path(self):
+        # opengrep prefixes rule ids with the rule file's dotted install path
+        f = {'rule_id': 'usr.local.lib.python3.10.dist-packages.mantis.resources.rules.secrets.secret-aws-access-key-id',
+             'severity': 'ERROR', 'message': 'AWS Access Key ID literal', 'metadata': {}}
+        v = mantis.map_finding(f, source_url='https://t.test/app.js')
+        self.assertEqual(v['template_id'], 'secrets.secret-aws-access-key-id')
+        self.assertEqual(v['type'], 'secrets.secret-aws-access-key-id')
+        self.assertTrue(v['name'].startswith('secrets.secret-aws-access-key-id: '))
+        self.assertNotIn('dist-packages', v['name'])
+
+    def test_audit_dir_keeps_extra_engines_off(self):
+        # mantis >= 0.2 runs trivy/grype by default, which reach the network
+        with mock.patch('limes.integrations.mantis._audit', return_value=[]) as m:
+            mantis.audit_dir('/code', packs=['secrets'])
+        self.assertEqual(m.call_args.kwargs.get('engines'), 'none')
+
+
+def _real_mantis():
+    import importlib.util
+    import shutil
+    return importlib.util.find_spec('mantis') is not None and shutil.which('opengrep') is not None
+
+
+@skipUnless(_real_mantis(), 'mantis-sast and opengrep are installed in the scan image only')
+class RealMantisTest(SimpleTestCase):
+    def test_finds_a_secret_in_crawled_js(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'app.js'), 'w') as f:
+                f.write('var k = "AKIAIOSFODNN7EXAMPLE";\n')  # AWS's documented example key
+            found = [mantis.map_finding(x, 'https://t.test/app.js') for x in mantis.audit_dir(d, packs=['secrets'])]
+        self.assertIn('secrets.secret-aws-access-key-id', [v['template_id'] for v in found])
