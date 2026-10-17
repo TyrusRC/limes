@@ -191,7 +191,7 @@ Add or Import Targets
         padding: '2em',
         onOpen: function() {
           swal.showLoading()
-          return fetch(`/api/tools/ip_to_domain/?format=json&ip_address=${ip_address.value}`, {
+          return fetch(`/api/tools/ip_to_domain/?format=json&ip_address=${encodeURIComponent(ip_address.value)}`, {
             method: 'GET',
             credentials: "same-origin",
             headers: {
@@ -205,16 +205,17 @@ Add or Import Targets
               // #resolved_domains_div
               $("#all_domains_checkbox").show();
               if(Array.isArray(json_data['ip_address'])) {
-                $('#resolved_domains_div').append(`<b class='text-info'>${json_data['ip_address'].length} domains associated with IP Address ${json_data['orig']}</b></br>`);
+                $('#resolved_domains_div').append(`<b class='text-info'>${json_data['ip_address'].length} domains associated with IP Address ${htmlEncode(json_data['orig'])}</b></br>`);
                 $('#resolved_domains_div').append(`<b>Please select the domains to import.</b>`);
                 $('#resolved_domains_div').append(`<div id='domains_checkbox' class='mt-2 row'></div>`);
                 json_data['ip_address'].forEach((ip_info, index, array) => {
                   for (var domain in ip_info['domains']) {
+                    const d = htmlEncode(ip_info['domains'][domain]);
                     $('#domains_checkbox').append(`
                     <div class="col-xl-2 col-md-4 col-sm-6 col-12">
                       <div class="form-check">
-                        <input type="checkbox" class="form-check-input resolved_ip_domains" name="resolved_ip_domains" id="${ip_info['domains'][domain]}" value="${ip_info['domains'][domain]}">
-                        <label class="form-check-label" for="${ip_info['domains'][domain]}">${ip_info['domains'][domain]}</label>
+                        <input type="checkbox" class="form-check-input resolved_ip_domains" name="resolved_ip_domains" id="${d}" value="${d}">
+                        <label class="form-check-label" for="${d}">${d}</label>
                       </div>
                     </div>`
                     );
@@ -239,7 +240,7 @@ Add or Import Targets
               $("#all_domains_checkbox").hide();
               swal.close();
               swal({
-                title: `Sorry, no domains associated with IP Address ${ip_address.value}!`,
+                title: `Sorry, no domains associated with IP Address ${htmlEncode(ip_address.value)}!`,
                 type: 'error',
                 padding: '2em'
               })

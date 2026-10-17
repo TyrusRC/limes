@@ -177,7 +177,7 @@ Quick Scan History
                         <i class="mdi mdi-chevron-right"></i>
                       </button>
                       <div class="dropdown-menu" style="">
-                        <a class="dropdown-item text-primary" href="javascript:show_scan_configuration('{{scan_history.cfg_starting_point_path}}', {{scan_history.cfg_out_of_scope_subdomains}}, {{scan_history.cfg_excluded_paths}}, {{scan_history.cfg_imported_subdomains}})"><i class="fe-settings"></i>&nbsp;Show Configurations</a>
+                        <a class="dropdown-item text-primary" href="javascript:show_scan_configuration('{{ scan_history.cfg_starting_point_path|default_if_none:''|escapejs|urlencode }}', [{% for v in scan_history.cfg_out_of_scope_subdomains %}'{{ v|escapejs|urlencode }}',{% endfor %}], [{% for v in scan_history.cfg_excluded_paths %}'{{ v|escapejs|urlencode }}',{% endfor %}], [{% for v in scan_history.cfg_imported_subdomains %}'{{ v|escapejs|urlencode }}',{% endfor %}])"><i class="fe-settings"></i>&nbsp;Show Configurations</a>
                         {% if user|can:'initiate_scans_subscans' %}
                           {% if scan_history.scan_status == 0 or scan_history.scan_status == 2 or scan_history.scan_status == 3 %}
                           <a class="dropdown-item text-primary" href="{% url 'start_scan' current_project.slug scan_history.domain.id %}?rescan=true&history_id={{ scan_history.id }}">
@@ -198,7 +198,7 @@ Quick Scan History
                           <div class="dropdown-divider"></div>
                         {% endif %}
                         {% if scan.scan_status != -1%}
-                          <a href="#" class="dropdown-item text-dark" onclick="initiate_report(id={{scan_history.id}}, has_subdomain_scan={% if 'subdomain_discovery' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, has_vulnerability_scan={% if 'vulnerability_scan' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, domain_name='{{ scan_history.domain.name }}')">
+                          <a href="#" class="dropdown-item text-dark" onclick="initiate_report(id={{scan_history.id}}, has_subdomain_scan={% if 'subdomain_discovery' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, has_vulnerability_scan={% if 'vulnerability_scan' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, domain_name='{{ scan_history.domain.name|escapejs }}')">
                           <i class="fe-download"></i>&nbsp;Scan Report</a>
                         {% endif %}
                         </div>
@@ -346,7 +346,7 @@ Quick Scan History
         for (var i = 0; i < selectedData.length; i++) {
           col1_data = selectedData[i];
           domain_name = col1_data.match(/([^\n]+)/g)[0];
-          target_array.push(domain_name);
+          target_array.push(extractContent(domain_name).trim());
         }
 
         target_array = Array.from(new Set(target_array));
@@ -354,7 +354,7 @@ Quick Scan History
           select = document.getElementById('filterByTarget');
           var option = document.createElement('option');
           option.value = target_array[target];
-          option.innerHTML = target_array[target];
+          option.textContent = target_array[target];
           select.appendChild(option);
         }
 
@@ -371,7 +371,7 @@ Quick Scan History
           select = document.getElementById('filterByScanType');
           var option = document.createElement('option');
           option.value = scan_type_array[engine];
-          option.innerHTML = scan_type_array[engine];
+          option.textContent = scan_type_array[engine];
           select.appendChild(option);
         }
       }
@@ -382,11 +382,11 @@ Quick Scan History
     $.getJSON(`/api/listOrganizations?&format=json`, function(data) {
       data = data['organizations']
       for (organization in data) {
-        name = htmlEncode(data[organization]['name']);
+        name = data[organization]['name'];
         select = document.getElementById('filterByOrganization');
         var option = document.createElement('option');
         option.value = name;
-        option.innerHTML = name;
+        option.textContent = name;
         select.appendChild(option);
       }
     }).fail(function() {});
@@ -397,18 +397,18 @@ Quick Scan History
       select = document.getElementById('filterByScanStatus');
       var option = document.createElement('option');
       option.value = status_types[status];
-      option.innerHTML = status_types[status];
+      option.textContent = status_types[status];
       select.appendChild(option);
     }
 
     var org_filter = document.getElementById('filterByOrganization');
     org_filter.addEventListener('click', function() {
       table.search(this.value).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Organization: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Organization: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by organization ${this.value}`,
+        text: `Filtering by organization ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -435,11 +435,11 @@ Quick Scan History
         default:
         badge_color = 'primary'
       }
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-${badge_color}">Scan Status: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-${badge_color}">Scan Status: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by scan status ${this.value}`,
+        text: `Filtering by scan status ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -447,11 +447,11 @@ Quick Scan History
     var engine_filter = document.getElementById('filterByScanType');
     engine_filter.addEventListener('click', function() {
       table.search(this.value).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Scan Engine: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Scan Engine: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by Engine ${this.value}`,
+        text: `Filtering by Engine ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -459,11 +459,11 @@ Quick Scan History
     var target_filter = document.getElementById('filterByTarget');
     target_filter.addEventListener('click', function() {
       table.search(this.value).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Target/Domain: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Target/Domain: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by Engine ${this.value}`,
+        text: `Filtering by Engine ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -657,16 +657,16 @@ function initiate_report(id, has_subdomain_scan, has_vulnerability_scan, domain_
     $('input[name="reportType"][value="vuln"]').prop('disabled', true);
   }
 
-  $('#generateReportBtn').attr('onClick', `generate_report(${id}, '${domain_name}')`);
-  $('#previewReportBtn').attr('onClick', `preview_report(${id}, '${domain_name}')`);
+  $('#generateReportBtn').attr('onClick', `generate_report(${id}, '${jsEscape(domain_name)}')`);
+  $('#previewReportBtn').attr('onClick', `preview_report(${id}, '${jsEscape(domain_name)}')`);
 }
 
 function preview_report(id, domain_name){
   var report_type = $('input[name="reportType"]:checked').val();
   var is_ignore_info_vuln = $('#excludeInfoFindings').is(":checked");
   var report_template = $('#templateSelect').val();
-  var url = `/scan/create_report/${id}?report_type=${report_type}`;
-  url += `&report_template=${report_template}`;
+  var url = `/scan/create_report/${id}?report_type=${encodeURIComponent(report_type)}`;
+  url += `&report_template=${encodeURIComponent(report_template)}`;
   if (is_ignore_info_vuln) {
     url += `&ignore_info_vuln`
   }
@@ -678,8 +678,8 @@ function preview_report(id, domain_name){
     var report_type = $('input[name="reportType"]:checked').val();
     var is_ignore_info_vuln = $('#excludeInfoFindings').is(":checked");
     var report_template = $('#templateSelect').val();
-    var url = `/scan/create_report/${id}?report_type=${report_type}&download`;
-    url += `&report_template=${report_template}`;
+    var url = `/scan/create_report/${id}?report_type=${encodeURIComponent(report_type)}&download`;
+    url += `&report_template=${encodeURIComponent(report_template)}`;
     if (is_ignore_info_vuln) {
       url += `&ignore_info_vuln`
     }
