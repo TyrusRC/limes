@@ -28,11 +28,11 @@ $(document).ready(function() {
 	var is_vuln_grouping = false;
 	var vuln_grouping_col = 3;
 	{% if request.GET.domain %}
-		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&domain={{request.GET.domain}}';
+		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&domain={{request.GET.domain|urlencode}}';
 	{% elif request.GET.vulnerability_name %}
-		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&vulnerability_name={{request.GET.vulnerability_name}}';
+		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&vulnerability_name={{request.GET.vulnerability_name|urlencode}}';
 	{% elif request.GET.subdomain %}
-		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&subdomain={{request.GET.subdomain}}';
+		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables&subdomain={{request.GET.subdomain|urlencode}}';
 	{% else %}
 		var vuln_ajax_url = '/api/listVulnerability/?project={{current_project.slug}}&format=datatables';
 	{% endif %}
@@ -59,7 +59,7 @@ $(document).ready(function() {
 		"order": [[ 6, "desc" ]],
 		"rowGroup": {
 			"startRender": function(rows, group) {
-				return group + ' (' + rows.count() + ' Vulnerabilities)';
+				return htmlEncode(group) + ' (' + rows.count() + ' Vulnerabilities)';
 			}
 		},
 		"columns": vuln_datatable_columns,
@@ -90,7 +90,7 @@ $(document).ready(function() {
 			{
 				"render": function ( data, type, row ) {
 					if (data) {
-						return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${data.toUpperCase()}&nbsp;&nbsp;</span>`;
+						return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
 				},
 				"targets": 1,
@@ -98,7 +98,7 @@ $(document).ready(function() {
 			{
 				"render": function ( data, type, row ) {
 					if (data) {
-						return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${data.toUpperCase()}&nbsp;&nbsp;</span>`;
+						return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
 				},
 				"targets": 2,
@@ -138,30 +138,30 @@ $(document).ready(function() {
 					if (row['tags']) {
 						tags = '<div>';
 						row['tags'].forEach(tag => {
-							tags += `<span class="badge badge-${badge_color} me-1 mt-1" data-toggle="tooltip" data-placement="top" title="Tags">${tag.name}</span>`;
+							tags += `<span class="badge badge-${badge_color} me-1 mt-1" data-toggle="tooltip" data-placement="top" title="Tags">${htmlEncode(tag.name)}</span>`;
 						});
 						tags += '</div>';
 					}
 					if (row['cvss_metrics']) {
-						cvss_metrics_badge = `<div><span class="badge badge-outline-primary mt-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${row['cvss_metrics']}</span></div>`;
+						cvss_metrics_badge = `<div><span class="badge badge-outline-primary mt-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${htmlEncode(row['cvss_metrics'])}</span></div>`;
 					}
 					if (row['cve_ids'] || row['cwe_ids']) {
 						cve_cwe_badge += '<br>';
 					}
 					if (row['cve_ids']) {
 						row['cve_ids'].forEach(cve => {
-							cve_cwe_badge += `<a href="#" onclick="get_and_render_cve_details('${cve.name.toUpperCase()}')" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${cve.name.toUpperCase()}</a>`;
+							cve_cwe_badge += `<a href="#" onclick="get_and_render_cve_details('${jsEscape(cve.name.toUpperCase())}')" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${htmlEncode(cve.name.toUpperCase())}</a>`;
 						});
 					}
 					if (row['cwe_ids']) {
 						row['cwe_ids'].forEach(cwe => {
-							cve_cwe_badge += `<a href="https://google.com/search?q=${cwe.name.toUpperCase()}" target="_blank" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${cwe.name.toUpperCase()}</a>`;
+							cve_cwe_badge += `<a href="https://google.com/search?q=${encodeURIComponent(cwe.name.toUpperCase())}" target="_blank" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${htmlEncode(cwe.name.toUpperCase())}</a>`;
 						});
 					}
 					// if (cve_cwe_badge != "") {
 					// 	cve_cwe_badge += "";
 					// }
-					return `<b class="text-${color}">` + data + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
+					return `<b class="text-${color}">` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
 				},
 				"targets": 3,
 			},
@@ -186,7 +186,7 @@ $(document).ready(function() {
 						else{
 							badge = 'danger';
 						}
-						return `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${data}</span>`;
+						return `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${htmlEncode(data)}</span>`;
 					}
 					return '';
 				},
@@ -229,7 +229,7 @@ $(document).ready(function() {
 						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-more-horizontal"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
 						</a>
 						<div class="dropdown-menu" style="">
-						<a class="dropdown-item" href="javascript:fetch_gpt_vuln_details(${row['id']}, '${row['name']}');">Fetch GPT Vulnerability Details</a>
+						<a class="dropdown-item" href="javascript:fetch_gpt_vuln_details(${row['id']}, '${jsEscape(row['name'])}');">Fetch GPT Vulnerability Details</a>
 						<a class="text-danger dropdown-item btn-delete-vulnerability" href="#" id="${row['id']}">Delete Vulnerability</a>
 						</div>
 						</div>`;
@@ -241,6 +241,11 @@ $(document).ready(function() {
 					return htmlEncode(data);
 				},
 				"targets": 16,
+			},
+			{
+				// escape every column that has no render of its own
+				"render": $.fn.dataTable.render.text(),
+				"targets": "_all",
 			}
 		],
 		"initComplete": function(settings, json) {
