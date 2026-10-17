@@ -13,3 +13,11 @@ def evaluate(ports, complete):
         else:
             out.append(Result(check, 'pass' if complete else 'error', {}))
     return out
+
+
+def risky_check(ports):
+    """The net.exposed_<svc> check of the worst risky port (highest severity, then lowest port), else None."""
+    seen = [p for p in ports if p in RISKY_PORTS]
+    if not seen:
+        return None
+    return f'net.exposed_{RISKY_PORTS[min(seen, key=lambda p: (-RISKY_PORTS[p][1], p))][0]}'

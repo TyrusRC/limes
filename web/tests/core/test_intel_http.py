@@ -1,9 +1,11 @@
+from datetime import date
 from unittest import mock
 
 import requests
+from django.core.cache import cache
 from django.test import SimpleTestCase
 
-from limes.intel import domains, http
+from limes.intel import domains, http, ratelimit
 
 
 class RegistrableTest(SimpleTestCase):
@@ -44,7 +46,7 @@ class Session:
 
 class GetJsonTest(SimpleTestCase):
     def setUp(self):
-        http._last.clear()
+        cache.clear()
         self.now, self.sleeps = [0.0], []
 
     def clock(self):
@@ -101,3 +103,36 @@ class GetJsonTest(SimpleTestCase):
         self.get(s, provider='crtsh')
         self.get(s, provider='crtsh')
         self.assertIn(5.0, self.sleeps)
+
+
+class BrokenCache:
+    def add(self, *a, **k):
+        raise ConnectionError('redis down')
+
+    incr = add
+
+
+class RateLimitTest(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+        ratelimit._local.clear()
+
+    def test_reserve_spaces_calls_across_processes(self):
+        self.assertEqual(ratelimit.reserve('internetdb', 1.0, now=100.2), 0)
+        self.assertAlmostEqual(ratelimit.reserve('internetdb', 1.0, now=100.2), 0.8)
+        self.assertEqual(ratelimit.reserve('ripestat', 0.25, now=100.2), 0)  # providers are independent
+
+    def test_reserve_falls_back_locally_when_cache_is_down(self):
+        self.assertEqual(ratelimit.reserve('p', 1.0, now=10.0, cache=BrokenCache()), 0)
+        self.assertAlmostEqual(ratelimit.reserve('p', 1.0, now=10.2, cache=BrokenCache()), 0.8)
+
+    def test_take_daily_and_per_tick(self):
+        self.assertTrue(all(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 1)) for _ in range(5000)))
+        self.assertFalse(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 1)))
+        self.assertTrue(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 2)))
+        self.assertEqual(ratelimit.per_tick(5000), 4)
+        self.assertEqual(ratelimit.per_tick(10000), 7)
+        self.assertEqual(ratelimit.per_tick(1), 1)
+
+    def test_take_daily_fails_closed_when_cache_is_down(self):
+        self.assertFalse(ratelimit.take_daily('internetdb', 5000, cache=BrokenCache()))
