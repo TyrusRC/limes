@@ -179,3 +179,75 @@ class RecentChangesTest(Base):
         self.assertEqual(rows[0]['asset'], 'a.x.com')
         self.assertIsNone(rows[1]['asset'])
         self.assertEqual(set(rows[0]), {'kind', 'title', 'severity', 'created_at', 'asset'})
+
+
+class OverviewDataTest(Base):
+    def test_riskiest_assets_follow_the_waived_score(self):
+        from startScan.models import IssueWaiver, TrackedIssue
+        a, b, clean = self.asset('a.x.com'), self.asset('b.x.com'), self.asset('c.x.com')
+        s = self.scan()
+        for asset, name, sev in ((a, 'crit', 4), (a, 'high', 3), (a, 'low', 1), (b, 'med', 2)):
+            Vulnerability.objects.create(scan_history=s, asset=asset, name=name, template_id=name, severity=sev,
+                                         open_status=True)
+        issue = TrackedIssue.objects.create(project=self.p, asset=a, key='crit', source='finding', severity=4)
+        IssueWaiver.objects.create(issue=issue, kind='accepted_risk', reason='r')
+        rows = asm_stats(self.p)['risky_assets']
+        self.assertEqual([r['value'] for r in rows], ['a.x.com', 'b.x.com'])  # clean (950) assets left out
+        self.assertEqual((rows[0]['score'], rows[0]['grade'], rows[0]['kind']), (799, 'B', 'hostname'))
+        self.assertEqual(rows[0]['counts'], {'critical': 0, 'high': 1, 'medium': 0, 'low': 1})
+
+    def test_grade_band_comes_from_scoring(self):
+        from dashboard.stats import grade_band
+        self.assertEqual(grade_band(749), {'floor': 600, 'top': 799, 'next': 'A', 'to_next': 51})
+        self.assertEqual(grade_band(950), {'floor': 800, 'top': 950, 'next': None, 'to_next': None})
+        self.assertIsNone(grade_band(None))
+
+    def test_last_scan_and_empty_project(self):
+        self.scan(ago=timedelta(days=2), vuln=False)
+        self.scan('y.com', ago=timedelta(minutes=1), vuln=False)
+        s = asm_stats(self.p)
+        self.assertEqual(s['monitoring']['last_scan'], self.now - timedelta(days=2))
+        empty = asm_stats(Project.objects.create(name='e', slug='e', insert_date=self.now))
+        self.assertEqual((empty['risky_assets'], empty['monitoring']['last_scan'], empty['risk']['band']), ([], None, None))
+
+
+class OverviewPageTest(Base):
+    XSS = '<img src=x onerror=alert(1)>'
+
+    def setUp(self):
+        super().setUp()
+        from django.contrib.auth.models import User
+        from django.contrib.auth.signals import user_logged_in
+        from dashboard.views import on_user_logged_in
+        user_logged_in.disconnect(on_user_logged_in)
+        self.addCleanup(user_logged_in.connect, on_user_logged_in)
+        self.client.force_login(User.objects.create_user('u', password='p'))
+
+    def page(self, slug):
+        self.client.get(f'/{slug}/dashboard/')  # warm-up (lazy prefs creation)
+        r = self.client.get(f'/{slug}/dashboard/')
+        self.assertEqual(r.status_code, 200)
+        return r.content.decode()
+
+    def test_attacker_text_is_escaped_and_raw_shown_only_when_waived(self):
+        from startScan.models import ChangeEvent, IssueWaiver, TrackedIssue
+        a = self.asset(self.XSS + '.x.com')
+        s = self.scan()
+        Vulnerability.objects.create(scan_history=s, asset=a, name='n', template_id='t', severity=3, open_status=True)
+        ChangeEvent.objects.create(project=self.p, kind='issue_new', severity=3, title='New: ' + self.XSS, asset=a)
+        html = self.page('p')
+        self.assertNotIn(self.XSS, html)
+        self.assertIn('&lt;img src=x onerror=alert(1)&gt;.x.com', html)  # riskiest assets and feed
+        self.assertIn('New: &lt;img', html)
+        self.assertNotIn('id="dash_raw"', html)
+        IssueWaiver.objects.create(kind='accepted_risk', reason='r', issue=TrackedIssue.objects.create(
+            project=self.p, asset=a, key='t', source='finding', severity=3))
+        invalidate(self.p.id)
+        self.assertIn('id="dash_raw"', self.page('p'))
+
+    def test_empty_project_shows_not_assessed(self):
+        Project.objects.create(name='e', slug='e', insert_date=self.now)
+        html = self.page('e')
+        self.assertIn('No owned assets yet.', html)
+        self.assertIn('No changes recorded yet.', html)
+        self.assertNotIn('ov-gauge-value', html)

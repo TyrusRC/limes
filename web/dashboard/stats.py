@@ -10,6 +10,7 @@ from django.utils import timezone
 STATS_TTL = 60
 WEEK = timedelta(days=7)
 LIST_LIMIT = 10
+RISKY_LIMIT = 6
 OWNED = ('owned_root', 'owned_host')
 SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 
@@ -28,7 +29,40 @@ def _risk(project):
     risk = scoring.project_score(project)
     snaps = ScoreSnapshot.objects.filter(project=project).order_by('-date').values('date', 'score', 'version')[:30]
     risk['trend'] = [{'date': s['date'].isoformat(), 'score': s['score'], 'version': s['version']} for s in reversed(list(snaps))]
+    risk['band'] = grade_band(risk['score'])
+    risk['max_score'] = scoring.MAX_SCORE
     return risk
+
+
+def grade_band(score):
+    """The scoring model's band around score: {floor, top, next grade, points to it}; None when unscored."""
+    from limes import scoring
+    if score is None:
+        return None
+    floors = scoring.GRADES  # [(floor, grade)], best first
+    i = next(i for i, (floor, _) in enumerate(floors) if score >= floor)
+    top = floors[i - 1][0] - 1 if i else scoring.MAX_SCORE
+    return {'floor': floors[i][0], 'top': top, 'next': floors[i - 1][1] if i else None,
+            'to_next': floors[i - 1][0] - score if i else None}
+
+
+def _risky_assets(project):
+    """Assessed assets below the maximum, weakest first, scored the way the headline is (waivers left out).
+    NOTE: recomputes the baselines project_score already built; cached for STATS_TTL. Upgrade: share them."""
+    from limes import scoring
+    from startScan.models import Asset
+    penalties, assessed = scoring.current_issues(project)
+    waived = scoring.waived_keys(project)
+    rows = []
+    for a in Asset.objects.filter(id__in=assessed).only('id', 'value', 'kind', 'last_seen'):
+        live = scoring._live(a.id, penalties.get(a.id, {}), waived)
+        score = scoring._score(live)
+        if score < scoring.MAX_SCORE:
+            sevs = list(live.values())
+            rows.append({'value': a.value, 'kind': a.kind, 'score': score, 'grade': scoring.grade(score),
+                         'last_seen': a.last_seen, 'counts': {n: sevs.count(v) for v, n in SEVERITY_FIELDS.items()}})
+    rows.sort(key=lambda r: (r['score'], r['value']))
+    return rows[:RISKY_LIMIT]
 
 
 def _inventory(project):
@@ -90,10 +124,11 @@ def _monitoring(project, now):
     # NOTE: due_roots spans every project; fine for hundreds of roots, cached for STATS_TTL
     due = [a for a in continuous.due_roots(now) if a.project_id == project.id][:5]
     last_auto = scans.filter(initiated_by__isnull=True).order_by('-start_scan_date').values_list('start_scan_date', flat=True).first()
+    last_scan = scans.order_by('-start_scan_date').values_list('start_scan_date', flat=True).first()
     return {'enabled': settings.CONTINUOUS_SCANS,
             'running': scans.filter(scan_status__in=continuous.IN_PROGRESS).count(),
             'next_due': [{'value': a.value, 'cadence_tier': a.cadence_tier} for a in due],
-            'last_auto': last_auto}
+            'last_auto': last_auto, 'last_scan': last_scan}
 
 
 def _recent_changes(project):
@@ -113,6 +148,7 @@ def asm_stats(project):
         'changes': _changes(project, now),
         'recent_changes': _recent_changes(project),
         'findings': _findings(project),
+        'risky_assets': _risky_assets(project),
         'monitoring': _monitoring(project, now),
         'activity': list(ScanActivity.objects.filter(scan_of__domain__project=project).order_by('-time')[:15]),
     }

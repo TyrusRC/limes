@@ -2,173 +2,171 @@
 {% load humanize %}
 {% load static %}
 {% block title %}
-Dashboard
+Overview
 {% endblock title %}
 
-{% block page_title %}
-Dashboard
-{% endblock page_title %}
+{% block page_title %}Overview{% endblock page_title %}
 
 {% block custom_js_css_link %}
-<link rel="stylesheet" type="text/css" href="{% static 'custom/custom.css' %}">
+<link rel="stylesheet" href="{% static 'limes/overview.css' %}">
 {% endblock custom_js_css_link %}
-
-{% block breadcrumb_title %}
-<span class="badge badge-soft-info">Limes {{ LIMES_CURRENT_VERSION }}</span>
-{% endblock breadcrumb_title %}
 
 {% block main_content %}
 {% url 'assets' slug=project.slug as assets_url %}
-<div class="row">
-  <div class="col-xl-5">
-    <div class="card" id="dash_risk">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h4 class="header-title mb-0">Risk</h4>
-          <a href="{{ assets_url }}" class="btn btn-xs btn-soft-primary">Assets</a>
+{% url 'issues' slug=project.slug as issues_url %}
+<p class="ov-sub">
+  <span>{{ project.name }}</span>
+  <span>{% if monitoring.last_scan %}Last scan {{ monitoring.last_scan|naturaltime }}{% else %}No scans yet{% endif %}</span>
+  <span>Continuous scanning {% if monitoring.enabled %}on{% else %}off{% endif %}{% if monitoring.running %} · {{ monitoring.running }} running{% endif %}</span>
+  <span>Scoring model {{ risk.version }}</span>
+</p>
+
+<div class="ov-grid">
+  <section class="card ov-score" id="dash_risk" aria-labelledby="h-score">
+    <div class="ov-card-head"><h2 id="h-score">Security score</h2><span class="ov-meta">of {{ risk.max_score }}</span></div>
+    <div class="ov-card-body">
+      {% if risk.score is not None %}
+      <div class="ov-gauge ov-grade-{{ risk.grade|lower }}" role="img" aria-label="Score {{ risk.score }} out of {{ risk.max_score }}, grade {{ risk.grade }}">
+        <svg viewBox="0 0 196 196" aria-hidden="true">
+          <g transform="rotate(135 98 98)" fill="none" stroke-width="14" stroke-linecap="round">
+            <circle class="ov-gauge-track" cx="98" cy="98" r="84" pathLength="1000" stroke-dasharray="750 1000"/>
+            <circle class="ov-gauge-value" cx="98" cy="98" r="84" pathLength="1000" stroke-dasharray="{% widthratio risk.score risk.max_score 750 %} 1000"/>
+          </g>
+        </svg>
+        <div class="ov-gauge-center"><span class="ov-gauge-score">{{ risk.score }}</span><span class="ov-gauge-label">headline score</span></div>
+        <div class="ov-gauge-ends" aria-hidden="true"><span>0</span><span>{{ risk.max_score }}</span></div>
+      </div>
+      <div class="ov-score-meta">
+        <span class="ov-grade ov-grade-lg ov-grade-{{ risk.grade|lower }}" aria-hidden="true">{{ risk.grade }}</span>
+        <div><strong>Grade {{ risk.grade }}</strong>
+          <span>{{ risk.band.floor }}–{{ risk.band.top }} · {% if risk.band.next %}{{ risk.band.to_next }} point{{ risk.band.to_next|pluralize }} to {{ risk.band.next }}{% else %}top grade{% endif %}</span></div>
+      </div>
+      {% if risk.raw_score != risk.score %}
+      <div class="ov-score-raw" id="dash_raw">
+        <span>Raw <strong>{{ risk.raw_score }}</strong> before waivers</span>
+        <a href="{{ issues_url }}">{{ risk.waived_count }} waived</a>
+      </div>
+      {% endif %}
+      <p class="ov-note">
+        {% if risk.coverage is not None %}{% widthratio risk.coverage 1 100 %}%{% else %}n/a{% endif %} of owned roots scanned in 30 days{% if risk.unassessed %} · {{ risk.unassessed }} assets not yet scanned{% endif %}
+      </p>
+      {% else %}
+      <div class="ov-gauge ov-gauge-empty" aria-hidden="true">
+        <svg viewBox="0 0 196 196">
+          <g transform="rotate(135 98 98)" fill="none" stroke-width="14" stroke-linecap="round">
+            <circle class="ov-gauge-track" cx="98" cy="98" r="84" pathLength="1000" stroke-dasharray="750 1000"/>
+          </g>
+        </svg>
+        <div class="ov-gauge-center"><span class="ov-gauge-score">—</span><span class="ov-gauge-label">not assessed</span></div>
+      </div>
+      <p class="ov-note ov-empty-note">
+        {% if risk.unassessed %}Not yet vulnerability-scanned: {{ risk.unassessed }} owned assets have no score.{% else %}No owned assets yet.{% endif %}
+      </p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card ov-trend" aria-labelledby="h-trend">
+    <div class="ov-card-head">
+      <div class="ov-trend-head"><h2 id="h-trend">Score trend</h2><span class="ov-meta">Last 30 days</span></div>
+      <span class="ov-delta" id="score_delta" hidden></span>
+    </div>
+    <div class="ov-card-body">
+      <div id="score_trend" role="img" aria-label="Headline score over the last 30 days"></div>
+      <p class="ov-note ov-empty-note" id="score_trend_empty" hidden>Not enough score history yet. A point is added each day.</p>
+      <div class="ov-legend" id="score_legend" hidden>
+        <span><i class="ov-swatch"></i>Headline score</span>
+        <span id="score_drop" hidden><i class="ov-swatch-event"></i><span></span></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card ov-surface" id="dash_inventory" aria-labelledby="h-surface">
+    <div class="ov-card-head"><h2 id="h-surface">Attack surface</h2><a class="ov-meta" href="{{ assets_url }}">View all</a></div>
+    <div class="ov-stats">
+      <div class="ov-stat"><div class="ov-stat-label"><i class="fe-globe" aria-hidden="true"></i>Root domains</div><div class="ov-stat-value">{{ inventory.owned_root|intcomma }}</div></div>
+      <div class="ov-stat"><div class="ov-stat-label"><i class="fe-server" aria-hidden="true"></i>Hostnames</div><div class="ov-stat-value">{{ inventory.owned_host|intcomma }}</div></div>
+      <div class="ov-stat"><div class="ov-stat-label"><i class="fe-share-2" aria-hidden="true"></i>IP addresses</div><div class="ov-stat-value">{{ inventory.ip|intcomma }}</div></div>
+      <div class="ov-stat"><div class="ov-stat-label"><i class="fe-link" aria-hidden="true"></i>Dependencies</div><div class="ov-stat-value">{{ inventory.dependency|intcomma }}</div></div>
+    </div>
+    <div class="ov-card-foot">
+      <span>{{ inventory.states.active }} active · {{ inventory.states.missing }} missing · {{ inventory.states.stale }} stale</span>
+      <a href="{{ assets_url }}?scope_tier=candidate" id="dash_review">{{ review.candidates }} to review{% if review.would_auto_confirm %} · {{ review.would_auto_confirm }} would auto-confirm{% endif %}</a>
+    </div>
+  </section>
+
+  <section class="card ov-sev" id="dash_findings" aria-labelledby="h-sev">
+    <h2 class="visually-hidden" id="h-sev">Open findings on owned assets, by severity</h2>
+    {% with total=findings.critical|add:findings.high|add:findings.medium|add:findings.low %}
+    <div class="ov-sev-strip">
+      <a class="ov-sev-tile" href="{{ issues_url }}"><span class="sev-critical">Critical</span><span class="ov-sev-count">{{ findings.critical|intcomma }}</span><span class="ov-sev-bar"><span class="bg-critical" style="width:{% widthratio findings.critical total 100 %}%"></span></span></a>
+      <a class="ov-sev-tile" href="{{ issues_url }}"><span class="sev-high">High</span><span class="ov-sev-count">{{ findings.high|intcomma }}</span><span class="ov-sev-bar"><span class="bg-high" style="width:{% widthratio findings.high total 100 %}%"></span></span></a>
+      <a class="ov-sev-tile" href="{{ issues_url }}"><span class="sev-medium">Medium</span><span class="ov-sev-count">{{ findings.medium|intcomma }}</span><span class="ov-sev-bar"><span class="bg-medium" style="width:{% widthratio findings.medium total 100 %}%"></span></span></a>
+      <a class="ov-sev-tile" href="{{ issues_url }}"><span class="sev-low">Low</span><span class="ov-sev-count">{{ findings.low|intcomma }}</span><span class="ov-sev-bar"><span class="bg-low" style="width:{% widthratio findings.low total 100 %}%"></span></span></a>
+    </div>
+    {% endwith %}
+  </section>
+
+  <section class="card ov-risky" id="dash_risky" aria-labelledby="h-risky">
+    <div class="ov-card-head"><h2 id="h-risky">Riskiest assets</h2><a class="ov-meta" href="{{ assets_url }}">All assets</a></div>
+    {% if risky_assets %}
+    <div class="table-responsive ov-flush">
+      <table class="table mb-0">
+        <thead><tr><th scope="col">Asset</th><th scope="col">Type</th><th scope="col">Score</th><th scope="col">Open issues <span class="ov-muted">(C · H · M · L)</span></th><th scope="col">Last seen</th></tr></thead>
+        <tbody>
+        {% for a in risky_assets %}
+          <tr>
+            <td class="ov-asset{% if a.kind == 'ip' %} mono{% endif %}">{{ a.value }}</td>
+            <td><span class="ov-tag">{% if a.kind == 'root_domain' %}Domain{% elif a.kind == 'hostname' %}Host{% elif a.kind == 'ip' %}IP{% else %}{{ a.kind }}{% endif %}</span></td>
+            <td><span class="ov-cell-score"><span class="ov-grade ov-grade-sm ov-grade-{{ a.grade|lower }}">{{ a.grade }}</span>{{ a.score }}</span></td>
+            <td><span class="ov-counts">
+              <span class="ov-count{% if a.counts.critical %} c{% endif %}" title="Critical">{{ a.counts.critical }}</span>
+              <span class="ov-count{% if a.counts.high %} h{% endif %}" title="High">{{ a.counts.high }}</span>
+              <span class="ov-count{% if a.counts.medium %} m{% endif %}" title="Medium">{{ a.counts.medium }}</span>
+              <span class="ov-count{% if a.counts.low %} l{% endif %}" title="Low">{{ a.counts.low }}</span>
+            </span></td>
+            <td class="ov-muted text-nowrap">{{ a.last_seen|naturaltime }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No open issues on assessed assets.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-changes" id="dash_changes" aria-labelledby="h-changes">
+    <div class="ov-card-head"><h2 id="h-changes">Recent changes</h2></div>
+    {% if recent_changes %}
+    <ul class="ov-feed">
+      {% for c in recent_changes|slice:":6" %}
+      <li>
+        {% if c.kind == 'issue_fixed' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-check"></i></span>
+        {% elif c.kind == 'issue_new' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-alert-triangle"></i></span>
+        {% elif c.kind == 'issue_regressed' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-rotate-ccw"></i></span>
+        {% elif c.kind == 'waiver_expired' %}<span class="ov-fi ov-fi-waived" aria-hidden="true"><i class="fe-clock"></i></span>
+        {% elif c.kind == 'score_dropped' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-trending-down"></i></span>
+        {% elif c.kind == 'asset_missing' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-eye-off"></i></span>
+        {% elif c.kind == 'asset_auto_confirmed' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-globe"></i></span>
+        {% else %}<span class="ov-fi" aria-hidden="true"><i class="fe-activity"></i></span>{% endif %}
+        <div class="ov-feed-text">
+          <div class="ov-feed-title">{{ c.title }}</div>
+          <div class="ov-feed-sub">{{ c.kind }}{% if c.asset %} · {{ c.asset }}{% endif %}</div>
         </div>
-        {% if risk.score is not None %}
-          <div class="d-flex align-items-baseline">
-            <span class="display-5 me-2">{{ risk.score }}</span>
-            <span class="badge bg-soft-primary text-primary font-16">{{ risk.grade }}</span>
-            {% if risk.raw_score != risk.score %}<small class="text-muted">raw {{ risk.raw_score }} {{ risk.raw_grade }}</small>{% endif %}
-          </div>
-          <p class="text-muted mb-2">
-            {% if risk.coverage is not None %}{% widthratio risk.coverage 1 100 %}%{% else %}n/a{% endif %} of owned roots scanned for vulnerabilities in 30 days
-            {% if risk.unassessed %}&middot; {{ risk.unassessed }} assets not yet scanned{% endif %}
-            &middot; {{ risk.version }}
-          </p>
-        {% elif risk.unassessed %}
-          <p class="text-muted">Not yet vulnerability-scanned: {{ risk.unassessed }} owned assets have no score.</p>
-        {% else %}
-          <p class="text-muted">No owned assets yet.</p>
-        {% endif %}
-        <div id="score_trend"></div>
-        {% if risk.top_penalties %}
-        <table class="table table-sm mb-0 mt-2">
-          <thead><tr><th>Asset</th><th>Issue</th><th>Severity</th><th>Points</th></tr></thead>
-          <tbody>
-          {% for p in risk.top_penalties %}
-            <tr><td>{{ p.asset }}</td><td>{{ p.issue }}</td><td>{{ p.severity }}</td><td>-{{ p.points }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-  <div class="col-xl-7">
-    <div class="card" id="dash_inventory">
-      <div class="card-body">
-        <h4 class="header-title mb-3">Inventory</h4>
-        <div class="row text-center">
-          <div class="col-3"><h3 class="mb-0">{{ inventory.owned_root|intcomma }}</h3><small class="text-muted">Owned roots</small></div>
-          <div class="col-3"><h3 class="mb-0">{{ inventory.owned_host|intcomma }}</h3><small class="text-muted">Owned hosts</small></div>
-          <div class="col-3"><h3 class="mb-0">{{ inventory.ip|intcomma }}</h3><small class="text-muted">IPs</small></div>
-          <div class="col-3"><h3 class="mb-0">{{ inventory.dependency|intcomma }}</h3><small class="text-muted">Dependencies</small></div>
-        </div>
-        <p class="text-muted mt-3 mb-2">
-          Active {{ inventory.states.active }} &middot; Missing {{ inventory.states.missing }} &middot;
-          Stale {{ inventory.states.stale }} &middot; Retired {{ inventory.states.retired }}
-        </p>
-        <a href="{{ assets_url }}?scope_tier=candidate" id="dash_review" class="d-block border rounded p-2">
-          <b>Review queue:</b> {{ review.candidates }} candidates
-          {% if review.would_auto_confirm %}&middot; {{ review.would_auto_confirm }} would auto-confirm{% endif %}
-        </a>
-      </div>
-    </div>
-    <div class="card" id="dash_findings">
-      <div class="card-body">
-        <h4 class="header-title mb-2">Findings on owned assets</h4>
-        <span class="badge bg-danger me-1">Critical {{ findings.critical }}</span>
-        <span class="badge bg-warning me-1">High {{ findings.high }}</span>
-        <span class="badge bg-info me-1">Medium {{ findings.medium }}</span>
-        <span class="badge bg-secondary">Low {{ findings.low }}</span>
-        <p class="text-muted mb-0 mt-2"><small>Open findings from each owned root's latest vulnerability scan.</small></p>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="row">
-  <div class="col-xl-7">
-    <div class="card" id="dash_changes">
-      <div class="card-body">
-        <h4 class="header-title mb-3">This week</h4>
-        <div class="row">
-          <div class="col-md-4">
-            <h5>New owned assets</h5>
-            {% for a in changes.new_owned %}<div>{{ a.value }} <small class="text-muted">{{ a.first_seen|naturaltime }}</small></div>
-            {% empty %}<p class="text-muted">None.</p>{% endfor %}
-          </div>
-          <div class="col-md-4">
-            <h5>Missing</h5>
-            {% for a in changes.missing %}<div>{{ a.value }} <small class="text-muted">seen {{ a.last_seen|naturaltime }}</small></div>
-            {% empty %}<p class="text-muted">None.</p>{% endfor %}
-          </div>
-          <div class="col-md-4">
-            <h5>Auto-confirmed</h5>
-            {% for a in changes.auto_confirmed %}<div>{{ a.value }}</div>
-            {% empty %}<p class="text-muted">None.</p>{% endfor %}
-          </div>
-        </div>
-        <h5 class="mt-3">Recent changes</h5>
-        {% for c in recent_changes %}<div>{{ c.kind }}: {{ c.title }}{% if c.asset %} <small class="text-muted">{{ c.asset }}</small>{% endif %} <small class="text-muted">{{ c.created_at|naturaltime }}</small></div>
-        {% empty %}<p class="text-muted">No changes recorded yet.</p>{% endfor %}
-      </div>
-    </div>
-  </div>
-  <div class="col-xl-5">
-    <div class="card" id="dash_monitoring">
-      <div class="card-body">
-        <h4 class="header-title mb-2">Monitoring</h4>
-        <p class="mb-1">Continuous scanning <b>{% if monitoring.enabled %}on{% else %}off{% endif %}</b> &middot; {{ monitoring.running }} running</p>
-        <p class="text-muted mb-2">Last automatic scan: {% if monitoring.last_auto %}{{ monitoring.last_auto|naturaltime }}{% else %}never{% endif %}</p>
-        {% if monitoring.next_due %}
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Next due</th><th>Cadence</th></tr></thead>
-          <tbody>{% for r in monitoring.next_due %}<tr><td>{{ r.value }}</td><td>{{ r.cadence_tier }}</td></tr>{% endfor %}</tbody>
-        </table>
-        {% else %}<p class="text-muted mb-0">Nothing due.</p>{% endif %}
-      </div>
-    </div>
-  </div>
-</div>
-<div class="row">
-  <div class="col-12">
-    <div class="card" id="dash_activity">
-      <div class="card-body">
-        <h4 class="header-title mb-2">Recent scan activity</h4>
-        {% for a in activity %}
-          <div><small class="text-muted">{{ a.time|naturaltime }}</small> {{ a.title }}</div>
-        {% empty %}<p class="text-muted mb-0">No scan activity yet.</p>{% endfor %}
-      </div>
-    </div>
-  </div>
+        <time class="ov-feed-time" datetime="{{ c.created_at|date:'c' }}" title="{{ c.created_at }}">{{ c.created_at|naturaltime }}</time>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No changes recorded yet.</p>
+    {% endif %}
+  </section>
 </div>
 {{ risk.trend|json_script:"score_trend_data" }}
 {% endblock main_content %}
 
 {% block page_level_script %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.29.0/apexcharts.min.js" integrity="sha512-fe6OklXva8AWoqdwgkE7Ni4uWgHGWxFQWZx4lYehzY2Qrst5YfogjAbnLd6egsoTrnjGI9/LYt1Ont2cKNbP2A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script type="text/javascript">
-$(document).ready(function() {
-  var trend = JSON.parse(document.getElementById('score_trend_data').textContent);
-  if (trend.length < 2) return;
-  var marks = [];
-  for (var i = 1; i < trend.length; i++) {
-    if (trend[i].version !== trend[i - 1].version) {
-      marks.push({x: Date.parse(trend[i].date), label: {text: 'model ' + trend[i].version, style: {fontSize: '10px'}}});
-      break;
-    }
-  }
-  new ApexCharts(document.getElementById('score_trend'), {
-    chart: {type: 'line', height: 140, toolbar: {show: false}, sparkline: {enabled: false}},
-    series: [{name: 'Score', data: trend.map(function(p) { return {x: Date.parse(p.date), y: p.score}; })}],
-    xaxis: {type: 'datetime', labels: {show: false}},
-    annotations: {xaxis: marks},
-    yaxis: {min: 0, max: 950},
-    stroke: {width: 2}
-  }).render();
-});
-</script>
+<script src="{% static 'limes/overview.js' %}"></script>
 {% endblock page_level_script %}
