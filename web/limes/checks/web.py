@@ -1,7 +1,7 @@
 """Website header checks from one HTTPS and one HTTP observation. Pure: no I/O."""
-from urllib.parse import urlparse
-
 from limes.checks.catalogue import CHECKS, Result
+from limes.checks.collect import same_host_https
+from limes.scope import target_host
 
 IDS = [i for i in CHECKS if i.startswith('web.')]
 HTTPS_DEPENDENT = [i for i in IDS if i not in ('web.https_missing', 'web.http_no_redirect')]
@@ -16,13 +16,15 @@ def _cookie_bad(raw):
     return not ('secure' in attrs and 'httponly' in attrs and any(a.startswith('samesite') for a in attrs))
 
 
-def _redirects_to_https(http, https):
+def _no_redirect_status(http, https, host):
+    """pass only for a redirect to https:// on the probed host itself (same rule as the collector)."""
     loc = (http.get('location') or '').strip()
     if not loc.lower().startswith('https://'):
-        return False
-    if isinstance(https, dict) and https.get('url'):
-        return (urlparse(loc).hostname or '').lower() == (urlparse(https['url']).hostname or '').lower()
-    return True
+        return 'fail'
+    host = host or (target_host(https['url']) if isinstance(https, dict) and https.get('url') else None)
+    if not host:
+        return 'error'  # cannot tell whether it stays on this host
+    return 'pass' if same_host_https(loc, host) else 'fail'
 
 
 def _https_checks(https):
@@ -61,8 +63,7 @@ def evaluate(obs):
         for cid in HTTPS_DEPENDENT:
             out[cid] = Result(cid, dep, {})
     if isinstance(http, dict):
-        ok = _redirects_to_https(http, https)
-        out['web.http_no_redirect'] = Result('web.http_no_redirect', 'pass' if ok else 'fail', {})
+        out['web.http_no_redirect'] = Result('web.http_no_redirect', _no_redirect_status(http, https, obs.get('host')), {})
     else:
         out['web.http_no_redirect'] = Result('web.http_no_redirect', 'error' if http == 'error' else 'not_applicable', {})
     return [out[i] for i in IDS]

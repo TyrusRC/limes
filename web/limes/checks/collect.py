@@ -96,7 +96,7 @@ def observe_http(host, ident, get=requests.get):
             return {'status': resp.status_code, 'location': resp.headers.get('Location', '')}
         finally:
             resp.close()
-    return {'https': _guard(lambda: _fetch_https(host, headers, get)), 'http': _guard(plain)}
+    return {'host': host, 'https': _guard(lambda: _fetch_https(host, headers, get)), 'http': _guard(plain)}
 
 
 # ---- TLS ----
