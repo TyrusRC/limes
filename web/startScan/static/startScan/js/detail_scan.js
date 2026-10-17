@@ -527,7 +527,7 @@ function get_screenshot(scan_id){
 			search_field = `${data[subdomain]['page_title']} ${data[subdomain]['name']} ${data[subdomain]['http_status']} ${ip_search_values} ${interesting_field}`;
 			link.setAttribute('data-lightbox', 'screenshot-gallery')
 			link.setAttribute('href', '/media/' + data[subdomain]['screenshot_path'])
-			link.setAttribute('data-title', `<a target='_blank' href='`+data[subdomain]['http_url']+`'><h3 style="color:white">`+data[subdomain]['name']+`</h3></a>`);
+			link.setAttribute('data-title', `<a target='_blank' href='`+safeHref(data[subdomain]['http_url'])+`'><h3 style="color:white">`+htmlEncode(data[subdomain]['name'])+`</h3></a>`);
 			link.classList.add('img-fluid');
 			link.classList.add('rounded');
 			link.classList.add('screenshot-gallery');
@@ -550,8 +550,8 @@ function get_screenshot(scan_id){
 				http_status_badge = 'warning';
 			}
 			page_title = data[subdomain]['page_title'] ? htmlEncode(data[subdomain]['page_title']) + '</br>': '' ;
-			subdomain_link = data[subdomain]['http_url'] ? `<a href="${data[subdomain]['http_url']}" target="_blank">${data[subdomain]['name']}</a>` : `<a href="https://${data[subdomain]['name']}" target="_blank">${data[subdomain]['name']}</a>`
-			http_status = data[subdomain]['http_status'] ? `<span class="m-1 float-end badge  badge-soft-${http_status_badge}">${data[subdomain]['http_status']}</span>` : '';
+			subdomain_link = data[subdomain]['http_url'] ? `<a href="${safeHref(data[subdomain]['http_url'])}" target="_blank">${htmlEncode(data[subdomain]['name'])}</a>` : `<a href="https://${htmlEncode(data[subdomain]['name'])}" target="_blank">${htmlEncode(data[subdomain]['name'])}</a>`
+			http_status = data[subdomain]['http_status'] ? `<span class="m-1 float-end badge  badge-soft-${http_status_badge}">${htmlEncode(data[subdomain]['http_status'])}</span>` : '';
 			figcaption.innerHTML = data[subdomain]['is_interesting'] ? page_title + subdomain_link + interesting_badge + http_status : page_title + subdomain_link + http_status;
 			figure.appendChild(figcaption);
 			link.appendChild(newImage);
@@ -564,10 +564,10 @@ function get_screenshot(scan_id){
 			// dynamic filtering menu
 			http_status = data[subdomain]['http_status'];
 			http_status_select = document.getElementById('http_select_filter');
-			if(!$('#http_select_filter').find("option:contains('" + http_status + "')").length){
+			if(![...http_status_select.options].some(o => o.textContent === String(http_status))){
 				var option = document.createElement('option');
 				option.value = ".http_" + http_status;
-				option.innerHTML = http_status;
+				option.textContent = http_status;
 				http_status_select.appendChild(option);
 			}
 
@@ -616,10 +616,10 @@ function get_screenshot(scan_id){
 		if (port_select) {
 			port_array.sort((a, b) => a - b);
 			for(var port in port_array){
-				if(!$('#ports_select_filter').find("option:contains('" + port_array[port] + "')").length){
+				if(![...port_select.options].some(o => o.textContent === String(port_array[port]))){
 					var option = document.createElement('option');
 					option.value = ".port_" + port_array[port];
-					option.innerHTML = port_array[port];
+					option.textContent = port_array[port];
 					port_select.appendChild(option);
 				}
 			}
@@ -628,10 +628,10 @@ function get_screenshot(scan_id){
 		// add ip to select
 		ip_select = document.getElementById('ips_select_filter');
 		for(var ip in ip_array){
-			if(!$('#ips_select_filter').find("option:contains('" + ip_array[ip] + "')").length){
+			if(![...ip_select.options].some(o => o.textContent === ip_array[ip])){
 				var option = document.createElement('option');
 				option.value = ".ip_" + ip_array[ip];
-				option.innerHTML = ip_array[ip];
+				option.textContent = ip_array[ip];
 				ip_select.appendChild(option);
 			}
 		}
@@ -640,10 +640,10 @@ function get_screenshot(scan_id){
 		service_select = document.getElementById('services_select_filter');
 		if (service_select) {
 			for(var service in service_array){
-				if(!$('#services_select_filter').find("option:contains('" + service_array[service] + "')").length){
+				if(![...service_select.options].some(o => o.textContent === service_array[service])){
 					var option = document.createElement('option');
 					option.value = ".service_" + service_array[service];
-					option.innerHTML = service_array[service];
+					option.textContent = service_array[service];
 					service_select.appendChild(option);
 				}
 			}
@@ -651,10 +651,10 @@ function get_screenshot(scan_id){
 
 		tech_select = document.getElementById('tech_select_filter');
 		for(var tech in tech_array){
-			if(!$('#tech_select_filter').find("option:contains('" + tech_array[tech] + "')").length){
+			if(![...tech_select.options].some(o => o.textContent === tech_array[tech])){
 				var option = document.createElement('option');
 				option.value = ".tech_" + tech_array[tech].replace(/ /g,"_").toLowerCase();
-				option.innerHTML = tech_array[tech];
+				option.textContent = tech_array[tech];
 				tech_select.appendChild(option);
 			}
 		}
