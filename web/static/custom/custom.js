@@ -840,7 +840,7 @@ function stop_scan(scan_id=null, subscan_id=null, reload_scan_bar=true, reload_l
 					}, 1500);
 				} else {
 					Snackbar.show({
-						text: 'Oops! Could not abort the scan. ' + data.message,
+						text: 'Oops! Could not abort the scan. ' + htmlEncode(data.message),
 						pos: 'top-right',
 						duration: 1500
 					});
@@ -956,7 +956,7 @@ function show_subscan_results(subscan_id) {
 		} else if (response['subscan']['task'] == 'fetch_url') {
 			task_name = 'Fetch URLs';
 		}
-		$('#xl-modal_title').html(`${task_name} Results on ${response['subscan']['subdomain_name']}`);
+		$('#xl-modal_title').html(`${task_name} Results on ${htmlEncode(response['subscan']['subdomain_name'])}`);
 		var scan_status = '';
 		var badge_color = 'danger';
 		if (response['subscan']['status'] == 1) {
@@ -980,9 +980,8 @@ function show_subscan_results(subscan_id) {
 				$('#xl-modal-content').append(`<div id="port_results_li"></div>`);
 				for (var ip in response['result']) {
 					var ip_addr = response['result'][ip]['address'];
-					var underscore_ip = ip_addr.replaceAll('.', '_');
-					var id_name = `ip_${underscore_ip}`;
-					$('#port_results_li').append(`<h5>IP Address: ${ip_addr}</br></br>${response['result'][ip]['ports'].length} Ports Open</h5>`);
+					var id_name = `ip_${ip}`;
+					$('#port_results_li').append(`<h5>IP Address: ${htmlEncode(ip_addr)}</br></br>${response['result'][ip]['ports'].length} Ports Open</h5>`);
 					$('#port_results_li').append(`<ul id="${id_name}"></ul>`);
 					for (var port_obj in response['result'][ip]['ports']) {
 						console.log(port_obj);
@@ -991,7 +990,7 @@ function show_subscan_results(subscan_id) {
 						if (port["is_uncommon"]) {
 							port_color = 'danger';
 						}
-						$(`#${id_name}`).append(`<li><span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${port['number']}</span>/<span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${port['service_name']}</span>/<span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${port['description']}</span></li>`);
+						$(`#${id_name}`).append(`<li><span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${htmlEncode(port['number'])}</span>/<span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${htmlEncode(port['service_name'])}</span>/<span class="ms-1 mt-1 me-1 badge badge-soft-${port_color}">${htmlEncode(port['description'])}</span></li>`);
 					}
 				}
 				$('#xl-modal-footer').append(`<span class="text-danger">* Uncommon Ports</span>`);
@@ -1252,7 +1251,7 @@ function get_and_render_subscan_history(subdomain_id, subdomain_name) {
 					color = 'danger';
 					bg_color = 'bg-soft-danger';
 					status_badge = '<span class="float-end badge bg-danger">Failed</span>';
-					error_message = `</br><span class="text-danger">Error: ${result_obj.error_message}`;
+					error_message = `</br><span class="text-danger">Error: ${htmlEncode(result_obj.error_message)}`;
 				} else if (result_obj.status == 3) {
 					color = 'danger';
 					bg_color = 'bg-soft-danger';
@@ -1267,7 +1266,7 @@ function get_and_render_subscan_history(subdomain_id, subdomain_name) {
 					<div class="card border-${color} border mini-card">
 					<a href="#" class="text-reset item-hovered" onclick="show_subscan_results(${result_obj['id']})">
 					<div class="card-header ${bg_color} text-${color} mini-card-header">
-					${task_name} on <b>${result_obj.subdomain_name}</b> using engine <b>${htmlEncode(result_obj.engine)}</b>
+					${htmlEncode(task_name)} on <b>${htmlEncode(result_obj.subdomain_name)}</b> using engine <b>${htmlEncode(result_obj.engine)}</b>
 					</div>
 					<div class="card-body mini-card-body">
 					<p class="card-text">
@@ -1308,16 +1307,16 @@ function fetch_whois(domain_name, force_reload_whois=false) {
 	fetch(url, {}).then(res => res.json())
 		.then(function(response) {
 			$("#whois_fetching_alert").hide();
-			document.getElementById('domain_age').innerHTML = response['domain']['domain_age'] + ' ' + response['domain']['date_created'];
-			document.getElementById('ip_address').innerHTML = response['domain']['ip_address'];
-			document.getElementById('ip_geolocation').innerHTML = response['domain']['geolocation'];
+			document.getElementById('domain_age').textContent = response['domain']['domain_age'] + ' ' + response['domain']['date_created'];
+			document.getElementById('ip_address').textContent = response['domain']['ip_address'];
+			document.getElementById('ip_geolocation').textContent = response['domain']['geolocation'];
 
-			document.getElementById('registrant_name').innerHTML = response['registrant']['name'];
+			document.getElementById('registrant_name').textContent = response['registrant']['name'];
 			console.log(response['registrant']['organization'])
-			document.getElementById('registrant_organization').innerHTML = response['registrant']['organization'] ? response['registrant']['organization'] : ' ';
-			document.getElementById('registrant_address').innerHTML = response['registrant']['address'] + ' ' + response['registrant']['city'] + ' ' + response['registrant']['state'] + ' ' + response['registrant']['country'];
-			document.getElementById('registrant_phone_numbers').innerHTML = response['registrant']['tel'];
-			document.getElementById('registrant_fax').innerHTML = response['registrant']['fax'];
+			document.getElementById('registrant_organization').textContent = response['registrant']['organization'] ? response['registrant']['organization'] : ' ';
+			document.getElementById('registrant_address').textContent = response['registrant']['address'] + ' ' + response['registrant']['city'] + ' ' + response['registrant']['state'] + ' ' + response['registrant']['country'];
+			document.getElementById('registrant_phone_numbers').textContent = response['registrant']['tel'];
+			document.getElementById('registrant_fax').textContent = response['registrant']['fax'];
 
 			Snackbar.show({
 				text: 'Whois Fetched...',
@@ -1468,60 +1467,60 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Domain</small>
-						<h5>${response.target}</h5>
+						<h5>${htmlEncode(response.target)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Dnssec</small>
-						<h5>${response.dnssec}</h5>
+						<h5>${htmlEncode(response.dnssec)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Geolocation</small>
-						<h5>${response.geolocation_iso}
-						<span class="ms-2 fi fi-${response.geolocation_iso}"></span></h5>
+						<h5>${htmlEncode(response.geolocation_iso)}
+						<span class="ms-2 fi fi-${htmlEncode(response.geolocation_iso)}"></span></h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Created</small>
-						<h5>${response.created}</h5>
+						<h5>${htmlEncode(response.created)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Updated</small>
-						<h5>${response.updated}</h5>
+						<h5>${htmlEncode(response.updated)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Expires</small>
-						<h5>${response.expires}</h5>
+						<h5>${htmlEncode(response.expires)}</h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-6">
 						<small class="sub-header">Whois Server</small>
-						<h5>${response.whois_server}</h5>
+						<h5>${htmlEncode(response.whois_server)}</h5>
 					</div>
 				</div>
 				<div class="row">
 					<div class="col-4">
 						<small class="sub-header">Registrar Name</small>
-						<h5>${response.registrar.name}</h5>
+						<h5>${htmlEncode(response.registrar.name)}</h5>
 					</div>
 					<div class="col-4">
 						<smal class="sub-header"l>Registrar Phone</small>
-						<h5>${response.registrar.phone}</h5>
+						<h5>${htmlEncode(response.registrar.phone)}</h5>
 					</div>
 					<div class="col-4">
 						<small class="sub-header">Registrar Email</small>
-						<h5>${response.registrar.email}</h5>
+						<h5>${htmlEncode(response.registrar.email)}</h5>
 					</div>
 				</div>`;
 
 				for (var status in response.status) {
 					var status_object = response.status[status];
 					if (status_object.includes('prohibited')) {
-						content += `<span class="badge badge-soft-danger me-1 mt-1">${status_object}</span>`;
+						content += `<span class="badge badge-soft-danger me-1 mt-1">${htmlEncode(status_object)}</span>`;
 					}
 					else {
-						content += `<span class="badge badge-soft-info mt-1 me-1">${status_object}</span>`;
+						content += `<span class="badge badge-soft-info mt-1 me-1">${htmlEncode(status_object)}</span>`;
 					}
 				}
 				content += `
@@ -1551,35 +1550,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.registrant.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.registrant.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.registrant.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.registrant.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.registrant.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.registrant.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.registrant.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.registrant.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.registrant.phone}
-												<span class="fe-printer"></span>&nbsp;${response.registrant.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.registrant.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.registrant.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.registrant.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.registrant.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.registrant.city} <b>State: </b>${response.registrant.state} <b>Zip Code: </b>${response.registrant.zipcode} <b>Country:
-											</b>${response.registrant.country} </td>
+											<td><b>City: </b>${htmlEncode(response.registrant.city)} <b>State: </b>${htmlEncode(response.registrant.state)} <b>Zip Code: </b>${htmlEncode(response.registrant.zipcode)} <b>Country:
+											</b>${htmlEncode(response.registrant.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1591,35 +1590,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.admin.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.admin.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.admin.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.admin.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.admin.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.admin.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.admin.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.admin.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.admin.phone}
-												<span class="fe-printer"></span>&nbsp;${response.admin.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.admin.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.admin.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.admin.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.admin.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.admin.city} <b>State: </b>${response.admin.state} <b>Zip Code: </b>${response.admin.zipcode} <b>Country:
-											</b>${response.admin.country} </td>
+											<td><b>City: </b>${htmlEncode(response.admin.city)} <b>State: </b>${htmlEncode(response.admin.state)} <b>Zip Code: </b>${htmlEncode(response.admin.zipcode)} <b>Country:
+											</b>${htmlEncode(response.admin.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1631,35 +1630,35 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 									<tbody>
 										<tr class="table-info">
 											<td><b>ID</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.technical_contact.id}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.technical_contact.id)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Name</b></td>
-											<td><span class="fe-user"></span>&nbsp;${response.technical_contact.name}</td>
+											<td><span class="fe-user"></span>&nbsp;${htmlEncode(response.technical_contact.name)}</td>
 										</tr>
 										<tr class="table-primary">
 											<td><b>Organization</b></td>
-											<td><span class="fe-briefcase"></span>&nbsp;${response.technical_contact.organization}</td>
+											<td><span class="fe-briefcase"></span>&nbsp;${htmlEncode(response.technical_contact.organization)}</td>
 										</tr>
 										<tr class="">
 											<td><b>Email</b></td>
-											<td><span class="fe-mail"></span>&nbsp;${response.technical_contact.email}</td>
+											<td><span class="fe-mail"></span>&nbsp;${htmlEncode(response.technical_contact.email)}</td>
 										</tr>
 										<tr class="table-info">
 											<td><b>Phone/Fax</b></td>
 											<td>
-												<span class="fe-phone"></span>&nbsp;${response.technical_contact.phone}
-												<span class="fe-printer"></span>&nbsp;${response.technical_contact.fax}
+												<span class="fe-phone"></span>&nbsp;${htmlEncode(response.technical_contact.phone)}
+												<span class="fe-printer"></span>&nbsp;${htmlEncode(response.technical_contact.fax)}
 											</td>
 										</tr>
 										<tr class="">
 											<td><b>Address</b></td>
-											<td><span class="fe-home"></span>&nbsp;${response.technical_contact.address}</td>
+											<td><span class="fe-home"></span>&nbsp;${htmlEncode(response.technical_contact.address)}</td>
 										</tr>
 										<tr class="table-danger">
 											<td><b>Address</b></td>
-											<td><b>City: </b>${response.technical_contact.city} <b>State: </b>${response.technical_contact.state} <b>Zip Code: </b>${response.technical_contact.zipcode} <b>Country:
-											</b>${response.technical_contact.country} </td>
+											<td><b>City: </b>${htmlEncode(response.technical_contact.city)} <b>State: </b>${htmlEncode(response.technical_contact.state)} <b>Zip Code: </b>${htmlEncode(response.technical_contact.zipcode)} <b>Country:
+											</b>${htmlEncode(response.technical_contact.country)} </td>
 										</tr>
 									</tbody>
 								</table>
@@ -1673,18 +1672,18 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					<h4>A Records</h4>`;
 					for (var a in response.dns.a) {
 						var a_object = response.dns.a[a];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${a_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(a_object)}</span>`;
 					}
 					content += `<h4>MX Records</h4>`;
 
 					for (var mx in response.dns.mx) {
 						var mx_object = response.dns.mx[mx];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${mx_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(mx_object)}</span>`;
 					}
 					content += `<h4>TXT Records</h4>`;
 					for (var txt in response.dns.txt) {
 						var txt_object = response.dns.txt[txt];
-						content += `<span class="badge badge-soft-secondary me-1 mt-1">${txt_object}</span>`;
+						content += `<span class="badge badge-soft-secondary me-1 mt-1">${htmlEncode(txt_object)}</span>`;
 					}
 					content += `</div>`;
 
@@ -1704,10 +1703,10 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 							for (var ip in response.historical_ips) {
 								var ip_object = response.historical_ips[ip];
 								content += `<tr>
-									<td><b>${ip_object.ip}</b></td>
-									<td>${ip_object.location}</td>
-									<td>${ip_object.owner}</td>
-									<td>${ip_object.last_seen}</td>
+									<td><b>${htmlEncode(ip_object.ip)}</b></td>
+									<td>${htmlEncode(ip_object.location)}</td>
+									<td>${htmlEncode(ip_object.owner)}</td>
+									<td>${htmlEncode(ip_object.last_seen)}</td>
 								</tr>`;
 							}
 
@@ -1722,7 +1721,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 
 					for (var ns in response.nameservers) {
 						var ns_object = response.nameservers[ns];
-						content += `<span class="badge badge-soft-primary me-1 mt-1">${ns_object}</span>`;
+						content += `<span class="badge badge-soft-primary me-1 mt-1">${htmlEncode(ns_object)}</span>`;
 					}
 
 					content += `</div><div class="tab-pane fade" id="v-pills-similar" role="tabpanel" aria-labelledby="v-pills-similar-tab" data-simplebar style="max-height: 300px; min-height: 300px;">`;
@@ -1730,7 +1729,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					if (response.related_tlds.length > 0) {
 						for (var domain in response.related_tlds) {
 							var dom_object = response.related_tlds[domain];
-							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${dom_object} as target." onclick="add_target('${dom_object}')">${dom_object}</span>`;
+							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${htmlEncode(dom_object)} as target." onclick="add_target('${jsEscape(dom_object)}')">${htmlEncode(dom_object)}</span>`;
 						}
 					}
 					else{
@@ -1744,7 +1743,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 					if (response.related_domains.length > 0) {
 						for (var domain in response.related_domains) {
 							var dom_object = response.related_domains[domain];
-							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${dom_object} as target." onclick="add_target('${dom_object}')">${dom_object}</span>`;
+							content += `<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add ${htmlEncode(dom_object)} as target." onclick="add_target('${jsEscape(dom_object)}')">${htmlEncode(dom_object)}</span>`;
 						}
 					}
 					else{
@@ -1759,7 +1758,7 @@ function display_whois_on_modal(response, show_add_target_btn=false) {
 
 	if (show_add_target_btn) {
 		content += `<div class="text-center">
-			<button class="btn btn-primary float-end mt-4" type="submit" id="search_whois_toolbox_btn" onclick="add_target('${response['target']}')">Add ${response['target']} as target</button>
+			<button class="btn btn-primary float-end mt-4" type="submit" id="search_whois_toolbox_btn" onclick="add_target('${jsEscape(response['target'])}')">Add ${htmlEncode(response['target'])} as target</button>
 		</div>`
 	}
 
@@ -1908,7 +1907,7 @@ function loadSubscanHistoryWidget(scan_history_id = null, domain_id = null) {
 					color = 'danger';
 					bg_color = 'bg-soft-danger';
 					status_badge = '<span class="float-end badge bg-danger">Failed</span>';
-					error_message = `</br><span class="text-danger">Error: ${result_obj.error_message}`;
+					error_message = `</br><span class="text-danger">Error: ${htmlEncode(result_obj.error_message)}`;
 				} else if (result_obj.status == 3) {
 					color = 'danger';
 					bg_color = 'bg-soft-danger';
@@ -1927,7 +1926,7 @@ function loadSubscanHistoryWidget(scan_history_id = null, domain_id = null) {
 					<div class="card border-${color} border mini-card">
 					<a href="#" class="text-reset item-hovered" onclick="show_subscan_results(${result_obj['id']})">
 					<div class="card-header ${bg_color} text-${color} mini-card-header">
-					${task_name} on <b>${result_obj.subdomain_name}</b>
+					${task_name} on <b>${htmlEncode(result_obj.subdomain_name)}</b>
 					</div>
 					<div class="card-body mini-card-body">
 					<p class="card-text">
@@ -1977,10 +1976,10 @@ function get_ips(scan_id=null, domain_id=null){
 			ip = data['ips'][val]
 			badge_color = ip['is_cdn'] ? 'warning' : 'primary';
 			if (scan_id) {
-				$("#ip-address").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${ip['ports'].length} Ports Open." onclick="get_ip_details('${ip['address']}', scan_id=${scan_id}, domain_id=null)">${ip['address']}</span>`);
+				$("#ip-address").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${ip['ports'].length} Ports Open." onclick="get_ip_details('${jsEscape(ip['address'])}', scan_id=${scan_id}, domain_id=null)">${htmlEncode(ip['address'])}</span>`);
 			}
 			else if (domain_id) {
-				$("#ip-address").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${ip['ports'].length} Ports Open." onclick="get_ip_details('${ip['address']}', scan_id=null, domain_id=${domain_id})">${ip['address']}</span>`);
+				$("#ip-address").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${ip['ports'].length} Ports Open." onclick="get_ip_details('${jsEscape(ip['address'])}', scan_id=null, domain_id=${domain_id})">${htmlEncode(ip['address'])}</span>`);
 			}
 			// $("#ip-address").append(`<span class='badge badge-soft-${badge_color}  m-1' data-toggle="modal" data-target="#tabsModal">${ip['address']}</span>`);
 		}
@@ -2009,10 +2008,10 @@ function get_technologies(scan_id=null, domain_id=null){
 		for (var val in data['technologies']){
 			tech = data['technologies'][val]
 			if (scan_id) {
-				$("#technologies").append(`<span class='badge badge-soft-primary  m-1 badge-link' data-toggle="tooltip" title="${tech['count']} Subdomains use this technology." onclick="get_tech_details('${tech['name']}', scan_id=${scan_id}, domain_id=null)">${tech['name']}</span>`);
+				$("#technologies").append(`<span class='badge badge-soft-primary  m-1 badge-link' data-toggle="tooltip" title="${tech['count']} Subdomains use this technology." onclick="get_tech_details('${jsEscape(tech['name'])}', scan_id=${scan_id}, domain_id=null)">${htmlEncode(tech['name'])}</span>`);
 			}
 			else if (domain_id) {
-				$("#technologies").append(`<span class='badge badge-soft-primary  m-1 badge-link' data-toggle="tooltip" title="${tech['count']} Subdomains use this technology." onclick="get_tech_details('${tech['name']}', scan_id=null, domain_id=${domain_id})">${tech['name']}</span>`);
+				$("#technologies").append(`<span class='badge badge-soft-primary  m-1 badge-link' data-toggle="tooltip" title="${tech['count']} Subdomains use this technology." onclick="get_tech_details('${jsEscape(tech['name'])}', scan_id=null, domain_id=${domain_id})">${htmlEncode(tech['name'])}</span>`);
 			}
 		}
 		$('#technologies-count').html(`<span class="badge badge-soft-primary me-1">${data['technologies'].length}</span>`);
@@ -2040,10 +2039,10 @@ function get_ports(scan_id=null, domain_id=null){
 			port = data['ports'][val]
 			badge_color = port['is_uncommon'] ? 'danger' : 'primary';
 			if (scan_id) {
-				$("#ports").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${port['description']}" onclick="get_port_details('${port['number']}', scan_id=${scan_id}, domain_id=null)">${port['number']}/${port['service_name']}</span>`);
+				$("#ports").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${htmlEncode(port['description'])}" onclick="get_port_details('${jsEscape(port['number'])}', scan_id=${scan_id}, domain_id=null)">${htmlEncode(port['number'])}/${htmlEncode(port['service_name'])}</span>`);
 			}
 			else if (domain_id){
-				$("#ports").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${port['description']}" onclick="get_port_details('${port['number']}', scan_id=null, domain_id=${domain_id})">${port['number']}/${port['service_name']}</span>`);
+				$("#ports").append(`<span class='badge badge-soft-${badge_color}  m-1 badge-link' data-toggle="tooltip" title="${htmlEncode(port['description'])}" onclick="get_port_details('${jsEscape(port['number'])}', scan_id=null, domain_id=${domain_id})">${htmlEncode(port['number'])}/${htmlEncode(port['service_name'])}</span>`);
 			}
 		}
 		$('#ports-count').html(`<span class="badge badge-soft-primary me-1">${data['ports'].length}</span>`);
@@ -2053,8 +2052,8 @@ function get_ports(scan_id=null, domain_id=null){
 
 
 function get_ip_details(ip_address, scan_id=null, domain_id=null){
-	var port_url = `/api/queryPorts/?ip_address=${ip_address}`;
-	var subdomain_url = `/api/querySubdomains/?ip_address=${ip_address}`;
+	var port_url = `/api/queryPorts/?ip_address=${encodeURIComponent(ip_address)}`;
+	var subdomain_url = `/api/querySubdomains/?ip_address=${encodeURIComponent(ip_address)}`;
 
 	if (scan_id) {
 		port_url += `&scan_id=${scan_id}`;
@@ -2101,7 +2100,7 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 		for (port in data['ports']){
 			port_obj = data['ports'][port];
 			badge_color = port_obj['is_uncommon'] ? 'danger' : 'info';
-			$("#modal_content_port").append(`<li class="mt-1">${port_obj['description']} <b class="text-${badge_color}">(${port_obj['number']}/${port_obj['service_name']})</b></li>`)
+			$("#modal_content_port").append(`<li class="mt-1">${htmlEncode(port_obj['description'])} <b class="text-${badge_color}">(${htmlEncode(port_obj['number'])}/${htmlEncode(port_obj['service_name'])})</b></li>`)
 		}
 		$("#port-modal-loader").remove();
 	});
@@ -2118,10 +2117,10 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 			badge_color = subdomain_obj['http_status'] >= 400 ? 'danger' : '';
 			li_id = get_randid();
 			if (subdomain_obj['http_url']) {
-				$("#modal_content_subdomain").append(`<li class="mt-1" id="${li_id}"><a href='${subdomain_obj['http_url']}' target="_blank" class="text-${badge_color}">${subdomain_obj['name']}</a></li>`)
+				$("#modal_content_subdomain").append(`<li class="mt-1" id="${li_id}"><a href='${safeHref(subdomain_obj['http_url'])}' target="_blank" class="text-${badge_color}">${htmlEncode(subdomain_obj['name'])}</a></li>`)
 			}
 			else {
-				$("#modal_content_subdomain").append(`<li class="mt-1 text-${badge_color}" id="${li_id}">${subdomain_obj['name']}</li>`);
+				$("#modal_content_subdomain").append(`<li class="mt-1 text-${badge_color}" id="${li_id}">${htmlEncode(subdomain_obj['name'])}</li>`);
 			}
 
 			if (subdomain_obj['http_status']) {
@@ -2141,8 +2140,8 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 
 function get_port_details(port, scan_id=null, domain_id=null){
 
-	var ip_url = `/api/queryIps/?port=${port}`;
-	var subdomain_url = `/api/querySubdomains/?port=${port}`;
+	var ip_url = `/api/queryIps/?port=${encodeURIComponent(port)}`;
+	var subdomain_url = `/api/querySubdomains/?port=${encodeURIComponent(port)}`;
 
 	if (scan_id) {
 		ip_url += `&scan_id=${scan_id}`;
@@ -2160,7 +2159,7 @@ function get_port_details(port, scan_id=null, domain_id=null){
 	var ip_spinner = `<span class="spinner-border spinner-border-sm me-1" id="ip-modal-loader"></span>`;
 	var subdomain_spinner = `<span class="spinner-border spinner-border-sm me-1" id="subdomain-modal-loader"></span>`;
 
-	$('#modal_title').html('Details for Port: <b>' + port + '</b>');
+	$('#modal_title').html('Details for Port: <b>' + htmlEncode(port) + '</b>');
 
 	$('#modal-content').empty();
 	$('#modal-tabs').empty();
@@ -2181,12 +2180,12 @@ function get_port_details(port, scan_id=null, domain_id=null){
 
 	$.getJSON(ip_url, function(data) {
 		$('#modal_ip_ul').empty();
-		$('#modal_ip_ul').append(`<p>${data['ips'].length} IP Addresses have Port ${port} Open`);
+		$('#modal_ip_ul').append(`<p>${data['ips'].length} IP Addresses have Port ${htmlEncode(port)} Open`);
 		$('#modal-ip-count').html(`<b>${data['ips'].length}</b>&nbsp;&nbsp;`);
 		for (ip in data['ips']){
 			ip_obj = data['ips'][ip];
 			text_color = ip_obj['is_cdn'] ? 'warning' : '';
-			$("#modal_ip_ul").append(`<li class='mt-1 text-${text_color}'>${ip_obj['address']}</li>`)
+			$("#modal_ip_ul").append(`<li class='mt-1 text-${text_color}'>${htmlEncode(ip_obj['address'])}</li>`)
 		}
 		$('#modal_ip_ul').append(`<span class="float-end text-warning">*IP Address highlighted are CDN IP Address</span>`);
 		$("#ip-modal-loader").remove();
@@ -2195,17 +2194,17 @@ function get_port_details(port, scan_id=null, domain_id=null){
 	// query subdomains
 	$.getJSON(subdomain_url, function(data) {
 		$('#modal_subdomain_ul').empty();
-		$('#modal_subdomain_ul').append(`<p>${data['subdomains'].length} Subdomains have Port ${port} Open`);
+		$('#modal_subdomain_ul').append(`<p>${data['subdomains'].length} Subdomains have Port ${htmlEncode(port)} Open`);
 		$('#modal-subdomain-count').html(`<b>${data['subdomains'].length}</b>&nbsp;&nbsp;`);
 		for (subdomain in data['subdomains']){
 			subdomain_obj = data['subdomains'][subdomain];
 			badge_color = subdomain_obj['http_status'] >= 400 ? 'danger' : '';
 			li_id = get_randid();
 			if (subdomain_obj['http_url']) {
-				$("#modal_subdomain_ul").append(`<li id="${li_id}" class="mt-1"><a href='${subdomain_obj['http_url']}' target="_blank" class="text-${badge_color}">${subdomain_obj['name']}</a></li>`)
+				$("#modal_subdomain_ul").append(`<li id="${li_id}" class="mt-1"><a href='${safeHref(subdomain_obj['http_url'])}' target="_blank" class="text-${badge_color}">${htmlEncode(subdomain_obj['name'])}</a></li>`)
 			}
 			else {
-				$("#modal_subdomain_ul").append(`<li class="mt-1 text-${badge_color}" id="${li_id}">${subdomain_obj['name']}</li>`);
+				$("#modal_subdomain_ul").append(`<li class="mt-1 text-${badge_color}" id="${li_id}">${htmlEncode(subdomain_obj['name'])}</li>`);
 			}
 
 			if (subdomain_obj['http_status']) {
@@ -2225,7 +2224,7 @@ function get_port_details(port, scan_id=null, domain_id=null){
 
 function get_tech_details(tech, scan_id=null, domain_id=null){
 
-	var url = `/api/querySubdomains/?tech=${tech}`;
+	var url = `/api/querySubdomains/?tech=${encodeURIComponent(tech)}`;
 
 	if (scan_id) {
 		url += `&scan_id=${scan_id}`;
@@ -2254,10 +2253,10 @@ function get_tech_details(tech, scan_id=null, domain_id=null){
 			badge_color = subdomain_obj['http_status'] >= 400 ? 'danger' : '';
 			li_id = get_randid();
 			if (subdomain_obj['http_url']) {
-				$("#modal-content").append(`<li id="${li_id}"><a href='${subdomain_obj['http_url']}' target="_blank" class="text-${badge_color}">${subdomain_obj['name']}</a></li>`)
+				$("#modal-content").append(`<li id="${li_id}"><a href='${safeHref(subdomain_obj['http_url'])}' target="_blank" class="text-${badge_color}">${htmlEncode(subdomain_obj['name'])}</a></li>`)
 			}
 			else {
-				$("#modal-content").append(`<li class="text-${badge_color}" id="${li_id}">${subdomain_obj['name']}</li>`);
+				$("#modal-content").append(`<li class="text-${badge_color}" id="${li_id}">${htmlEncode(subdomain_obj['name'])}</li>`);
 			}
 
 			if (subdomain_obj['http_status']) {
@@ -2425,7 +2424,7 @@ function get_and_render_cve_details(cve_id){
 			});
 		}
 		else{
-			swal.fire("Error!", response.message, "error", {
+			swal.fire("Error!", htmlEncode(response.message), "error", {
 				button: "Okay",
 			});
 		}
@@ -2602,8 +2601,12 @@ function get_most_common_vulnerability(slug=null, scan_id=null, target_id=null, 
 
 function highlight_search(search_keyword, content){
 	// this function will send the highlighted text from search keyword
-	var reg = new RegExp('('+search_keyword+')', 'gi');
-	return content.replace(reg, '<mark>$1</mark>');
+	var keyword = String(search_keyword).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	if (!keyword) return htmlEncode(content);
+	// split() with a capture group puts the matches at the odd indexes
+	return String(content).split(new RegExp('(' + keyword + ')', 'gi')).map(function(part, i) {
+		return i % 2 ? '<mark>' + htmlEncode(part) + '</mark>' : htmlEncode(part);
+	}).join('');
 }
 
 
@@ -2653,7 +2656,7 @@ function add_project_modal(){
 		confirmButtonText: 'Create Project',
 		showLoaderOnConfirm: true,
 		preConfirm: (name) => {
-			return fetch(`/api/action/create/project?name=${name}`)
+			return fetch(`/api/action/create/project?name=${encodeURIComponent(name)}`)
 				.then(response => {
 					if (!response.ok) {
 						throw new Error(response.error)
@@ -2671,7 +2674,7 @@ function add_project_modal(){
 			console.log(result);
 			if (result.isConfirmed) {
 				Swal.fire({
-					title: `${result.value.project_name} is created.`,
+					title: `${htmlEncode(result.value.project_name)} is created.`,
 					onClose: reloadPage
 				})
 			}
@@ -3156,9 +3159,9 @@ async function show_attack_surface_modal(id){
 		const data = await send_gpt__attack_surface_api_request(id);
 		Swal.close();
 		if (data.status) {
-			$('#modal_title').html(`Attack Surface Suggestion for ${data.subdomain_name} (BETA)`);
+			$('#modal_title').html(`Attack Surface Suggestion for ${htmlEncode(data.subdomain_name)} (BETA)`);
 			$('#modal-content').empty();
-			$('#modal-content').append(data.description.replace(new RegExp('\r?\n','g'), '<br />'));
+			$('#modal-content').append(htmlEncode(data.description).replace(/&#13;/g, '').replace(/&#10;/g, '<br />'));
 			$('#modal_dialog').modal('show');
 		}
 		else{
@@ -3213,7 +3216,7 @@ function show_scan_configuration(starting_path, out_of_scope_subdomains, exclude
 	var content = `
 	<div class="scan-config-modal">
 		<div class="starting-path mb-3">
-			<h5>Starting Path: <code>${starting_path || '/'}</code></h5>
+			<h5>Starting Path: <code>${htmlEncode(starting_path || '/')}</code></h5>
 		</div>
 		<ul class="nav nav-tabs nav-bordered" role="tablist">
 			<li class="nav-item" role="presentation">
@@ -3235,17 +3238,17 @@ function show_scan_configuration(starting_path, out_of_scope_subdomains, exclude
 		<div class="tab-content">
 			<div class="tab-pane fade show active" id="outofscope" role="tabpanel">
 				<ul class="config-list">
-					${out_of_scope_subdomains.map(domain => `<li><code>${domain}</code></li>`).join('')}
+					${out_of_scope_subdomains.map(domain => `<li><code>${htmlEncode(domain)}</code></li>`).join('')}
 				</ul>
 			</div>
 			<div class="tab-pane fade" id="imported" role="tabpanel">
 				<ul class="config-list">
-					${imported_subdomains.map(domain => `<li><code>${domain}</code></li>`).join('')}
+					${imported_subdomains.map(domain => `<li><code>${htmlEncode(domain)}</code></li>`).join('')}
 				</ul>
 			</div>
 			<div class="tab-pane fade" id="excluded" role="tabpanel">
 				<ul class="config-list">
-					${excluded_paths.map(path => `<li><code>${path}</code></li>`).join('')}
+					${excluded_paths.map(path => `<li><code>${htmlEncode(path)}</code></li>`).join('')}
 				</ul>
 			</div>
 		</div>

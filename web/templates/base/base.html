@@ -142,8 +142,8 @@
           if (response.status) {
             for (var history in response.results) {
               $('#search-history-items').append(`
-                <a href="/${slug}/search?query=${response.results[history].query}" class="dropdown-item notify-item">
-                  <span>${response.results[history].query}</span>
+                <a href="/${slug}/search?query=${htmlEncode(encodeURIComponent(response.results[history].query))}" class="dropdown-item notify-item">
+                  <span>${htmlEncode(response.results[history].query)}</span>
                 </a>
               `);
             }
@@ -161,7 +161,7 @@
       {% for message in messages %}
         <script type="text/javascript">
           Snackbar.show({
-            text: '{{ message }}',
+            text: '{{ message|force_escape|escapejs }}',
             pos: 'top-right',
             {% if message.tags == 'error'%}
               actionTextColor: '#fff',
