@@ -86,9 +86,10 @@ function getCookie(name) {
 	return cookieValue;
 }
 // Source: https://portswigger.net/web-security/cross-site-scripting/preventing#encode-data-on-output
+// The u flag matches whole code points, so emoji/astral characters become one valid reference, not two lone surrogates.
 function htmlEncode(str) {
-	return String(str).replace(/[^\w. ]/gi, function(c) {
-		return '&#' + c.charCodeAt(0) + ';';
+	return String(str).replace(/[^\w. ]/giu, function(c) {
+		return '&#' + c.codePointAt(0) + ';';
 	});
 }
 // Source: https://portswigger.net/web-security/cross-site-scripting/preventing#encode-data-on-output
@@ -165,10 +166,12 @@ function change_vuln_status(id) {
 		}
 	})
 }
-// splits really long strings into multiple lines
+// splits really long strings into multiple lines; takes raw text and returns HTML (each line htmlEncoded after
+// splitting, so an escape is never cut in half). Callers must not encode beforehand.
 // Souce: https://stackoverflow.com/a/52395960
 function split_into_lines(str, maxWidth) {
 	const newLineStr = "</br>";
+	str = String(str);
 	done = false;
 	res = '';
 	do {
@@ -176,7 +179,7 @@ function split_into_lines(str, maxWidth) {
 		// Inserts new line at first whitespace of the line
 		for (i = maxWidth - 1; i >= 0; i--) {
 			if (test_white_space(str.charAt(i))) {
-				res = res + [str.slice(0, i), newLineStr].join('');
+				res = res + htmlEncode(str.slice(0, i)) + newLineStr;
 				str = str.slice(i + 1);
 				found = true;
 				break;
@@ -184,12 +187,12 @@ function split_into_lines(str, maxWidth) {
 		}
 		// Inserts new line at maxWidth position, the word is too long to wrap
 		if (!found) {
-			res += [str.slice(0, maxWidth), newLineStr].join('');
+			res += htmlEncode(str.slice(0, maxWidth)) + newLineStr;
 			str = str.slice(maxWidth);
 		}
 		if (str.length < maxWidth) done = true;
 	} while (!done);
-	return res + str;
+	return res + htmlEncode(str);
 }
 
 function test_white_space(x) {
@@ -1333,7 +1336,7 @@ function get_target_whois(domain_name) {
 	const url = `/api/tools/whois/?format=json&target=${domain_name}`;
 	
 	Swal.fire({
-		title: `Fetching WHOIS details for ${domain_name}...`,
+		title: `Fetching WHOIS details for ${htmlEncode(domain_name)}...`,
 		allowOutsideClick: false,
 		showConfirmButton: false,
 		willOpen: () => {
@@ -1384,7 +1387,7 @@ function get_domain_whois(domain_name, show_add_target_btn = false) {
 	const url = `/api/tools/whois/?format=json&target=${domain_name}`;
 	
 	Swal.fire({
-		title: `Fetching WHOIS details for ${domain_name}...`,
+		title: `Fetching WHOIS details for ${htmlEncode(domain_name)}...`,
 		allowOutsideClick: false,
 		showConfirmButton: false,
 		willOpen: () => {
@@ -2723,7 +2726,7 @@ function render_vuln_offcanvas(vuln){
 		<a href="${safeHref(vuln.http_url)}" 
 			target="_blank" 
 			rel="noopener noreferrer">
-			${split_into_lines(htmlEncode(vuln.http_url), 150)}
+			${split_into_lines(vuln.http_url, 150)}
 		</a></p>`;
 	body += `<p><b>Severity: </b>${htmlEncode(vuln.severity)}<br><b>Type: </b>${htmlEncode(vuln.type.toUpperCase())}<br><b>Source: </b> ${htmlEncode(vuln.source.toUpperCase())}</p>`;
 
