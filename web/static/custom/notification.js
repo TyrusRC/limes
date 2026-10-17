@@ -44,24 +44,30 @@ function updateNotifications() {
           notificationItem.className = `notification-panel-item d-flex align-items-start p-3 ${
             notification.is_read ? "" : "notification-panel-unread"
           } notification-panel-status-${notification.status}`;
+          // static skeleton only; notification text is attacker-influenced (domain names, finding titles)
           notificationItem.innerHTML = `
                     <div class="notification-panel-content flex-grow-1">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <h6 class="notification-panel-title mb-0">${
-                              notification.title
-                            }</h6>
+                            <h6 class="notification-panel-title mb-0"></h6>
                             <span class="notification-panel-icon">
-                                <i class="mdi ${notification.icon}"></i>
+                                <i></i>
                             </span>
                         </div>
-                        <p class="notification-panel-description mb-1">${
-                          notification.description
-                        }</p>
-                        <small class="notification-panel-time">${timeago.format(
-                          new Date(notification.created_at)
-                        )}</small>
+                        <p class="notification-panel-description mb-1"></p>
+                        <small class="notification-panel-time"></small>
                     </div>
                 `;
+          notificationItem.querySelector(".notification-panel-title").textContent = notification.title;
+          notificationItem.querySelector(".notification-panel-icon i").className = `mdi ${notification.icon}`;
+          const description = notificationItem.querySelector(".notification-panel-description");
+          // one line per newline; older rows stored literal <br> separators
+          String(notification.description || "").split(/\r?\n|<br\s*\/?>/i).forEach((line, i) => {
+            if (i) description.appendChild(document.createElement("br"));
+            description.appendChild(document.createTextNode(line));
+          });
+          notificationItem.querySelector(".notification-panel-time").textContent = timeago.format(
+            new Date(notification.created_at)
+          );
           notificationItem.addEventListener("click", (event) => {
             notificationAction(
               notification.id,
@@ -102,7 +108,7 @@ function showNotificationSnackbar(notification) {
   }
 
   Snackbar.show({
-    text: `New notification: ${notification.title}`,
+    text: `New notification: ${htmlEncode(notification.title)}`,  // Snackbar renders text as HTML
     pos: "top-right",
     actionTextColor: actionTextColor,
     backgroundColor: backgroundColor,

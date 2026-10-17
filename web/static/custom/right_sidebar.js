@@ -18,7 +18,7 @@ function getScanStatusSidebar(project, reload) {
       for (var scan in scans['pending']) {
         scan_object = scans['pending'][scan];
         $('#upcoming_scans').append(`
-          <div class="alert alert-warning" role="alert">${htmlEncode(scan_object.scan_type.engine_name)} on ${scan_object.domain.name}</div>
+          <div class="alert alert-warning" role="alert">${htmlEncode(scan_object.scan_type.engine_name)} on ${htmlEncode(scan_object.domain.name)}</div>
           `);
       }
     }
@@ -35,7 +35,7 @@ function getScanStatusSidebar(project, reload) {
           <div class="card border-primary border mini-card">
           <a href="/scan/${project}/detail/${scan_object.id}" class="text-reset item-hovered">
           <div class="card-header bg-soft-primary text-primary mini-card-header">
-          ${htmlEncode(scan_object.scan_type.engine_name)} on ${scan_object.domain.name}
+          ${htmlEncode(scan_object.scan_type.engine_name)} on ${htmlEncode(scan_object.domain.name)}
           <span class="badge badge-soft-primary float-end">
           ${scan_object.current_progress}%
           </span>
@@ -91,7 +91,7 @@ function getScanStatusSidebar(project, reload) {
             <div class="card border-${color} border mini-card">
             <a href="/scan/${project}/detail/${scan_object.id}" class="text-reset item-hovered float-end">
             <div class="card-header ${bg_color} text-${color} mini-card-header">
-            ${htmlEncode(scan_object.scan_type.engine_name)} on ${scan_object.domain.name}
+            ${htmlEncode(scan_object.scan_type.engine_name)} on ${htmlEncode(scan_object.domain.name)}
             </div>
             <div class="card-body mini-card-body">
             <p class="card-text">
@@ -130,7 +130,7 @@ function getScanStatusSidebar(project, reload) {
             <div class="card border-primary border mini-card">
             <a href="#" onclick="show_subscan_results(${task_object['id']})" class="text-reset item-hovered">
             <div class="card-header bg-soft-primary text-primary mini-card-header">
-            ${task_name} on <b>${task_object.subdomain_name}</b> using engine <b>${htmlEncode(task_object.engine)}</b>
+            ${htmlEncode(task_name)} on <b>${htmlEncode(task_object.subdomain_name)}</b> using engine <b>${htmlEncode(task_object.engine)}</b>
             </div>
             <div class="card-body mini-card-body">
             <p class="card-text">
@@ -164,7 +164,7 @@ function getScanStatusSidebar(project, reload) {
             color = 'danger';
             bg_color = 'bg-soft-danger';
             status_badge = '<span class="float-end badge bg-danger">Failed</span>';
-            error_message = `</br><span class="text-danger">Error: ${task_object.error_message}`;
+            error_message = `</br><span class="text-danger">Error: ${htmlEncode(task_object.error_message)}`;
           }
           else if (task_object.status == 3) {
             color = 'danger';
@@ -181,7 +181,7 @@ function getScanStatusSidebar(project, reload) {
             <div class="card border-${color} border mini-card">
             <a href="#" class="text-reset item-hovered" onclick="show_subscan_results(${task_object['id']})">
             <div class="card-header ${bg_color} text-${color} mini-card-header">
-            ${task_name} on <b>${task_object.subdomain_name}</b> using engine <b>${htmlEncode(task_object.engine)}</b>
+            ${htmlEncode(task_name)} on <b>${htmlEncode(task_object.subdomain_name)}</b> using engine <b>${htmlEncode(task_object.engine)}</b>
             </div>
             <div class="card-body mini-card-body">
             <p class="card-text">
@@ -209,7 +209,7 @@ function getScanStatusSidebar(project, reload) {
 
           status_badge = '<span class="float-end badge bg-warning">Upcoming</span>';
 
-          $('#upcoming_tasks').append(`<div class="alert alert-warning" role="alert">${task_name} on ${task_object.subdomain_name}</div>`);
+          $('#upcoming_tasks').append(`<div class="alert alert-warning" role="alert">${htmlEncode(task_name)} on ${htmlEncode(task_object.subdomain_name)}</div>`);
         }
       }
       else{
