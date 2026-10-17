@@ -1,6 +1,5 @@
 """Diff the current issues against TrackedIssue rows and record an event per change."""
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from limes import scoring
@@ -47,8 +46,8 @@ def sync_issues(project, now=None):
         buckets = {a.id: _bucket(a, roots) for a in assets.values()}
         synced = set(state.roots)
         passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
-        waived = set(IssueWaiver.objects.filter(issue__project=project, revoked_at__isnull=True)
-                     .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values_list('issue_id', flat=True))
+        waived = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__project=project)
+                     .values_list('issue_id', flat=True))
         out = []
         for asset_id, keys in issues.items():
             asset = assets.get(asset_id)

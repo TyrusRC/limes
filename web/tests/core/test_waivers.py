@@ -188,6 +188,50 @@ class WaiverAlertsTest(TestCase):
         self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 0})
         self.assertEqual(ChangeEvent.objects.filter(kind='waiver_expired').count(), 1)
 
+    def test_expire_waivers_delivers_immediate_event(self):
+        self.expired(self.issue())
+        with mock.patch('limes.tasks.notifications.send_notif') as notif:
+            waiver_tasks.expire_waivers(now=self.now)
+        self.assertIsNotNone(ChangeEvent.objects.get(kind='waiver_expired').notified_at)
+        notif.delay.assert_called_once()
+
+    def test_delivery_failure_does_not_stop_other_projects(self):
+        self.expired(self.issue())
+        with mock.patch('limes.alerts.deliver.deliver_immediate', side_effect=RuntimeError('boom')):
+            self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 1})
+
+    def test_cache_outage_does_not_break_expiry_or_writes(self):
+        self.expired(self.issue())
+        with mock.patch('limes.alerts.waiver_tasks.invalidate', side_effect=RuntimeError('redis')):
+            self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 1})
+        other = TrackedIssue.objects.create(project=self.p, asset=self.a, key='k2', source='finding', severity=3)
+        with mock.patch('limes.waivers.invalidate', side_effect=RuntimeError('redis')):
+            waivers.create_waiver(other, 'accepted_risk', 'r', self.u)
+            self.assertTrue(waivers.revoke_waiver(other, self.u))
+
+    def test_revoked_after_expiry_is_not_announced(self):
+        w = self.expired(self.issue())
+        real = IssueWaiver.objects.filter
+        def revoke_then_filter(*a, **k):  # a revoke commits between the due query and the claim
+            if k.get('expiry_notified') is False and 'pk' in k:
+                IssueWaiver.objects.filter(pk=w.pk).update(revoked_at=self.now)
+            return real(*a, **k)
+        with mock.patch.object(IssueWaiver.objects, 'filter', side_effect=revoke_then_filter):
+            self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 0})
+        self.assertFalse(ChangeEvent.objects.exists())
+
+    def test_waiver_inactive_exactly_at_expires_at(self):
+        exp = self.now + timedelta(days=1)
+        both = {self.a.id: {'k': 3, 'k2': 3}}
+        self.sync(both)
+        self.sync({})  # both fixed
+        for key in ('k', 'k2'):
+            waivers.create_waiver(TrackedIssue.objects.get(key=key), 'accepted_risk', 'r', self.u, now=self.now, expires_at=exp)
+        with mock.patch('limes.scoring.current_issues', return_value=({self.a.id: {'k': 3}}, {self.a.id})):
+            self.assertEqual(issues.sync_issues(self.p, now=exp - timedelta(seconds=1)), [])  # k regresses while waived
+        with mock.patch('limes.scoring.current_issues', return_value=(both, {self.a.id})):
+            self.assertEqual(len(issues.sync_issues(self.p, now=exp)), 1)  # k2 regresses at expires_at
+
     def test_expire_waivers_skips_revoked_and_unexpired(self):
         self.expired(self.issue(), revoked_at=self.now)
         other = TrackedIssue.objects.create(project=self.p, asset=self.a, key='k2', source='finding', severity=3)

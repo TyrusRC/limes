@@ -868,11 +868,10 @@ class IssueList(APIView):
 			issues = issues.filter(source=q['source'])
 		now = timezone.now()
 		if q.get('waived') in ('true', 'false'):
-			ids = IssueWaiver.objects.filter(revoked_at__isnull=True).filter(
-				Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values('issue_id')
+			ids = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
 			issues = issues.filter(id__in=ids) if q['waived'] == 'true' else issues.exclude(id__in=ids)
 		out = []
-		live = IssueWaiver.objects.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+		live = IssueWaiver.objects.filter(IssueWaiver.active_q(now))
 		live = live.select_related('created_by').order_by('-created_at', '-id')
 		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
 			Prefetch('waivers', queryset=live, to_attr='live_waivers'))
@@ -961,6 +960,9 @@ class IssueNotes(APIView):
 		return Response({'status': True, 'message': 'note added'})
 
 
+MAX_FORECAST_ISSUES = 500
+
+
 class ScoreForecast(APIView):
 	"""Adjusted score if the chosen issues were fixed."""
 
@@ -973,6 +975,8 @@ class ScoreForecast(APIView):
 		raw = data.get('issues')
 		if not isinstance(raw, list):
 			return Response({'status': False, 'message': 'issues must be a list of ids'})
+		if len(raw) > MAX_FORECAST_ISSUES:
+			return Response({'status': False, 'message': f'at most {MAX_FORECAST_ISSUES} issues per forecast'})
 		ids = [_parse_id(x) for x in raw]
 		if None in ids:
 			return Response({'status': False, 'message': 'issues must be a list of ids'})

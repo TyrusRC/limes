@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest import mock
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
@@ -60,6 +61,22 @@ class IssueApiTest(TestCase):
         self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='false_positive', reason='fp')
         self.assertEqual([r['id'] for r in self.list(waived='true')], [self.i1.id])
         self.assertEqual([r['id'] for r in self.list(waived='false')], [self.i2.id])
+
+    def test_waiver_inactive_exactly_at_expires_at(self):
+        exp = timezone.now() + timedelta(days=3)
+        IssueWaiver.objects.create(issue=self.i1, kind='accepted_risk', reason='r', created_by=self.admin, expires_at=exp)
+        waived = lambda: [r['id'] for r in self.list(waived='true')]
+        with mock.patch('api.views.timezone.now', return_value=exp - timedelta(seconds=1)):
+            self.assertEqual(waived(), [self.i1.id])
+        with mock.patch('api.views.timezone.now', return_value=exp):
+            self.assertEqual(waived(), [])
+            self.assertIsNone([r for r in self.list() if r['id'] == self.i1.id][0]['waiver'])
+
+    def test_forecast_caps_issue_list(self):
+        r = self.post(self.admin, '/api/score_forecast/', issues=list(range(1, 502)))
+        self.assertFalse(r.json()['status'])
+        self.assertIn('500', r.json()['message'])
+        self.assertTrue(self.post(self.admin, '/api/score_forecast/', issues=list(range(1, 501))).json()['status'])
 
     def test_waive_and_revoke_round_trip(self):
         r = self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='accepted_risk', reason='ok')
