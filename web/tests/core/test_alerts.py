@@ -1,12 +1,15 @@
+from datetime import timedelta
 from unittest import mock
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from dashboard.models import Project
 from limes import scoring
 from limes.alerts import events, issues
-from startScan.models import Asset, ChangeEvent, RiskCheck, TrackedIssue
+from limes.tasks import inventory
+from startScan.models import Asset, ChangeEvent, RiskCheck, ScanRun, ScoreSnapshot, TrackedIssue
+from tests.core.test_attribution_decisions import DecisionBase
 from tests.core.test_scoring import Base
 
 
@@ -103,3 +106,68 @@ class CurrentIssuesTest(Base):
         got, assessed = scoring.current_issues(self.p)
         self.assertEqual(got, {host.id: {'t1': 3, 'web.csp_missing': 1}})
         self.assertIn(host.id, assessed)
+
+
+class OtherEventsTest(Base):
+    def snap(self, score, grade, date=None):
+        return ScoreSnapshot(project=self.p, date=date or timezone.localdate(), version='v', score=score, grade=grade)
+
+    def test_score_event_rules(self):
+        f = scoring.score_event
+        self.assertEqual(f(self.snap(850, 'A'), self.snap(790, 'B'))[0], 'score_dropped')
+        self.assertEqual(f(self.snap(800, 'A'), self.snap(750, 'B'))[0], 'score_dropped')
+        self.assertEqual(f(self.snap(940, 'A'), self.snap(880, 'A'))[0], 'score_dropped')
+        self.assertEqual(f(self.snap(900, 'A'), self.snap(880, 'A'))[0], 'score_changed')
+        self.assertEqual(f(self.snap(880, 'A'), self.snap(900, 'A'))[0], 'score_changed')
+        self.assertIsNone(f(None, self.snap(900, 'A')))
+        self.assertIsNone(f(self.snap(None, 'A'), self.snap(900, 'A')))
+        self.assertIsNone(f(self.snap(900, 'A'), self.snap(None, 'A')))
+        self.assertIsNone(f(self.snap(900, 'A'), self.snap(900, 'A')))
+        self.assertIn('850 (A)', f(self.snap(850, 'A'), self.snap(790, 'B'))[1])
+
+    def test_snapshot_records_score_event(self):
+        a = self.host('a.x.com')
+        self.vuln(self.scan(), a, 4)
+        ScoreSnapshot.objects.create(project=self.p, date=timezone.localdate() - timedelta(days=1), version='v',
+                                     score=950, grade='A')
+        scoring.snapshot_scores()
+        (e,) = ChangeEvent.objects.filter(kind='score_dropped')
+        self.assertTrue(e.immediate)
+        scoring.snapshot_scores()
+        self.assertEqual(ChangeEvent.objects.count(), 1)
+
+    def test_missing_transition_records_event(self):
+        root = Asset.objects.get(value='x.com')
+        run = ScanRun.objects.create(project=self.p, root_asset=root, start_scan_date=timezone.now())
+        a = inventory.upsert_hostname_asset(self.p, 'a.x.com', parent=root)
+        Asset.objects.filter(id=a.id).update(last_seen=run.start_scan_date - timedelta(minutes=1))
+        inventory.finalize_lifecycle(run)
+        self.assertEqual(ChangeEvent.objects.count(), 0)  # still active, miss count only went up
+        inventory.finalize_lifecycle(run)
+        inventory.finalize_lifecycle(run)
+        (e,) = ChangeEvent.objects.filter(kind='asset_missing')
+        self.assertEqual((e.asset_id, e.immediate), (a.id, False))
+        inventory.finalize_lifecycle(run)  # no longer active, so not scanned again
+        self.assertEqual(ChangeEvent.objects.count(), 1)
+
+
+class AutoConfirmEventTest(DecisionBase):
+    def qualifying(self):
+        a = self.cand('ours.net', ('ns', 'ns1.example.com', 'dns'), ('cert', '102', 'crtsh'))
+        self.delegate(a)
+        return a
+
+    @override_settings(ATTRIBUTION_AUTO_CONFIRM=True)
+    def test_auto_confirm_records_event(self):
+        a = self.qualifying()
+        self.run_all()
+        (e,) = ChangeEvent.objects.filter(kind='asset_auto_confirmed')
+        self.assertEqual((e.asset_id, e.immediate), (a.id, True))
+        self.run_all()
+        self.assertEqual(ChangeEvent.objects.count(), 1)
+
+    @override_settings(ATTRIBUTION_AUTO_CONFIRM=False)
+    def test_flag_off_records_nothing(self):
+        self.qualifying()
+        self.run_all()
+        self.assertEqual(ChangeEvent.objects.count(), 0)
