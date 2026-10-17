@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
@@ -196,10 +196,11 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
         events.record_asset_new(a.project, host)
     monitor = {'checked_at': now.isoformat(), 'active': bool(ports) or result['http_live'] or mx,
                'status': status, 'reason': reason}
-    a.refresh_from_db(fields=['enrichment'])  # _store may have written this very row (an ip)
-    a.enrichment = {**(a.enrichment or {}), 'monitor': monitor}
-    a.last_resolved_at = now  # the "Last checked" stamp, for every kind
-    a.save(update_fields=['enrichment', 'last_resolved_at'])
+    with transaction.atomic():  # locked like SetAssetCadence, so a cadence_explicit set meanwhile is kept
+        row = Asset.objects.select_for_update().get(pk=a.pk)  # _store may also have written this very row (an ip)
+        row.enrichment = {**(row.enrichment or {}), 'monitor': monitor}
+        row.last_resolved_at = now  # the "Last checked" stamp, for every kind
+        row.save(update_fields=['enrichment', 'last_resolved_at'])
     return {**monitor, 'project_id': a.project_id}
 
 

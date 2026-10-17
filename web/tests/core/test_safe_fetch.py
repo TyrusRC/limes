@@ -245,8 +245,8 @@ class RebindingTest(TestCase):
 
 class _Server:
     """A local HTTP(S) server on 127.0.0.1 answering 200 to every request; records Host headers."""
-    def __init__(self, context=None):
-        self.context, self.hosts, self.errors = context, [], []
+    def __init__(self, context=None, set_cookie=False):
+        self.context, self.hosts, self.errors, self.cookies, self.set_cookie = context, [], [], [], set_cookie
         self.sock = socket.socket()
         self.sock.bind(('127.0.0.1', 0))
         self.sock.listen(8)
@@ -275,8 +275,11 @@ class _Server:
                 for line in data.split(b'\r\n'):
                     if line.lower().startswith(b'host:'):
                         self.hosts.append(line[5:].strip().decode())
+                    if line.lower().startswith(b'cookie:'):
+                        self.cookies.append(line[7:].strip().decode())
                 if data:
-                    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                    cookie = b'Set-Cookie: s=1; Path=/\r\n' if self.set_cookie else b''
+                    conn.sendall(b'HTTP/1.1 200 OK\r\n' + cookie + b'Content-Length: 0\r\nConnection: close\r\n\r\n')
             except (OSError, ssl.SSLError) as e:  # the client refused our certificate: expected in the mismatch case
                 self.errors.append(e)
             finally:
@@ -374,3 +377,16 @@ class PinnedTlsRealTest(SimpleTestCase):
         self.assertEqual(r.status_code, 200)
         r.close()
         self.assertEqual(plain.hosts, [f'good.test:{plain.port}'])
+
+    def test_pinned_session_never_replays_cookies(self):
+        """One pinned session serves every hop and the cleartext probe: a cookie set over https (perhaps in answer
+        to the project's secret headers) must never be sent again, least of all in cleartext."""
+        from limes import safe_fetch
+        plain = _Server(set_cookie=True)
+        self.addCleanup(plain.close)
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1')
+        for _ in range(2):
+            r = get(f'http://good.test:{plain.port}/', timeout=5)
+            self.assertEqual(r.headers.get('Set-Cookie'), 's=1; Path=/')
+            r.close()
+        self.assertEqual((len(plain.hosts), plain.cookies), (2, []))

@@ -159,6 +159,18 @@ class CheckTest(Base):
             self.assertTrue({'email.spf_missing', 'dns.caa_missing', 'web.hsts_missing', 'tls.cert_expired'} <= ids, ids)
             self.assertTrue(self.reload(root).enrichment['monitor']['active'])  # MX: active
 
+    def test_tls_handshake_alone_counts_as_active(self):
+        h = self.asset('hostname', 'tls.other.com')
+        obs = observers(self.calls, expired=True)
+        obs['http'] = lambda host, ident: {'host': host, 'https': 'error', 'http': None}  # bad cert: requests errors
+        self.check(h, public('tls.other.com'), obs=obs)
+        self.assertTrue(self.reload(h).enrichment['monitor']['active'])
+        quiet = self.asset('hostname', 'quiet.other.com')
+        obs = {'http': lambda host, ident: {'host': host, 'https': None, 'http': None},
+               'tls': lambda host: {'cert': None, 'legacy': {}}}
+        self.check(quiet, public('quiet.other.com'), obs=obs)
+        self.assertFalse(self.reload(quiet).enrichment['monitor']['active'])
+
     def test_stopped_or_rejected_untouched(self):
         h = self.asset('hostname', 'a.other.com')
         rejected = self.asset('hostname', 'b.other.com', tier='rejected')

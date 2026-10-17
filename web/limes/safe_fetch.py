@@ -14,12 +14,14 @@ egress proxy that vets every connection.
 """
 import socket
 import ssl
+from http.cookiejar import DefaultCookiePolicy
 from urllib.parse import urlsplit, urlunsplit
 
 import dns.exception
 import dns.resolver
 import requests
 from requests.adapters import HTTPAdapter
+from requests.cookies import RequestsCookieJar
 
 from limes import scope
 from limes.checks import collect
@@ -86,6 +88,9 @@ def pinned_get(host, ip, session_factory=requests.Session):
     host = host.rstrip('.').lower()
     session = session_factory()
     session.trust_env = False  # no proxies or .netrc credentials from the environment
+    # cookie-free, like a fresh requests.get per call: nothing set on one hop (perhaps in answer to the project's
+    # secret headers) is replayed on the next, least of all on the cleartext probe
+    session.cookies = RequestsCookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
     session.mount('https://', _PinnedAdapter(host))
 
     def get(url, **kw):
