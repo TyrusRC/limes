@@ -80,7 +80,16 @@ class CheckTest(Base):
         self.assertEqual(self.calls, [])
         h = self.reload(h)
         self.assertEqual(h.enrichment['monitor']['status'], 'refused')
-        self.assertIn('10.0.0.1', h.enrichment['monitor']['reason'])
+        self.assertIn('private address', h.enrichment['monitor']['reason'])
+        # the private answer is recorded only as a dependency IP: nothing that selects targets picks it up
+        from limes import scope
+        from limes.checks import run
+        private = Asset.objects.get(project=self.p, kind='ip', value='10.0.0.1')
+        self.assertEqual(private.scope_tier, 'dependency')
+        self.assertNotIn(private, monitor.monitored())
+        self.assertNotIn(private, run._owned(self.p))
+        self.assertEqual(scope.may_attack(self.p, ['10.0.0.1'])[0], [])
+        self.assertEqual(scope.may_contact(self.p, ['a.other.com'])[0], [])
         self.assertEqual(RiskCheck.objects.count(), 0)
         self.assertEqual(h.last_resolved_at, self.now)
         mixed = self.asset('hostname', 'b.other.com')
@@ -197,6 +206,28 @@ class CheckTest(Base):
         self.check(h, {})
         self.assertEqual((h.risk_checks.count(), self.reload(h).enrichment['monitor']['dns_only']), (0, False))
 
+    def test_attempt_is_stamped_before_contact(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+        h = self.asset('hostname', 'slow.other.com', enrichment={'monitor': {'active': True, 'status': 'ok'}})
+        with mock.patch('limes.monitor.run.run_asset_checks', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                self.check(h, public('slow.other.com'))
+        h = self.reload(h)
+        self.assertEqual(h.last_resolved_at, self.now)  # rotates to the back instead of coming first every tick
+        self.assertEqual((h.enrichment['monitor']['status'], h.enrichment['monitor']['active']), ('timeout', True))
+        self.assertEqual(h.enrichment['monitor']['attempted_at'], self.now.isoformat())
+
+    def test_store_keeps_a_concurrent_cadence(self):
+        from limes.tasks.intel import _store
+        ip = self.asset('ip', PUBLIC)
+        stale = Asset.objects.get(pk=ip.pk)
+        Asset.objects.filter(pk=ip.pk).update(cadence_tier='crown_jewel', enrichment={'cadence_explicit': True})
+        _store(stale, 'internetdb', {'ports': [22]}, self.now)
+        ip = self.reload(ip)
+        self.assertTrue(ip.enrichment['cadence_explicit'])
+        self.assertEqual(ip.enrichment['internetdb']['ports'], [22])
+        self.assertEqual(stale.enrichment, ip.enrichment)
+
     def test_stopped_or_rejected_untouched(self):
         h = self.asset('hostname', 'a.other.com')
         rejected = self.asset('hostname', 'b.other.com', tier='rejected')
@@ -288,6 +319,37 @@ class TickTest(Base):
         with override_settings(CONTINUOUS_SCANS=False), mock.patch.object(monitor, 'check_asset') as check:
             self.assertEqual(monitor.monitor_assets(), {'checked': 0, 'reason': 'disabled'})
         check.assert_not_called()
+
+    def test_dripping_host_times_out_and_the_tick_moves_on(self):
+        from limes import safe_fetch
+        from tests.core.test_safe_fetch import Clock, Drip
+        slow = self.asset('hostname', 'slow.other.com')
+        fast = self.asset('hostname', 'fast.other.com')
+        clock = Clock()
+
+        def connect(addr, timeout=None, *a, **kw):
+            if addr == (PUBLIC, 80):
+                return Drip(clock)
+            raise ConnectionRefusedError()
+        refused = functools.partial(safe_fetch.pinned_tls_connect, create_connection=lambda addr, timeout=None: connect(addr))
+        answers = {**public('slow.other.com'), ('fast.other.com', 'A'): ['93.184.216.35'], ('fast.other.com', 'AAAA'): [],
+                   ('fast.other.com', 'CNAME'): dns.resolver.NoAnswer}
+        with mock.patch('urllib3.util.connection.create_connection', connect), \
+                mock.patch.object(safe_fetch, '_monotonic', clock), \
+                mock.patch.object(safe_fetch, 'pinned_tls_connect', refused), \
+                mock.patch.object(monitor, 'check_asset', functools.partial(monitor.check_asset, resolve=stub(answers),
+                                                                            get=Get())), \
+                mock.patch('limes.monitor.deliver_immediate'):
+            out = monitor.monitor_assets()
+        self.assertEqual(out['checked'], 2)  # the next asset still ran in the same tick
+        self.assertEqual(clock.t, 32)  # the drip was cut at the 30 s deadline (one 4 s read past it at most)
+        s, f = self.reload(slow), self.reload(fast)
+        self.assertEqual((s.enrichment['monitor']['status'], f.enrichment['monitor']['status']), ('timeout', 'ok'))
+        self.assertIsNotNone(s.last_resolved_at)
+        never = self.asset('hostname', 'new.other.com')
+        later = timezone.now() + 31 * DAY
+        self.assertEqual(monitor.due_assets(later)[0], never)
+        self.assertEqual(set(monitor.due_assets(later)[1:]), {s, f})
 
     def test_tick_budget_stops_between_assets(self):
         for i in range(3):

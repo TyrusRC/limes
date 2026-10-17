@@ -17,6 +17,7 @@ RESERVED_NETWORKS = [ipaddress.ip_network(c) for c in (
     '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4', '255.255.255.255/32',
     '::1/128', '::/128', 'fc00::/7', 'fe80::/10', 'ff00::/8', '2001:db8::/32', '::ffff:0:0/96',
     '64:ff9b::/96', '64:ff9b:1::/48', '2002::/16', '2001::/23', '100::/64', '5f00::/16',
+    'fec0::/10', '::/96',  # deprecated site-local and IPv4-compatible: Python's is_global calls both global
 )]
 
 # Names that only resolve inside a network (mDNS, RFC 2606/6761/8375, common internal zones).

@@ -14,6 +14,7 @@ egress proxy that vets every connection.
 """
 import socket
 import ssl
+import time
 from http.cookiejar import DefaultCookiePolicy
 from urllib.parse import urlsplit, urlunsplit
 
@@ -22,12 +23,111 @@ import dns.resolver
 import requests
 from requests.adapters import HTTPAdapter
 from requests.cookies import RequestsCookieJar
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from limes import scope
 from limes.checks import collect
 
-MAX_REASON_ADDRESSES = 5
 DEFAULT_PORTS = {'http': 80, 'https': 443}
+# Total wall clock for one host check (every http hop, the plain probe and the TLS handshakes), whatever the
+# host does: a host dripping a byte every few seconds never resets it. Each blocking step gets min(STEP, time left).
+HOST_DEADLINE = 30
+STEP = collect.TIMEOUT
+_monotonic = time.monotonic  # module attribute so tests can inject a clock
+
+
+class Deadline:
+    """One host check's total time budget."""
+    def __init__(self, seconds=HOST_DEADLINE, clock=None):
+        self.clock = clock or _monotonic
+        self.end = self.clock() + seconds
+
+    def expired(self):
+        return self.clock() >= self.end
+
+    def timeout(self):
+        """The timeout for the next blocking step; TimeoutError once the deadline has passed."""
+        left = self.end - self.clock()
+        if left <= 0:
+            raise TimeoutError('host check deadline reached')
+        return min(STEP, left)
+
+
+class _DeadlineSocket:
+    """Wraps the socket of a pinned HTTP connection: every send and recv is armed with the deadline's timeout."""
+    _io_refs = 0
+    _closed = False
+
+    def __init__(self, sock, deadline):
+        self._sock, self._deadline = sock, deadline
+
+    def _arm(self):
+        self._sock.settimeout(self._deadline.timeout())
+
+    def recv(self, *a):
+        self._arm()
+        return self._sock.recv(*a)
+
+    def recv_into(self, *a):
+        self._arm()
+        return self._sock.recv_into(*a)
+
+    def send(self, *a):
+        self._arm()
+        return self._sock.send(*a)
+
+    def sendall(self, *a):
+        self._arm()
+        return self._sock.sendall(*a)
+
+    def settimeout(self, t):
+        pass  # the deadline decides; urllib3 resetting a per-read timeout must not extend it
+
+    def makefile(self, mode='r', buffering=None, **kw):
+        # socket.socket.makefile builds a SocketIO over self, so the file's reads come back through recv_into
+        return socket.socket.makefile(self, mode, buffering, **kw)
+
+    def _decref_socketios(self):
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+
+def _pools(deadline):
+    """urllib3 pool classes whose connections dial with the deadline's timeout and wrap their socket in it.
+    CPython bounds the whole TLS handshake by the socket timeout set at connect, so the handshake is covered too."""
+    def connect(conn, parent):
+        conn.timeout = deadline.timeout()
+        parent.connect(conn)
+        conn.sock = _DeadlineSocket(conn.sock, deadline)
+
+    class Plain(HTTPConnection):
+        def connect(self):
+            connect(self, HTTPConnection)
+
+    class Secure(HTTPSConnection):
+        def connect(self):
+            connect(self, HTTPSConnection)
+
+    class PlainPool(HTTPConnectionPool):
+        ConnectionCls = Plain
+
+    class SecurePool(HTTPSConnectionPool):
+        ConnectionCls = Secure
+    return {'http': PlainPool, 'https': SecurePool}
+
+
+def _address_class(value):
+    ip = scope.parse_ip(value)
+    if ip is None:
+        return 'malformed'
+    for attr, word in (('is_loopback', 'loopback'), ('is_link_local', 'link-local'), ('is_multicast', 'multicast'),
+                       ('is_unspecified', 'unspecified'), ('is_private', 'private')):
+        if getattr(ip, attr):
+            return word
+    return 'reserved'
 
 
 def _answers(resolve, name, rdtype):
@@ -59,21 +159,25 @@ def resolve_vetted(host, resolve=collect._resolve):
         found += got
     if not found:
         return None, f'{name} does not resolve'
-    bad = sorted({str(a) for a in found if scope.is_reserved_ip(a)})
-    if bad:
-        return None, f'{name} resolves to private/reserved ' + ', '.join(bad[:MAX_REASON_ADDRESSES])
+    bad = sorted({_address_class(a) for a in found if scope.is_reserved_ip(a)})
+    if bad:  # the class only: the internal address itself is not repeated into stored reasons
+        return None, f'{name} resolves to a {" / ".join(bad)} address'
+    # A answers come first: IPv4 is preferred, since containers on default Docker networks often have no IPv6 route
     return str(scope.parse_ip(found[0])), None
 
 
 class _PinnedAdapter(HTTPAdapter):
-    """HTTPS pools that send SNI and verify the certificate for `host` while connecting to an IP URL."""
-    def __init__(self, host, **kw):
-        self._host = host  # set first: HTTPAdapter.__init__ calls init_poolmanager
+    """Pools bound by the host check's deadline; for https (host set) they also send SNI and verify the
+    certificate for `host` while connecting to an IP URL."""
+    def __init__(self, host, deadline, **kw):
+        self._host, self._deadline = host, deadline  # set first: HTTPAdapter.__init__ calls init_poolmanager
         super().__init__(**kw)
 
     def init_poolmanager(self, *args, **kw):
-        kw['server_hostname'] = kw['assert_hostname'] = self._host
+        if self._host:
+            kw['server_hostname'] = kw['assert_hostname'] = self._host
         super().init_poolmanager(*args, **kw)
+        self.poolmanager.pool_classes_by_scheme = _pools(self._deadline)
 
 
 def _netloc(ip, port):
@@ -81,7 +185,7 @@ def _netloc(ip, port):
     return f'{addr}:{port}' if port else addr
 
 
-def pinned_get(host, ip, session_factory=requests.Session):
+def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
     """A requests.get stand-in that only fetches URLs on `host`, always from `ip`, never following redirects.
     NOTE: one session (and its pool) per call of pinned_get, i.e. per host check; it is left to the garbage
     collector. Upgrade path: close it explicitly if host checks ever run in a long-lived loop."""
@@ -91,7 +195,9 @@ def pinned_get(host, ip, session_factory=requests.Session):
     # cookie-free, like a fresh requests.get per call: nothing set on one hop (perhaps in answer to the project's
     # secret headers) is replayed on the next, least of all on the cleartext probe
     session.cookies = RequestsCookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
-    session.mount('https://', _PinnedAdapter(host))
+    deadline = deadline or Deadline()
+    session.mount('https://', _PinnedAdapter(host, deadline))
+    session.mount('http://', _PinnedAdapter(None, deadline))
 
     def get(url, **kw):
         bad = requests.exceptions.InvalidURL(f'refusing a URL that is not on {host}')
@@ -105,7 +211,7 @@ def pinned_get(host, ip, session_factory=requests.Session):
         scheme = parts.scheme.lower()
         if scheme not in DEFAULT_PORTS or '@' in parts.netloc or scope.target_host(url) != host:
             raise bad
-        if kw.get('verify') is False:
+        if not kw.get('verify', True):  # False, 0, '' or None would all turn verification off
             raise ValueError('TLS verification cannot be turned off')
         if port == DEFAULT_PORTS[scheme]:
             port = None
@@ -117,13 +223,17 @@ def pinned_get(host, ip, session_factory=requests.Session):
     return get
 
 
-def pinned_tls_connect(ip, create_connection=socket.create_connection, context_factory=collect.tls_context):
-    """connect(host, legacy=None) for collect.observe_tls: dials (ip, 443) with SNI and verification for host."""
+def pinned_tls_connect(ip, create_connection=socket.create_connection, context_factory=collect.tls_context, deadline=None):
+    """connect(host, legacy=None) for collect.observe_tls: dials (ip, 443) with SNI and verification for host.
+    Dial and handshake each get min(STEP, time left): CPython bounds the whole handshake by the socket timeout."""
+    deadline = deadline or Deadline()
+
     def connect(host, legacy=None):
         ctx = context_factory(legacy)
         if ctx.verify_mode != ssl.CERT_REQUIRED or not ctx.check_hostname:
             raise ValueError('refusing a TLS context that does not verify the certificate and hostname')
-        with create_connection((ip, 443), timeout=collect.TIMEOUT) as sock:
+        with create_connection((ip, 443), timeout=deadline.timeout()) as sock:
+            sock.settimeout(deadline.timeout())
             with ctx.wrap_socket(sock, server_hostname=host) as tls:
                 return tls.getpeercert()
     return connect
