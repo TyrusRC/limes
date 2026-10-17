@@ -6,13 +6,9 @@ from django.conf import settings
 
 from limes import owned_ranges
 from limes.intel import domains
+from limes.scope import INTERNAL_SUFFIXES as _INTERNAL_SUFFIXES, INTERNAL_TLDS as _INTERNAL_TLDS
 from limes.scope import is_reserved_ip, is_reserved_network, parse_ip
 from startScan.inventory_migrate import normalize_host
-
-
-# Names that only resolve inside a network (mDNS, RFC 2606/6761/8375, common internal zones).
-_INTERNAL_TLDS = ('local', 'internal', 'localhost', 'test', 'invalid', 'example', 'lan', 'corp')
-_INTERNAL_SUFFIXES = ('home.arpa',)
 
 
 def _err(msg):
@@ -94,8 +90,8 @@ def classify_asset_entry(raw):
     value = normalize_host(puny)
     if not value or not validators.domain(value):
         return _err(f'invalid domain/host: {s}')
-    # NOTE: name checks can't stop public names that resolve to private IPs (e.g. 10.0.0.1.nip.io).
-    # Upgrade path: reject private resolved IPs at each active stage (not implemented yet).
+    # Name checks can't stop public names that resolve to private IPs (e.g. 10.0.0.1.nip.io): limes.safe_fetch
+    # vets every resolved answer right before any contact and refuses the host if one is private or reserved.
     if value.rsplit('.', 1)[-1] in _INTERNAL_TLDS or value.endswith(tuple('.' + x for x in _INTERNAL_SUFFIXES)):
         return _err(f'internal-only name rejected: {s}')
     if domains.registrable(value) is None:

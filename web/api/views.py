@@ -842,20 +842,28 @@ class RescanAsset(APIView):
 
 
 class SetAssetCadence(APIView):
-	"""How often continuous monitoring rediscovers an owned root (limes.continuous)."""
+	"""How often an owned asset is rediscovered or monitored (limes.continuous, limes.monitor, limes.owned_ranges).
+	A cadence set here is explicit: it overrides the monitor's activity rule ('off' stops monitoring)."""
 	permission_classes = [HasPermission]
 	permission_required = PERM_INITATE_SCANS_SUBSCANS
+	KINDS = ('root_domain', 'hostname', 'ip', 'cidr', 'asn')
 
 	def post(self, request):
 		asset = _load_asset(request)
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
-		if asset.kind != 'root_domain':
-			return Response({'status': False, 'message': 'cadence applies to root domains only'})
+		if asset.kind not in self.KINDS:
+			return Response({'status': False, 'message': 'cadence applies to roots, hostnames, IPs, ranges and ASNs only'})
+		if asset.scope_tier not in ('owned_root', 'owned_host'):
+			return Response({'status': False, 'message': 'cadence applies to owned assets only'})
 		tier = request.data.get('cadence_tier')
 		if not isinstance(tier, str) or tier not in dict(CADENCE_TIERS):
 			return Response({'status': False, 'message': 'unknown cadence tier'})
-		Asset.objects.filter(pk=asset.pk).update(cadence_tier=tier)
+		with transaction.atomic():
+			row = Asset.objects.select_for_update().get(pk=asset.pk)
+			row.cadence_tier = tier
+			row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
+			row.save(update_fields=['cadence_tier', 'enrichment'])
 		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 

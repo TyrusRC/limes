@@ -445,7 +445,11 @@ class PortsTest(TestCase):
 
 class RunTest(TestCase):
     def setUp(self):
+        from unittest import mock
         from startScan.models import IpAddress
+        vetted = mock.patch('limes.checks.run.safe_fetch.resolve_vetted', return_value=('93.184.216.34', None))
+        vetted.start()
+        self.addCleanup(vetted.stop)
         self.project = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
         self.root = Asset.objects.create(project=self.project, kind='root_domain', value='x.com', scope_tier='owned_root')
         self.host = Asset.objects.create(project=self.project, kind='hostname', value='a.x.com', scope_tier='owned_host')
