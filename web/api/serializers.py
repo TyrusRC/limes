@@ -8,6 +8,19 @@ from scanEngine.models import *
 from startScan.models import *
 from targetApp.models import *
 from dashboard.models import InAppNotification
+from django.utils.http import url_has_allowed_host_and_scheme
+from urllib.parse import urlsplit
+
+
+def safe_redirect_link(url):
+	"""Notification click target: a same-site relative path or an http(s) URL, else None (no javascript:, data:, //host)."""
+	# browsers drop tabs/newlines inside URLs ('java\tscript:'), so any control character or space is refused
+	if not url or any(c.isspace() or not c.isprintable() for c in url):
+		return None
+	if url_has_allowed_host_and_scheme(url, allowed_hosts=None):  # relative: no scheme and no host
+		return url
+	parts = urlsplit(url)
+	return url if parts.scheme.lower() in ('http', 'https') and parts.netloc else None
 
 
 class InAppNotificationSerializer(serializers.ModelSerializer):
@@ -30,6 +43,11 @@ class InAppNotificationSerializer(serializers.ModelSerializer):
 
 	def get_project_name(self, obj):
 		return obj.project.name if obj.project else None
+
+	def to_representation(self, instance):
+		data = super().to_representation(instance)
+		data['redirect_link'] = safe_redirect_link(data.get('redirect_link'))
+		return data
 
 
 class SearchHistorySerializer(serializers.ModelSerializer):
