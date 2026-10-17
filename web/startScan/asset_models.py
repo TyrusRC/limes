@@ -6,7 +6,8 @@ from dashboard.models import Project
 from limes.definitions import CELERY_TASK_STATUSES
 from startScan.models import IpAddress, Technology
 
-ASSET_KINDS = [('root_domain', 'root_domain'), ('hostname', 'hostname'), ('ip', 'ip'), ('cidr', 'cidr')]
+ASSET_KINDS = [('root_domain', 'root_domain'), ('hostname', 'hostname'), ('ip', 'ip'), ('cidr', 'cidr'),
+               ('asn', 'asn')]
 SCOPE_TIERS = [('owned_root', 'owned_root'), ('owned_host', 'owned_host'),
                ('co_brand', 'co_brand'), ('candidate', 'candidate'), ('rejected', 'rejected'),
                ('dependency', 'dependency')]  # infrastructure we rely on, never scanned by IP

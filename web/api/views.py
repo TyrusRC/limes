@@ -674,6 +674,9 @@ class AddAssets(APIView):
 
 	def post(self, request):
 		from api.asset_add import classify_asset_entry
+		from django.conf import settings
+		from limes.owned_ranges import addresses, range_addresses
+		from limes.tasks.inventory import _append_source
 		from dashboard.stats import invalidate
 		data = request.data
 		if not isinstance(data, dict):
@@ -695,6 +698,8 @@ class AddAssets(APIView):
 		set_authorized = tier == 'co_brand' and 'active_authorized' in data
 		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
 		added, existing, skipped, warnings = 0, 0, 0, []
+		cap = settings.RANGE_ADDRESS_CAP
+		used = range_addresses(project)
 		with transaction.atomic():
 			for entry in raw:
 				if not isinstance(entry, str):
@@ -706,29 +711,45 @@ class AddAssets(APIView):
 					skipped += 1
 					warnings.append(c['error'])
 					continue
-				asset, created = Asset.objects.get_or_create(
-					project=project, kind=c['kind'], value=c['value'],
-					defaults={'scope_tier': tier, 'state': 'active'})
-				# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
-				# those are explicit decisions made through Confirm/Reject.
-				if not created and asset.scope_tier == 'rejected':
-					skipped += 1
-					warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+				# The project cap is all-or-nothing per entry, against a running total across the request.
+				new_cidrs = [v for v in c['values'] if c['kind'] == 'cidr' and tier != 'co_brand' and not
+					Asset.objects.filter(project=project, kind='cidr', value=v, scope_tier__in=('owned_root', 'owned_host')).exists()]
+				need = sum(addresses(v) for v in new_cidrs)
+				if need and used + need > cap:
+					skipped += len(c['values'])
+					warnings.extend(
+						f"{entry.strip()} would add {need} addresses, over this project's cap of {cap} "
+						f'({used} in use): add fewer ranges or ask the operator to raise LIMES_RANGE_ADDRESS_CAP'
+						for _ in c['values'])
 					continue
-				promote = created or asset.scope_tier in ('candidate', 'dependency')
-				if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
-					existing += 1
-					continue
-				if promote:
-					asset.scope_tier = tier
-					asset.state = 'active'
-				if set_authorized:
-					asset.active_authorized = authorized
-				asset.added_by = request.user
-				if reason:
-					asset.decision_reason = reason
-				asset.save()
-				added += 1
+				used += need
+				if c['warning'] and c['warning'] not in warnings:
+					warnings.append(c['warning'])
+				for value in c['values']:
+					asset, created = Asset.objects.get_or_create(
+						project=project, kind=c['kind'], value=value,
+						defaults={'scope_tier': tier, 'state': 'active'})
+					# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
+					# those are explicit decisions made through Confirm/Reject.
+					if not created and asset.scope_tier == 'rejected':
+						skipped += 1
+						warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+						continue
+					promote = created or asset.scope_tier in ('candidate', 'dependency')
+					if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
+						existing += 1
+						continue
+					if promote:
+						asset.scope_tier = tier
+						asset.state = 'active'
+					if set_authorized:
+						asset.active_authorized = authorized
+					asset.added_by = request.user
+					if reason:
+						asset.decision_reason = reason
+					_append_source(asset, 'manual', reason or f'added by {request.user.get_username()}')
+					asset.save()
+					added += 1
 		invalidate(project.id)
 		return Response({'status': True, 'message': {
 			'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}})
