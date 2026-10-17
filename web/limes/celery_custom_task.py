@@ -20,6 +20,10 @@ if 'CELERY_BROKER' in os.environ:
 	cache = Redis.from_url(os.environ['CELERY_BROKER'])
 
 
+# Core ASM stages: run whenever the workflow schedules them, so engines (old or custom) need not list them.
+ALWAYS_RUN = {'passive_intel', 'risk_checks'}
+
+
 class LimesRequest(Request):
 	success_msg = ''
 	retry_msg = ''
@@ -99,7 +103,8 @@ class LimesTask(Task):
 				# are not skipped when only the parent is listed in engine.tasks.
 				# (The old DAST sub-tasks now run inside vulnerability_scan/assay.)
 				dependent_tasks = {}
-				if self.track and self.task_name not in self.engine.tasks and dependent_tasks.get(self.task_name) not in self.engine.tasks:
+				if (self.track and self.task_name not in ALWAYS_RUN and self.task_name not in self.engine.tasks
+						and dependent_tasks.get(self.task_name) not in self.engine.tasks):
 					logger.debug(f'Task {self.name} is not part of engine "{self.engine.engine_name}" tasks. Skipping.')
 					return
 

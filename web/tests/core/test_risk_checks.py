@@ -515,6 +515,53 @@ class StageTest(TestCase):
         self.assertEqual(out, {'checked': 2, 'failed': 1})
         self.assertEqual(m.call_args[0][1].value, 'x.com')
 
+    def _engine_ctx(self):
+        # a real engine whose YAML lists neither stage, tracked as in a real scan
+        from scanEngine.models import EngineType
+        from startScan.asset_models import ScanRun
+        ctx = self._ctx('owned_root')
+        del ctx['track']
+        eng = EngineType.objects.create(engine_name='real', yaml_configuration='port_scan: {}\n')
+        root = Asset.objects.get(project=self.p, value='x.com')
+        run = ScanRun.objects.create(project=self.p, root_asset=root, start_scan_date=timezone.now())
+        ctx.update(engine_id=eng.id, scan_run_id=run.id)
+        return ctx, run
+
+    def test_risk_checks_runs_when_engine_does_not_list_it(self):
+        from unittest import mock
+        from limes.tasks import stages
+        ctx, run = self._engine_ctx()
+        with mock.patch('limes.checks.run.run_checks', return_value={'checked': 1, 'failed': 0}) as m:
+            out = stages.risk_checks(ctx=ctx)
+        m.assert_called_once()
+        self.assertEqual(out, {'checked': 1, 'failed': 0})
+        self.assertEqual(list(run.jobs.values_list('stage', flat=True)), ['probe'])
+
+    def test_passive_intel_runs_when_engine_does_not_list_it(self):
+        from unittest import mock
+        from limes.tasks import stages
+        ctx, _run = self._engine_ctx()
+        names = ['limes.tasks.intel.run_crtsh', 'limes.tasks.intel.run_internetdb', 'limes.tasks.intel.run_ripestat',
+                 'limes.tasks.attribution.collect_dns', 'limes.tasks.attribution.score_project',
+                 'limes.tasks.attribution.verify_delegations', 'limes.tasks.attribution.apply_decisions']
+        with mock.patch('limes.tasks.resolution.resolve_root', return_value=0):
+            patches = [mock.patch(n, return_value={}) for n in names]
+            mocks = [p.start() for p in patches]
+            try:
+                stages.passive_intel(ctx=ctx)
+            finally:
+                for p in patches:
+                    p.stop()
+        mocks[0].assert_called_once()
+
+    def test_other_stages_stay_gated_by_engine(self):
+        from unittest import mock
+        from limes.tasks import stages
+        ctx, _run = self._engine_ctx()
+        with mock.patch.object(stages.screenshot, 'run') as m:
+            self.assertIsNone(stages.screenshot(ctx=ctx))
+        m.assert_not_called()
+
     def test_skipped_unless_owned_root(self):
         from unittest import mock
         from limes.tasks import stages
