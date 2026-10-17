@@ -110,6 +110,9 @@ Dashboard
             {% empty %}<p class="text-muted">None.</p>{% endfor %}
           </div>
         </div>
+        <h5 class="mt-3">Recent changes</h5>
+        {% for c in recent_changes %}<div>{{ c.kind }}: {{ c.title }}{% if c.asset %} <small class="text-muted">{{ c.asset }}</small>{% endif %} <small class="text-muted">{{ c.created_at|naturaltime }}</small></div>
+        {% empty %}<p class="text-muted">No changes recorded yet.</p>{% endfor %}
       </div>
     </div>
   </div>

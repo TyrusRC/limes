@@ -164,3 +164,18 @@ class TrendVersionTest(Base):
                                          score=800, grade='B')
         trend = asm_stats(self.p)['risk']['trend']
         self.assertEqual([t['version'] for t in trend], ['v1', 'v2'])
+
+
+class RecentChangesTest(Base):
+    def test_recent_changes_newest_first_and_scoped(self):
+        from startScan.models import ChangeEvent
+        a = self.asset('a.x.com')
+        for i in range(12):
+            ev = ChangeEvent.objects.create(project=self.p, kind='issue_new', severity=3, title=f't{i}', asset=a if i == 11 else None)
+            ChangeEvent.objects.filter(id=ev.id).update(created_at=self.now - timedelta(minutes=12 - i))
+        ChangeEvent.objects.create(project=self.other, kind='issue_new', title='other')
+        rows = asm_stats(self.p)['recent_changes']
+        self.assertEqual([r['title'] for r in rows], [f't{i}' for i in range(11, 1, -1)])
+        self.assertEqual(rows[0]['asset'], 'a.x.com')
+        self.assertIsNone(rows[1]['asset'])
+        self.assertEqual(set(rows[0]), {'kind', 'title', 'severity', 'created_at', 'asset'})

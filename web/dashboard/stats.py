@@ -96,6 +96,13 @@ def _monitoring(project, now):
             'last_auto': last_auto}
 
 
+def _recent_changes(project):
+    from startScan.models import ChangeEvent
+    evs = ChangeEvent.objects.filter(project=project).select_related('asset').order_by('-created_at', '-id')[:LIST_LIMIT]
+    return [{'kind': e.kind, 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
+             'asset': e.asset.value if e.asset else None} for e in evs]
+
+
 def asm_stats(project):
     from startScan.models import ScanActivity
     now = timezone.now()
@@ -104,6 +111,7 @@ def asm_stats(project):
         'inventory': _inventory(project),
         'review': _review(project),
         'changes': _changes(project, now),
+        'recent_changes': _recent_changes(project),
         'findings': _findings(project),
         'monitoring': _monitoring(project, now),
         'activity': list(ScanActivity.objects.filter(scan_of__domain__project=project).order_by('-time')[:15]),
