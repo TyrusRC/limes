@@ -104,6 +104,11 @@ function issue_default_expiry() {
 	return d.toISOString().slice(0, 10);
 }
 
+// accepted_risk needs an expiry (default +90 days); a false positive stays open-ended unless a date is chosen.
+function issue_sync_expiry() {
+	document.getElementById('issue_expiry').value = document.getElementById('issue_kind').value === 'accepted_risk' ? issue_default_expiry() : '';
+}
+
 function issue_form_html(row) {
 	if (!issue_can_write()) return '<p class="text-muted">You can view issues but not change them.</p>';
 	var revoke = row.waiver ? '<button class="btn btn-sm btn-soft-danger mb-3" id="issue_revoke">Revoke waiver</button>' : '';
@@ -112,8 +117,8 @@ function issue_form_html(row) {
 		'<select id="issue_kind" class="form-select mb-2"><option value="accepted_risk">accepted_risk</option><option value="false_positive">false_positive</option></select>' +
 		'<label class="form-label" for="issue_reason">Reason (required)</label>' +
 		'<textarea id="issue_reason" class="form-control mb-2" rows="3" maxlength="5000"></textarea>' +
-		'<label class="form-label" for="issue_expiry">Expires (required for accepted_risk, max 365 days)</label>' +
-		'<input type="date" id="issue_expiry" class="form-control mb-2" value="' + issue_default_expiry() + '">' +
+		'<label class="form-label" for="issue_expiry">Expires (required for accepted_risk, optional for false_positive, max 365 days)</label>' +
+		'<input type="date" id="issue_expiry" class="form-control mb-2">' +
 		'<button class="btn btn-sm btn-primary mb-3" id="issue_waive">Waive</button>';
 }
 
@@ -145,6 +150,8 @@ function issue_modal(id) {
 	issue_load_notes(id);
 	var fail = function() { issue_toast('Request failed.'); };
 	if (!issue_can_write()) return;
+	issue_sync_expiry();
+	document.getElementById('issue_kind').addEventListener('change', issue_sync_expiry);
 	document.getElementById('issue_waive').addEventListener('click', function() {
 		var kind = document.getElementById('issue_kind').value, exp = document.getElementById('issue_expiry').value;
 		var body = {project: issue_project(), issue_id: id, kind: kind, reason: document.getElementById('issue_reason').value};
@@ -169,6 +176,7 @@ function issue_modal(id) {
 
 function issues_init() {
 	issue_load_score();
+	$.fn.dataTable.ext.errMode = 'none';
 	var table = $('#issue_results').DataTable({
 		processing: true,
 		stripeClasses: [],
@@ -191,6 +199,7 @@ function issues_init() {
 		],
 		order: [[3, 'desc']]
 	});
+	$('#issue_results').on('error.dt', function() { issue_toast('Could not load issues.'); });
 	['severity', 'source', 'waived'].forEach(function(k) {
 		document.getElementById('f_' + k).addEventListener('change', function() { table.ajax.url(issue_url()).load(); });
 	});
