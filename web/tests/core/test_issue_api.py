@@ -86,6 +86,14 @@ class IssueApiTest(TestCase):
             self.assertTrue(r.json()['message'], c)
         self.assertFalse(IssueWaiver.objects.exists())
 
+    def test_waive_and_revoke_drop_the_cached_dashboard_stats(self):
+        from django.core.cache import cache
+        from dashboard.stats import _key
+        for url, body in (('/api/action/issue/waive/', {'kind': 'false_positive', 'reason': 'fp'}), ('/api/action/issue/revoke/', {})):
+            cache.set(_key(self.p.id), {'stale': True})
+            self.assertTrue(self.post(self.admin, url, issue_id=self.i1.id, **body).json()['status'])
+            self.assertIsNone(cache.get(_key(self.p.id)), url)
+
     def test_naive_expiry_accepted(self):
         exp = (timezone.now() + timedelta(days=5)).replace(tzinfo=None).isoformat()
         r = self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='false_positive',
