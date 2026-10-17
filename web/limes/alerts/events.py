@@ -9,7 +9,7 @@ from startScan.models import ChangeEvent
 
 logger = logging.getLogger(__name__)
 KINDS = ('issue_new', 'issue_fixed', 'issue_regressed', 'score_dropped', 'score_changed',
-         'asset_auto_confirmed', 'asset_missing')
+         'asset_auto_confirmed', 'asset_missing', 'waiver_expired')
 IMMEDIATE_SEVERITY = 3
 ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed')
 
@@ -17,6 +17,8 @@ ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed')
 def is_immediate(kind, key, severity):
     if kind in ALWAYS_IMMEDIATE:
         return True
+    if kind == 'waiver_expired':  # the caller passes severity only while the issue is still open
+        return (severity or 0) >= IMMEDIATE_SEVERITY
     if kind not in ('issue_new', 'issue_regressed'):
         return False
     key = key or ''

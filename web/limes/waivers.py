@@ -42,7 +42,7 @@ def create_waiver(issue, kind, reason, user, expires_at=None, now=None):
         raise WaiverError(f'expiry must be in the future and within {MAX_DAYS} days')
     with transaction.atomic():
         TrackedIssue.objects.select_for_update().get(pk=issue.pk)
-        issue.waivers.filter(revoked_at__isnull=True).update(revoked_at=now, revoked_by=user)
+        issue.waivers.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).update(revoked_at=now, revoked_by=user)
         return IssueWaiver.objects.create(issue=issue, kind=kind, reason=reason, created_by=user,
                                           created_at=now, expires_at=expires_at)
 
