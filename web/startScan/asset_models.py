@@ -17,7 +17,7 @@ SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
 
-__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot']
+__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck']
 
 
 class Tag(models.Model):
@@ -156,3 +156,17 @@ class ScoreSnapshot(models.Model):
 
     class Meta:
         unique_together = ('project', 'date')
+
+
+class RiskCheck(models.Model):
+    """Latest result of one configuration check on one asset (limes.checks)."""
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='risk_checks')
+    check_id = models.CharField(max_length=60)
+    status = models.CharField(max_length=16)
+    severity = models.IntegerField()
+    evidence = models.JSONField(default=dict)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_checked = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('asset', 'check_id')
