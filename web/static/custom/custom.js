@@ -205,7 +205,7 @@ function parse_comma_values_into_span(data, color, outline = null) {
 		var badge = `<span class='badge badge-soft-` + color + ` m-1'>`;
 		var data_with_span = "";
 		data.split(/\s*,\s*/).forEach(function(split_vals) {
-			data_with_span += badge + split_vals + "</span>";
+			data_with_span += badge + htmlEncode(split_vals) + "</span>";
 		});
 		return data_with_span;
 	}
@@ -385,9 +385,9 @@ function parse_technology(data, color, scan_id = null, domain_id=null) {
 	var data_with_span = "";
 	for (var key in data) {
 		if (scan_id) {
-			data_with_span += badge + ` onclick="get_tech_details('${data[key]['name']}', ${scan_id}, domain_id=null)">` + data[key]['name'] + "</span>";
+			data_with_span += badge + ` onclick="get_tech_details('${jsEscape(data[key]['name'])}', ${scan_id}, domain_id=null)">` + htmlEncode(data[key]['name']) + "</span>";
 		} else if (domain_id) {
-			data_with_span += badge + ` onclick="get_tech_details('${data[key]['name']}', scan_id=null, domain_id=domain_id)">` + data[key]['name'] + "</span>";
+			data_with_span += badge + ` onclick="get_tech_details('${jsEscape(data[key]['name'])}', scan_id=null, domain_id=domain_id)">` + htmlEncode(data[key]['name']) + "</span>";
 		}
 	}
 	return data_with_span;
@@ -401,7 +401,7 @@ function parse_ip(data, cdn) {
 	}
 	var data_with_span = "";
 	data.split(/\s*,\s*/).forEach(function(split_vals) {
-		data_with_span += badge + split_vals + "</span>";
+		data_with_span += badge + htmlEncode(split_vals) + "</span>";
 	});
 	return data_with_span;
 }
@@ -568,9 +568,9 @@ function get_interesting_subdomains(project, target_id, scan_history_id) {
 					// tech_badge = `</br>` + parse_technology(row['technologies'], "primary", outline=true, scan_id=null);
 				}
 				if (row['http_url']) {
-					return `<a href="` + row['http_url'] + `" class="text-primary" target="_blank">` + data + `</a>` + tech_badge;
+					return `<a href="` + safeHref(row['http_url']) + `" class="text-primary" target="_blank">` + htmlEncode(data) + `</a>` + tech_badge;
 				}
-				return `<a href="https://` + data + `" class="text-primary" target="_blank">` + data + `</a>` + tech_badge;
+				return `<a href="https://` + htmlEncode(data) + `" class="text-primary" target="_blank">` + htmlEncode(data) + `</a>` + tech_badge;
 			},
 			"targets": 0
 		}, 
@@ -595,7 +595,9 @@ function get_interesting_subdomains(project, target_id, scan_history_id) {
 				return `<span class='badge badge-pills badge-soft-danger'>` + data + `</span>`;
 			},
 			"targets": 2,
-		}, ],
+		},
+		// remaining cells (incl. hidden ones) as text
+		{"targets": "_all", "render": $.fn.dataTable.render.text()}, ],
 	});
 }
 
@@ -658,7 +660,7 @@ function get_interesting_endpoints(project, target_id, scan_history_id) {
 		}, {
 			"render": function(data, type, row) {
 				var url = split_into_lines(data, 70);
-				return "<a href='" + data + "' target='_blank' class='text-primary'>" + url + "</a>";
+				return "<a href='" + safeHref(data) + "' target='_blank' class='text-primary'>" + url + "</a>";
 			},
 			"targets": 0
 		}, 
@@ -683,7 +685,9 @@ function get_interesting_endpoints(project, target_id, scan_history_id) {
 				return `<span class='badge badge-pills badge-soft-danger'>` + data + `</span>`;
 			},
 			"targets": 2,
-		}, ],
+		},
+		// remaining cells (incl. hidden ones) as text
+		{"targets": "_all", "render": $.fn.dataTable.render.text()}, ],
 	});
 }
 
@@ -705,7 +709,7 @@ function get_important_subdomains(target_id, scan_history_id) {
 				$("#important-subdomains-list").append(`
 					<div id="${div_id}">
 					<p>
-					<span id="subdomain_${subdomain['id']}"> ${subdomain['name']}
+					<span id="subdomain_${subdomain['id']}"> ${htmlEncode(subdomain['name'])}
 					<span class="">
 					<a href="javascript:;" data-clipboard-action="copy" class="m-1 float-end badge-link text-info copyable text-primary" data-toggle="tooltip" data-placement="top" title="Copy Subdomain!" data-clipboard-target="#subdomain_${subdomain['id']}">
 					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather feather-copy"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
@@ -1025,7 +1029,7 @@ function get_http_status_badge(data) {
 function render_endpoint_in_xlmodal(endpoint_count, subdomain_name, result) {
 	// This function renders endpoints datatable in xl modal
 	// Used in Subscan results and subdomain to endpoints modal
-	$('#xl-modal-content').append(`<h5> ${endpoint_count} Endpoints Discovered on subdomain ${subdomain_name}</h5>`);
+	$('#xl-modal-content').append(`<h5> ${endpoint_count} Endpoints Discovered on subdomain ${htmlEncode(subdomain_name)}</h5>`);
 	$('#xl-modal-content').append(`
 		<div class="">
 		<table id="endpoint-modal-datatable" class="table dt-responsive w-100">
@@ -1054,19 +1058,19 @@ function render_endpoint_in_xlmodal(endpoint_count, subdomain_name, result) {
 			tech_badge = '<div>' + parse_technology(endpoint['technologies'], "primary", outline = true);
 		}
 		if (endpoint['webserver']) {
-			web_server = `<span class='m-1 badge badge-soft-info' data-toggle="tooltip" data-placement="top" title="Web Server">${endpoint['webserver']}</span>`;
+			web_server = `<span class='m-1 badge badge-soft-info' data-toggle="tooltip" data-placement="top" title="Web Server">${htmlEncode(endpoint['webserver'])}</span>`;
 		}
 		var url = split_into_lines(endpoint['http_url'], 70);
 		var rand_id = get_randid();
 		tech_badge += web_server + '</div>';
-		var http_url_td = "<a href='" + endpoint['http_url'] + `' target='_blank' class='text-primary'>` + url + "</a>" + tech_badge;
+		var http_url_td = "<a href='" + safeHref(endpoint['http_url']) + `' target='_blank' class='text-primary'>` + url + "</a>" + tech_badge;
 		$('#endpoint_tbody').append(`
 			<tr>
 			<td>${http_url_td}</td>
 			<td>${get_http_status_badge(endpoint['http_status'])}</td>
-			<td>${return_str_if_not_null(htmlEncode(endpoint['page_title']))}</td>
+			<td>${htmlEncode(return_str_if_not_null(endpoint['page_title']))}</td>
 			<td>${parse_comma_values_into_span(endpoint['matched_gf_patterns'], "danger", outline=true)}</td>
-			<td>${return_str_if_not_null(endpoint['content_type'])}</td>
+			<td>${htmlEncode(return_str_if_not_null(endpoint['content_type']))}</td>
 			<td>${return_str_if_not_null(endpoint['content_length'])}</td>
 			<td>${get_response_time_text(endpoint['response_time'])}</td>
 			</tr>
@@ -1231,7 +1235,7 @@ function get_and_render_subscan_history(subdomain_id, subdomain_name) {
 	}).then(function(data) {
 		console.log(data);
 		if (data['status']) {
-			$('#modal_title').html('Subscan History for subdomain ' + subdomain_name);
+			$('#modal_title').html('Subscan History for subdomain ' + htmlEncode(subdomain_name));
 			$('#modal-content').empty();
 			$('#modal-content').append(`<div id="subscan_history_table"></div>`);
 
@@ -1289,7 +1293,7 @@ function get_and_render_subscan_history(subdomain_id, subdomain_name) {
 function fetch_whois(domain_name, force_reload_whois=false) {
 	// this function will fetch WHOIS record for any subdomain and also display
 	// snackbar once whois is fetched
-	var url = `/api/tools/whois/?format=json&target=${domain_name}`;
+	var url = `/api/tools/whois/?format=json&target=${encodeURIComponent(domain_name)}`;
 	if (force_reload_whois) {
 		url+='&is_reload=true'
 	}
@@ -1333,7 +1337,7 @@ function fetch_whois(domain_name, force_reload_whois=false) {
 }
 
 function get_target_whois(domain_name) {
-	const url = `/api/tools/whois/?format=json&target=${domain_name}`;
+	const url = `/api/tools/whois/?format=json&target=${encodeURIComponent(domain_name)}`;
 	
 	Swal.fire({
 		title: `Fetching WHOIS details for ${htmlEncode(domain_name)}...`,
@@ -1384,7 +1388,7 @@ function get_target_whois(domain_name) {
 }
 
 function get_domain_whois(domain_name, show_add_target_btn = false) {
-	const url = `/api/tools/whois/?format=json&target=${domain_name}`;
+	const url = `/api/tools/whois/?format=json&target=${encodeURIComponent(domain_name)}`;
 	
 	Swal.fire({
 		title: `Fetching WHOIS details for ${htmlEncode(domain_name)}...`,
@@ -2070,7 +2074,7 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 	var subdomain_loader = `<span class="inner-div spinner-border text-primary align-self-center loader-sm" id="subdomain-modal-loader"></span>`;
 
 	// add tab modal title
-	$('#modal_title').html('Details for IP: <b>' + ip_address + '</b>');
+	$('#modal_title').html('Details for IP: <b>' + htmlEncode(ip_address) + '</b>');
 
 	$('#modal-content').empty();
 	$('#modal-tabs').empty();
@@ -2092,7 +2096,7 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 
 	$.getJSON(port_url, function(data) {
 		$('#modal_content_port').empty();
-		$('#modal_content_port').append(`<p> IP Addresses ${ip_address} has ${data['ports'].length} Open Ports`);
+		$('#modal_content_port').append(`<p> IP Addresses ${htmlEncode(ip_address)} has ${data['ports'].length} Open Ports`);
 		$('#modal-open-ports-count').html(`<b>${data['ports'].length}</b>&nbsp;&nbsp;`);
 		for (port in data['ports']){
 			port_obj = data['ports'][port];
@@ -2107,7 +2111,7 @@ function get_ip_details(ip_address, scan_id=null, domain_id=null){
 	// query subdomains
 	$.getJSON(subdomain_url, function(data) {
 		$('#modal_content_subdomain').empty();
-		$('#modal_content_subdomain').append(`<p>${data['subdomains'].length} Subdomains are associated with IP ${ip_address}`);
+		$('#modal_content_subdomain').append(`<p>${data['subdomains'].length} Subdomains are associated with IP ${htmlEncode(ip_address)}`);
 		$('#modal-subdomain-count').html(`<b>${data['subdomains'].length}</b>&nbsp;&nbsp;`);
 		for (subdomain in data['subdomains']){
 			subdomain_obj = data['subdomains'][subdomain];
@@ -2234,7 +2238,7 @@ function get_tech_details(tech, scan_id=null, domain_id=null){
 
 	var interesting_badge = `<span class="m-1 badge  badge-soft-danger bs-tooltip" title="Interesting Subdomain">Interesting</span>`;
 	// render tab modal
-	$('.modal-title').html('Details for Technology: <b>' + tech + '</b>');
+	$('.modal-title').html('Details for Technology: <b>' + htmlEncode(tech) + '</b>');
 	$('#modal_dialog').modal('show');
 
 	$('.modal-text').empty();
@@ -2244,7 +2248,7 @@ function get_tech_details(tech, scan_id=null, domain_id=null){
 	$.getJSON(url, function(data) {
 		$('#modal-loader').empty();
 		$('#modal-content').empty();
-		$('#modal-content').append(`${data['subdomains'].length} Subdomains are using ${tech}`);
+		$('#modal-content').append(`${data['subdomains'].length} Subdomains are using ${htmlEncode(tech)}`);
 		for (subdomain in data['subdomains']){
 			subdomain_obj = data['subdomains'][subdomain];
 			badge_color = subdomain_obj['http_status'] >= 400 ? 'danger' : '';
