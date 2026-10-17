@@ -12,28 +12,31 @@ from django.core.cache import cache as default_cache
 logger = logging.getLogger(__name__)
 
 SLOTS = 120
+# NOTE: _local is not thread-safe and only grows by one entry per provider; it is the cache-down fallback only.
 _local = {}  # provider -> last slot time handed out by this process (cache-down fallback only)
 _warned = False
 
 
-def _cache_down(exc):
+def _cache_down(exc, consequence):
     global _warned
     if not _warned:
         _warned = True
-        logger.warning('rate limiter cache unavailable (%s); falling back to per-process limits', exc)
+        logger.warning('rate limiter cache unavailable (%s); %s', exc, consequence)
 
 
 def reserve(provider, interval, now, cache=default_cache):
-    """Seconds the caller must wait before contacting `provider`. `now` is wall time (comparable across processes)."""
-    base = math.floor(now / interval)
+    """Seconds to wait before contacting `provider`, or None when all SLOTS upcoming slots are taken
+    (saturated: the caller should treat the provider as busy and try later). `now` is wall time (comparable
+    across processes). Claimed slots start at least `interval` apart, and the caller sleeps until its slot start."""
+    base = math.ceil(now / interval)
     try:
         for k in range(SLOTS):
             slot = base + k
             if cache.add(f'limes:rl:{provider}:{slot}', 1, int(interval * (SLOTS + 5)) + 10):
                 return max(0.0, slot * interval - now)
-        return max(0.0, (base + SLOTS - 1) * interval - now)
+        return None
     except Exception as e:
-        _cache_down(e)
+        _cache_down(e, 'falling back to per-process spacing')
     at = max(now, _local.get(provider, float('-inf')) + interval)
     _local[provider] = at
     return at - now
@@ -41,14 +44,16 @@ def reserve(provider, interval, now, cache=default_cache):
 
 def take_daily(provider, limit, today=None, cache=default_cache):
     """Count one call against today's (UTC) budget; False once it is spent.
-    Fails closed when the cache is down, so a broken cache cannot overspend a provider."""
+    Fails closed when the cache is down, so a broken cache cannot overspend a provider.
+    NOTE: the counter lives in the cache, so an eviction or flush resets the day's count. Upgrade path: a
+    persistent counter (database row) or a Redis Lua token bucket."""
     today = today or datetime.now(timezone.utc).date()
     key = f'limes:daily:{provider}:{today.isoformat()}'
     try:
         cache.add(key, 0, 2 * 86400)
         return cache.incr(key) <= limit
     except Exception as e:
-        _cache_down(e)
+        _cache_down(e, 'budgeted calls are paused (failing closed)')
         return False
 
 
