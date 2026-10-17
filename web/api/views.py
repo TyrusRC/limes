@@ -31,6 +31,7 @@ from startScan.models import *
 from startScan.models import EndPoint
 from startScan.asset_models import CADENCE_TIERS
 from limes.continuous import start_asm_scan
+from limes.scan_target import ensure_scan_target
 from targetApp.models import *
 from api.permissions import *
 from api.serializers import *
@@ -698,6 +699,7 @@ class AddAssets(APIView):
 		set_authorized = tier == 'co_brand' and 'active_authorized' in data
 		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
 		added, existing, skipped, warnings = 0, 0, 0, []
+		roots = []  # new or promoted owned roots, given a scan target once the transaction commits
 		cap = settings.RANGE_ADDRESS_CAP
 		# NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
 		# Upgrade: select_for_update on the project row around this read and the writes.
@@ -761,6 +763,11 @@ class AddAssets(APIView):
 					_append_source(asset, 'manual', reason or f'added by {request.user.get_username()}')
 					asset.save()
 					added += 1
+					roots.append(asset)
+		for asset in roots:
+			warning = ensure_scan_target(asset)[1]
+			if warning:
+				warnings.append(warning)
 		invalidate(project.id)
 		return Response({'status': True, 'message': {
 			'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}})
@@ -799,8 +806,9 @@ class ConfirmAsset(APIView):
 		asset.added_by = request.user
 		asset.decision_reason = str(data.get('reason') or '')[:5000]
 		asset.save()
+		warning = ensure_scan_target(asset)[1]
 		invalidate(asset.project_id)
-		return Response({'status': True, 'message': 'confirmed'})
+		return Response({'status': True, 'message': f'confirmed. {warning}' if warning else 'confirmed'})
 
 
 class RejectAsset(APIView):
