@@ -12,6 +12,10 @@ from limes.definitions import PROJECT_LEVEL_NOTIFICATION
 from startScan.models import Asset, ChangeEvent
 
 logger = logging.getLogger(__name__)
+# NOTE: chat APIs reject long messages (Discord 2000 chars); events beyond the cap stay marked digested and
+# remain visible in the dashboard's recent changes. Upgrade path: split into several messages.
+DIGEST_MAX_LINES = 25
+DIGEST_MAX_CHARS = 1900
 OWNED_TIERS = ('owned_root', 'owned_host')
 
 
@@ -27,12 +31,20 @@ def _counts(project, now):
 
 
 def _compose(events, owned, candidates):
-    lines = [e.title for e in events]
+    titles = [e.title[:200] for e in events]
+    tail = []
     if owned:
-        lines.append('%d new owned asset%s' % (owned, '' if owned == 1 else 's'))
+        tail.append('%d new owned asset%s' % (owned, '' if owned == 1 else 's'))
     if candidates:
-        lines.append('%d new candidate%s' % (candidates, '' if candidates == 1 else 's'))
-    return '\n'.join(lines) or None
+        tail.append('%d new candidate%s' % (candidates, '' if candidates == 1 else 's'))
+    shown = titles[:DIGEST_MAX_LINES]
+    while True:
+        more = len(titles) - len(shown)
+        lines = shown + (['...and %d more changes - see the dashboard' % more] if more else []) + tail
+        text = '\n'.join(lines)
+        if len(text) <= DIGEST_MAX_CHARS or not shown:
+            return text[:DIGEST_MAX_CHARS] or None
+        shown = shown[:-1]
 
 
 def build_digest(project, now=None):
@@ -66,11 +78,16 @@ def send_digest(chat=None):
                     redirect_link=reverse('dashboardIndex', kwargs={'slug': project.slug}))
             except SoftTimeLimitExceeded:
                 raise
-            except Exception:
-                logger.exception('In-app digest failed for project %s', project.pk)
-            chat(msg, title=title)
+            except Exception as exc:  # never log exc text: it can carry a webhook URL
+                logger.warning('In-app digest failed for project %s: %s', project.pk, type(exc).__name__)
+            try:
+                chat(msg, title=title)
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception as exc:
+                logger.warning('Chat digest failed for project %s: %s', project.pk, type(exc).__name__)
         except SoftTimeLimitExceeded:
             raise
-        except Exception:
-            logger.exception('Digest failed for project %s', project.pk)
+        except Exception as exc:
+            logger.warning('Digest failed for project %s: %s', project.pk, type(exc).__name__)
     return {'projects': Project.objects.count(), 'sent': sent}

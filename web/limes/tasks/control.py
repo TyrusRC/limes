@@ -371,6 +371,7 @@ def report(ctx={}, description=None):
 		scan.scan_status = status
 	scan.stop_scan_date = timezone.now()
 	scan.save(update_fields=['scan_status', 'stop_scan_date'])
+	alert_project = None
 	if ctx.get('scan_run_id') and not subscan:
 		from startScan.asset_models import ScanRun
 		ScanRun.objects.filter(pk=ctx['scan_run_id']).update(
@@ -379,14 +380,7 @@ def report(ctx={}, description=None):
 		if run and run.status == SUCCESS_TASK:  # failed scans must not age unseen hosts
 			from limes.tasks import inventory as inv
 			inv.finalize_lifecycle(run)
-			try:
-				from limes.alerts import deliver, issues
-				issues.sync_issues(run.project)
-				deliver.deliver_immediate(run.project)
-			except SoftTimeLimitExceeded:
-				raise
-			except Exception:
-				logger.exception('Change alerts failed for scan run %s', run.pk)
+			alert_project = run.project
 	from dashboard.stats import invalidate
 	invalidate(scan.domain.project_id)
 
@@ -396,3 +390,14 @@ def report(ctx={}, description=None):
 		subscan_id=subscan_id,
 		engine_id=engine_id,
 		status=status_h)
+
+	# Last, so a slow chat endpoint or a time-limit hit cannot skip the cache invalidation or scan notification
+	if alert_project:
+		from limes.alerts import deliver, issues
+		for name, step in (('sync_issues', issues.sync_issues), ('deliver_immediate', deliver.deliver_immediate)):
+			try:
+				step(alert_project)
+			except SoftTimeLimitExceeded:
+				raise
+			except Exception:
+				logger.exception('Change alert step %s failed for project %s', name, alert_project.pk)

@@ -265,6 +265,13 @@ class DeliverTest(TestCase):
         self.assertIsNone(d.notified_at)
         self.assertEqual(InAppNotification.objects.count(), 2)
 
+    def test_chat_failure_does_not_log_url(self):
+        self.ev()
+        self.chat.side_effect = requests.exceptions.ConnectionError('https://hooks.slack.com/services/T0K3N')
+        with self.assertLogs('limes.alerts.deliver', level='DEBUG') as cm:
+            self.run_()
+        self.assertNotIn('T0K3N', '\n'.join(cm.output))
+
     def test_delivered_events_are_not_resent(self):
         self.ev()
         self.assertEqual(self.run_(), 1)
@@ -438,6 +445,44 @@ class DigestTest(TestCase):
         self.assertIsNone(done.digested_at)
         self.assertEqual(deliver.deliver_immediate(self.p, chat=self.chat, post=mock.Mock()), 0)
 
+    def test_second_run_resends_nothing(self):
+        self.ev()
+        self.assertEqual(digest.send_digest(chat=self.chat)['sent'], 1)
+        self.assertEqual(digest.send_digest(chat=self.chat)['sent'], 0)
+        self.assertEqual(self.chat.call_count, 1)
+
+    def test_event_notified_between_read_and_claim_is_skipped(self):
+        e = self.ev(immediate=True)
+        real = digest._pending
+
+        def stale(project):
+            rows = list(real(project))
+            ChangeEvent.objects.filter(pk=e.pk).update(notified_at=timezone.now())
+            return rows
+        with mock.patch.object(digest, '_pending', stale):
+            self.assertEqual(digest.send_digest(chat=self.chat)['sent'], 0)
+        e.refresh_from_db()
+        self.assertIsNone(e.digested_at)
+
+    def test_long_digest_is_bounded_and_fully_claimed(self):
+        for i in range(40):
+            self.ev(title='change number %d %s' % (i, 'x' * 20))
+        self.asset('a.example.com', 'owned_host')
+        digest.send_digest(chat=self.chat)
+        self.assertEqual(self.chat.call_count, 1)
+        msg = self.chat.call_args.args[0]
+        self.assertLessEqual(len(msg), 1900)
+        self.assertIn('and 15 more', msg)
+        self.assertIn('1 new owned asset', msg)
+        self.assertEqual(ChangeEvent.objects.filter(digested_at__isnull=False).count(), 40)
+
+    def test_chat_failure_does_not_log_url(self):
+        self.ev()
+        boom = mock.Mock(side_effect=requests.exceptions.ConnectionError('https://hooks.slack.com/services/T0K3N'))
+        with self.assertLogs('limes.alerts.digest', level='DEBUG') as cm:
+            digest.send_digest(chat=boom)
+        self.assertNotIn('T0K3N', '\n'.join(cm.output))
+
     def test_empty_project_sends_nothing(self):
         self.assertIsNone(digest.build_digest(self.p))
         self.assertEqual(digest.send_digest(chat=self.chat), {'projects': 1, 'sent': 0})
@@ -477,6 +522,23 @@ class WiringTest(TestCase):
     def test_successful_report_syncs_and_delivers(self):
         s, d = self.report()
         s.assert_called_once_with(self.p)
+        d.assert_called_once_with(self.p)
+
+    def test_time_limit_in_alerts_keeps_notification_and_cache(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+        with mock.patch('dashboard.stats.invalidate') as inv, \
+                mock.patch.object(control, 'send_scan_notif') as notif, \
+                mock.patch('limes.alerts.issues.sync_issues'), \
+                mock.patch('limes.alerts.deliver.deliver_immediate', side_effect=SoftTimeLimitExceeded):
+            ctx = {'scan_history_id': self.scan.id}
+            control.start_scan_run(self.domain, self.scan, 'full', ctx)
+            with self.assertRaises(SoftTimeLimitExceeded):
+                control.report.run(ctx=ctx)
+        inv.assert_called_once()
+        notif.delay.assert_called_once()
+
+    def test_sync_error_still_delivers(self):
+        s, d = self.report(sync=mock.Mock(side_effect=RuntimeError('x')))
         d.assert_called_once_with(self.p)
 
     def test_failed_scan_neither(self):
