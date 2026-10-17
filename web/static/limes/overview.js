@@ -62,7 +62,7 @@
       grid: {borderColor: border, strokeDashArray: 0, padding: {left: 4, right: 8}},
       xaxis: {type: 'datetime', labels: {style: {colors: muted, fontSize: '11px'}, datetimeUTC: true},
               axisBorder: {show: false}, axisTicks: {show: false}, tooltip: {enabled: false}},
-      yaxis: {min: Math.max(0, lo - pad), max: hi + pad, tickAmount: 3, forceNiceScale: true,
+      yaxis: {min: Math.max(0, lo - pad), max: Math.min(Number(el.dataset.max) || Infinity, hi + pad), tickAmount: 3,
               labels: {style: {colors: [muted], fontSize: '11px'}, formatter: function (v) { return Math.round(v); }}},
       annotations: {xaxis: xs,
                     points: drop ? [{x: Date.parse(drop.p.date), y: drop.p.score, marker: {size: 4, fillColor: crit, strokeColor: crit}}] : []},

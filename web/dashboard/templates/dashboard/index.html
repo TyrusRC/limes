@@ -7,9 +7,6 @@ Overview
 
 {% block page_title %}Overview{% endblock page_title %}
 
-{% block custom_js_css_link %}
-<link rel="stylesheet" href="{% static 'limes/overview.css' %}">
-{% endblock custom_js_css_link %}
 
 {% block main_content %}
 {% url 'assets' slug=project.slug as assets_url %}
@@ -17,7 +14,6 @@ Overview
 <p class="ov-sub">
   <span>{{ project.name }}</span>
   <span>{% if monitoring.last_scan %}Last scan {{ monitoring.last_scan|naturaltime }}{% else %}No scans yet{% endif %}</span>
-  <span>Continuous scanning {% if monitoring.enabled %}on{% else %}off{% endif %}{% if monitoring.running %} · {{ monitoring.running }} running{% endif %}</span>
   <span>Scoring model {{ risk.version }}</span>
 </p>
 
@@ -72,7 +68,7 @@ Overview
       <span class="ov-delta" id="score_delta" hidden></span>
     </div>
     <div class="ov-card-body">
-      <div id="score_trend" role="img" aria-label="Headline score over the last 30 days"></div>
+      <div id="score_trend" data-max="{{ risk.max_score }}" role="img" aria-label="Headline score over the last 30 days"></div>
       <p class="ov-note ov-empty-note" id="score_trend_empty" hidden>Not enough score history yet. A point is added each day.</p>
       <div class="ov-legend" id="score_legend" hidden>
         <span><i class="ov-swatch"></i>Headline score</span>
@@ -90,13 +86,14 @@ Overview
       <div class="ov-stat"><div class="ov-stat-label"><i class="fe-link" aria-hidden="true"></i>Dependencies</div><div class="ov-stat-value">{{ inventory.dependency|intcomma }}</div></div>
     </div>
     <div class="ov-card-foot">
-      <span>{{ inventory.states.active }} active · {{ inventory.states.missing }} missing · {{ inventory.states.stale }} stale</span>
+      <span>{{ inventory.states.active }} active · {{ inventory.states.missing }} missing · {{ inventory.states.stale }} stale · {{ inventory.states.retired }} retired</span>
+      <a href="{{ assets_url }}" id="dash_new_owned">+{{ changes.new_owned|intcomma }} new this week</a>
       <a href="{{ assets_url }}?scope_tier=candidate" id="dash_review">{{ review.candidates }} to review{% if review.would_auto_confirm %} · {{ review.would_auto_confirm }} would auto-confirm{% endif %}</a>
     </div>
   </section>
 
   <section class="card ov-sev" id="dash_findings" aria-labelledby="h-sev">
-    <h2 class="visually-hidden" id="h-sev">Open findings on owned assets, by severity</h2>
+    <h2 class="visually-hidden" id="h-sev">Open issues on assessed assets, by severity, waived issues left out</h2>
     {% with total=findings.critical|add:findings.high|add:findings.medium|add:findings.low %}
     <div class="ov-sev-strip">
       <a class="ov-sev-tile" href="{{ issues_url }}"><span class="sev-critical">Critical</span><span class="ov-sev-count">{{ findings.critical|intcomma }}</span><span class="ov-sev-bar"><span class="bg-critical" style="width:{% widthratio findings.critical total 100 %}%"></span></span></a>
@@ -112,12 +109,12 @@ Overview
     {% if risky_assets %}
     <div class="table-responsive ov-flush">
       <table class="table mb-0">
-        <thead><tr><th scope="col">Asset</th><th scope="col">Type</th><th scope="col">Score</th><th scope="col">Open issues <span class="ov-muted">(C · H · M · L)</span></th><th scope="col">Last seen</th></tr></thead>
+        <thead><tr><th scope="col">Asset</th><th scope="col" class="ov-hide-sm">Type</th><th scope="col">Score</th><th scope="col">Open issues <span class="ov-muted">(C · H · M · L)</span></th><th scope="col" class="ov-hide-sm">Last seen</th></tr></thead>
         <tbody>
         {% for a in risky_assets %}
           <tr>
             <td class="ov-asset{% if a.kind == 'ip' %} mono{% endif %}">{{ a.value }}</td>
-            <td><span class="ov-tag">{% if a.kind == 'root_domain' %}Domain{% elif a.kind == 'hostname' %}Host{% elif a.kind == 'ip' %}IP{% else %}{{ a.kind }}{% endif %}</span></td>
+            <td class="ov-hide-sm"><span class="ov-tag">{% if a.kind == 'root_domain' %}Domain{% elif a.kind == 'hostname' %}Host{% elif a.kind == 'ip' %}IP{% else %}{{ a.kind }}{% endif %}</span></td>
             <td><span class="ov-cell-score"><span class="ov-grade ov-grade-sm ov-grade-{{ a.grade|lower }}">{{ a.grade }}</span>{{ a.score }}</span></td>
             <td><span class="ov-counts">
               <span class="ov-count{% if a.counts.critical %} c{% endif %}" title="Critical">{{ a.counts.critical }}</span>
@@ -125,7 +122,7 @@ Overview
               <span class="ov-count{% if a.counts.medium %} m{% endif %}" title="Medium">{{ a.counts.medium }}</span>
               <span class="ov-count{% if a.counts.low %} l{% endif %}" title="Low">{{ a.counts.low }}</span>
             </span></td>
-            <td class="ov-muted text-nowrap">{{ a.last_seen|naturaltime }}</td>
+            <td class="ov-muted text-nowrap ov-hide-sm">{{ a.last_seen|naturaltime }}</td>
           </tr>
         {% endfor %}
         </tbody>
@@ -136,6 +133,7 @@ Overview
     {% endif %}
   </section>
 
+  <div class="ov-side">
   <section class="card ov-changes" id="dash_changes" aria-labelledby="h-changes">
     <div class="ov-card-head"><h2 id="h-changes">Recent changes</h2></div>
     {% if recent_changes %}
@@ -152,7 +150,7 @@ Overview
         {% else %}<span class="ov-fi" aria-hidden="true"><i class="fe-activity"></i></span>{% endif %}
         <div class="ov-feed-text">
           <div class="ov-feed-title">{{ c.title }}</div>
-          <div class="ov-feed-sub">{{ c.kind }}{% if c.asset %} · {{ c.asset }}{% endif %}</div>
+          <div class="ov-feed-sub">{{ c.label }}{% if c.asset %} · {{ c.asset }}{% endif %}</div>
         </div>
         <time class="ov-feed-time" datetime="{{ c.created_at|date:'c' }}" title="{{ c.created_at }}">{{ c.created_at|naturaltime }}</time>
       </li>
@@ -162,6 +160,20 @@ Overview
     <p class="ov-note ov-empty-note ov-pad">No changes recorded yet.</p>
     {% endif %}
   </section>
+
+  <section class="card ov-monitoring" id="dash_monitoring" aria-labelledby="h-monitoring">
+    <div class="ov-card-head"><h2 id="h-monitoring">Monitoring</h2><span class="ov-meta">Continuous scanning {% if monitoring.enabled %}on{% else %}off{% endif %} · {{ monitoring.running }} running</span></div>
+    <div class="ov-card-body">
+      <p class="ov-mon-line">Last automatic scan: {% if monitoring.last_auto %}<time datetime="{{ monitoring.last_auto|date:'c' }}">{{ monitoring.last_auto|naturaltime }}</time>{% else %}never{% endif %}</p>
+      {% if monitoring.next_due %}
+      <table class="table table-sm mb-0 ov-due">
+        <thead><tr><th scope="col">Next due</th><th scope="col">Cadence</th></tr></thead>
+        <tbody>{% for r in monitoring.next_due %}<tr><td>{{ r.value }}</td><td>{{ r.cadence_tier }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% else %}<p class="ov-mon-line ov-muted mb-0">Nothing due.</p>{% endif %}
+    </div>
+  </section>
+  </div>
 </div>
 {{ risk.trend|json_script:"score_trend_data" }}
 {% endblock main_content %}
