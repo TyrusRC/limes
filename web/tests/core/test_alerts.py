@@ -12,6 +12,7 @@ from django.utils import timezone
 from dashboard.models import InAppNotification, Project
 from limes import celery_routing, scoring
 from limes.alerts import deliver, digest, events, issues
+from limes.checks import network
 from limes.definitions import FAILED_TASK, SUCCESS_TASK
 from limes.tasks import attribution, control, inventory
 from scanEngine.models import EngineType
@@ -35,6 +36,37 @@ class ImmediacyTest(SimpleTestCase):
         self.assertTrue(events.is_immediate('asset_auto_confirmed', None, None))
         self.assertFalse(events.is_immediate('score_changed', None, None))
         self.assertFalse(events.is_immediate('asset_missing', None, None))
+        self.assertTrue(events.is_immediate('asset_new', 'net.exposed_rdp', None))
+        self.assertFalse(events.is_immediate('asset_new', None, None))
+        self.assertEqual(network.risky_check([80, 3389, 21]), 'net.exposed_rdp')
+        self.assertEqual(network.risky_check([21, 23]), 'net.exposed_telnet')
+        self.assertEqual(network.risky_check([445, 3389]), 'net.exposed_smb')  # tie on severity: lowest port
+        self.assertIsNone(network.risky_check([80]))
+
+
+class AssetNewTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.parent = Asset.objects.create(project=self.p, kind='cidr', value='198.51.100.0/24', scope_tier='owned_host')
+        self.a = Asset.objects.create(project=self.p, kind='ip', value='198.51.100.7', scope_tier='owned_host',
+                                      parent=self.parent)
+
+    def test_plain_and_risky(self):
+        ev = events.record_asset_new(self.p, self.a, ports=[80])
+        self.assertEqual(ev.kind, 'asset_new')
+        self.assertEqual(ev.title, 'New ip 198.51.100.7')
+        self.assertFalse(ev.immediate)
+        self.assertEqual(ev.detail, {'ports': [80], 'parent': '198.51.100.0/24'})
+        ev = events.record_asset_new(self.p, self.a, ports=[80, 3389])
+        self.assertEqual(ev.title, 'New ip 198.51.100.7 exposes rdp')
+        self.assertTrue(ev.immediate)
+
+    def test_no_parent_and_failure_never_raises(self):
+        self.parent.delete()
+        self.a.refresh_from_db()
+        self.assertEqual(events.record_asset_new(self.p, self.a).detail, {'ports': [], 'parent': None})
+        with mock.patch('limes.alerts.events.record', side_effect=RuntimeError('boom')):
+            self.assertIsNone(events.record_asset_new(self.p, self.a))
 
 
 class SyncTest(TestCase):
