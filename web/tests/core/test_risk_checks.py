@@ -562,6 +562,15 @@ class StageTest(TestCase):
             self.assertIsNone(stages.screenshot(ctx=ctx))
         m.assert_not_called()
 
+    def test_crash_is_not_reported_as_success(self):
+        from unittest import mock
+        from limes.tasks import stages
+        from limes.definitions import FAILED_TASK
+        with mock.patch('limes.checks.run.run_checks', side_effect=RuntimeError('boom')):
+            stages.risk_checks(ctx=self._ctx('owned_root'))
+        self.assertEqual(stages.risk_checks.status, FAILED_TASK)
+        self.assertIn('boom', stages.risk_checks.error)
+
     def test_skipped_unless_owned_root(self):
         from unittest import mock
         from limes.tasks import stages
