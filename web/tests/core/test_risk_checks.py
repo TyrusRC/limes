@@ -146,3 +146,64 @@ class TlsEvalTest(SimpleTestCase):
 
     def test_cert_error_is_error(self):
         self.assertEqual({r.status for r in self.ev('error').values()}, {'error'})
+
+
+class MailDnsEvalTest(SimpleTestCase):
+    def mail(self, txt, dmarc, mx):
+        from limes.checks import email as mail_checks
+        res = mail_checks.evaluate({'txt': txt, 'dmarc': dmarc, 'mx': mx})
+        self.assertEqual([r.check for r in res], [i for i in CHECKS if i.startswith('email.')])
+        return {r.check: r for r in res}
+
+    def test_spf_and_dmarc_good(self):
+        r = self.mail(['v=spf1 include:_spf.x -all'], ['v=DMARC1; p=reject'], ['mx.x'])
+        self.assertEqual({x.status for x in r.values()}, {'pass'})
+
+    def test_spf_permissive_and_dmarc_none(self):
+        ok = self.mail(['v=spf1 ~all'], ['v=DMARC1; p=reject'], ['mx.x'])
+        self.assertEqual(ok['email.spf_permissive'].status, 'pass')
+        for rec in ('v=spf1 +all', 'v=spf1 ?all', 'v=spf1 all'):
+            r = self.mail([rec], ['v=DMARC1; p=reject'], ['mx.x'])
+            self.assertEqual(r['email.spf_permissive'].status, 'fail', rec)
+            self.assertEqual(r['email.spf_permissive'].evidence, {'spf': rec})
+        r = self.mail(['v=spf1 -all'], ['v=DMARC1; P=None'], ['mx.x'])
+        self.assertEqual(r['email.dmarc_none'].status, 'fail')
+
+    def test_missing_records(self):
+        r = self.mail([], [], ['mx.x'])
+        for i in ('spf_missing', 'dmarc_missing', 'mx_unprotected'):
+            self.assertEqual(r['email.' + i].status, 'fail', i)
+        self.assertEqual(r['email.spf_permissive'].status, 'not_applicable')
+        self.assertEqual(r['email.dmarc_none'].status, 'not_applicable')
+        self.assertEqual(self.mail([], [], [])['email.mx_unprotected'].status, 'pass')
+
+    def test_lookup_error_is_error(self):
+        r = self.mail('error', ['v=DMARC1; p=reject'], ['mx.x'])
+        self.assertEqual(r['email.spf_missing'].status, 'error')
+        self.assertEqual(r['email.spf_permissive'].status, 'error')
+        self.assertEqual(r['email.mx_unprotected'].status, 'error')
+        r = self.mail(['v=spf1 -all'], ['v=DMARC1; p=reject'], 'error')
+        self.assertEqual(r['email.mx_unprotected'].status, 'error')
+
+    def test_dnssec_and_caa(self):
+        from limes.checks import dns as dns_checks
+        r = {x.check: x.status for x in dns_checks.evaluate({'ds': False, 'caa': True})}
+        self.assertEqual(r, {'dns.dnssec_missing': 'fail', 'dns.caa_missing': 'pass'})
+        r = {x.check: x.status for x in dns_checks.evaluate({'ds': 'error', 'caa': 'error'})}
+        self.assertEqual(set(r.values()), {'error'})
+
+
+class NetworkEvalTest(SimpleTestCase):
+    def test_risky_ports(self):
+        from limes.checks import network
+        res = {r.check: r for r in network.evaluate({3389: ['naabu'], 443: ['internetdb 2026-10-10']})}
+        self.assertEqual(len(res), 14)
+        self.assertEqual(res['net.exposed_rdp'].status, 'fail')
+        self.assertEqual(res['net.exposed_rdp'].evidence, {'port': 3389, 'seen_by': ['naabu']})
+        self.assertEqual({c for c, r in res.items() if r.status == 'pass'}, set(res) - {'net.exposed_rdp'})
+
+    def test_no_fresh_port_data_is_error(self):
+        from limes.checks import network
+        res = network.evaluate(None)
+        self.assertEqual(len(res), 14)
+        self.assertEqual({r.status for r in res}, {'error'})
