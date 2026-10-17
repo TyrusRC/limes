@@ -775,6 +775,16 @@ class AssetSerializer(serializers.ModelSerializer):
     ip_addresses = serializers.SlugRelatedField(many=True, read_only=True, slug_field='address')
     tags = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
     vuln_count = serializers.IntegerField(read_only=True, default=0)
+    monitor = serializers.SerializerMethodField()
+    found_by = serializers.SerializerMethodField()
+
+    def get_monitor(self, obj):
+        from limes import monitor
+        return monitor.monitor_state(obj)
+
+    def get_found_by(self, obj):
+        from limes import monitor
+        return monitor.found_by(obj)
 
     class Meta:
         model = Asset
@@ -782,4 +792,5 @@ class AssetSerializer(serializers.ModelSerializer):
                   'first_seen', 'last_seen', 'missed_count', 'http_status', 'page_title', 'webserver',
                   'content_type', 'content_length', 'response_time', 'cname', 'is_cdn', 'cdn_name',
                   'screenshot_path', 'sources', 'decision_reason', 'technologies', 'ip_addresses',
-                  'tags', 'vuln_count', 'enrichment', 'confidence', 'confidence_detail', 'cadence_tier']
+                  'tags', 'vuln_count', 'enrichment', 'confidence', 'confidence_detail', 'cadence_tier',
+                  'last_resolved_at', 'monitor', 'found_by']

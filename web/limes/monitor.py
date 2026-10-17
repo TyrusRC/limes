@@ -10,6 +10,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from dashboard.models import Project
 from dashboard.stats import invalidate
@@ -59,6 +60,61 @@ def effective_interval(asset):
     if enrichment.get('cadence_explicit'):
         return CADENCE_INTERVALS[asset.cadence_tier]
     return ACTIVE_INTERVAL if (enrichment.get('monitor') or {}).get('active') else INACTIVE_INTERVAL
+
+
+# Assets-page labels for the raw source names in Asset.sources.
+FOUND_BY = {'manual': 'manual', 'discovery': 'scan', 'probe': 'scan', 'dns': 'scan', 'crtsh': 'CT',
+            'internetdb': 'InternetDB', 'cidr': 'CIDR', 'asn': 'ASN', 'attribution': 'attribution'}
+ENUMERATION_OFF = 'Enumeration off (operator setting)'
+
+
+def found_by(asset):
+    """Unique labels for the asset's sources, in source order. Unknown sources read 'other'; none read 'manual' for
+    an asset a user added, else 'target'."""
+    labels = []
+    for s in asset.sources or []:
+        label = FOUND_BY.get(s.get('source') if isinstance(s, dict) else None, 'other')
+        if label not in labels:
+            labels.append(label)
+    return labels or ['manual' if asset.added_by_id else 'target']
+
+
+def _interval_label(delta):
+    hours = int(delta.total_seconds() // 3600)
+    return f'{hours}h' if hours < 48 else f'{hours // 24}d'
+
+
+def monitor_state(asset):
+    """What the Assets page shows about tracking, from stored fields only (no queries when the list view has
+    annotated has_target). interval is None when off or not monitored; next_due = last check + interval."""
+    out = {'interval': None, 'next_due': None, 'last_checked': None, 'status': None, 'reason': None}
+    enrichment = asset.enrichment or {}
+    last = asset.last_resolved_at
+    if asset.scope_tier not in OWNED:
+        return out
+    if asset.kind in ('cidr', 'asn'):
+        info = enrichment.get('asn' if asset.kind == 'asn' else 'enum') or {}
+        out['status'], out['reason'] = info.get('status'), info.get('reason')
+        if asset.kind == 'cidr' and out['status'] != 'refused' and not settings.RANGE_ENUMERATION:
+            out['status'], out['reason'] = 'enumeration_off', ENUMERATION_OFF
+        stamp = (info.get('refreshed_at') or info.get('checked_at')) if asset.kind == 'asn' else info.get('last_pass_at')
+        last = last or (parse_datetime(stamp) if isinstance(stamp, str) else None)
+        interval = CADENCE_INTERVALS.get(asset.cadence_tier)
+    elif asset.kind in KINDS:
+        has_target = getattr(asset, 'has_target', None)
+        if asset.kind == 'root_domain' and (has_scan_target(asset) if has_target is None else has_target):
+            interval = CADENCE_INTERVALS.get(asset.cadence_tier)  # the root scans' cadence
+        else:
+            interval = effective_interval(asset)
+            mon = enrichment.get('monitor') or {}
+            out['status'], out['reason'] = mon.get('status'), mon.get('reason')
+    else:
+        return out
+    out['last_checked'] = last.isoformat() if last else None
+    if interval is not None:
+        out['interval'] = _interval_label(interval)
+        out['next_due'] = (last + interval).isoformat() if last else None
+    return out
 
 
 def monitored(project=None):

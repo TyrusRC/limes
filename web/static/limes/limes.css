@@ -1141,3 +1141,8 @@ a.ov-meta:hover { color: var(--brand-ink); }
   .l-issue-col { padding: var(--space-4); }
   .l-form-row { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Assets page: tracking columns */
+.l-monitor-bad { color: var(--sev-critical-ink); }
+.l-col-monitor { min-width: 9rem; max-width: 18rem; }
+.badge.l-badge-src { color: var(--sev-info-ink); background: var(--sev-info-bg); border-color: transparent; font-weight: 500; }
