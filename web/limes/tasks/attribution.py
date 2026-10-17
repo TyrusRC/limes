@@ -268,7 +268,7 @@ def apply_decisions(project):
             scope_tier=tier, decision_reason=reason, sources=a.sources, added_by=None)
         auto += done
         if done:  # 0 means a human decided first
-            events.record(project, 'asset_auto_confirmed', f'{a.value} auto-confirmed as an {tier.replace("_", " ")}',
+            events.safe_record(project, 'asset_auto_confirmed', f'{a.value} auto-confirmed as an {tier.replace("_", " ")}',
                           asset=a, detail={'confidence': round(a.confidence, 2), 'ns': control['value']})
     if auto:
         invalidate(project.id)

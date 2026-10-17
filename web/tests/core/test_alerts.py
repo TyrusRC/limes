@@ -7,7 +7,7 @@ from django.utils import timezone
 from dashboard.models import Project
 from limes import scoring
 from limes.alerts import events, issues
-from limes.tasks import inventory
+from limes.tasks import attribution, inventory
 from startScan.models import Asset, ChangeEvent, RiskCheck, ScanRun, ScoreSnapshot, TrackedIssue
 from tests.core.test_attribution_decisions import DecisionBase
 from tests.core.test_scoring import Base
@@ -150,6 +150,40 @@ class OtherEventsTest(Base):
         inventory.finalize_lifecycle(run)  # no longer active, so not scanned again
         self.assertEqual(ChangeEvent.objects.count(), 1)
 
+    def test_failing_event_loses_neither_snapshot_nor_other_projects(self):
+        a = self.host('a.x.com')
+        self.vuln(self.scan(), a, 4)
+        other = Project.objects.create(name='q', slug='q', insert_date=timezone.now())
+        yesterday = timezone.localdate() - timedelta(days=1)
+        for proj in (self.p, other):
+            ScoreSnapshot.objects.create(project=proj, date=yesterday, version='v', score=950, grade='A')
+        real = events.record
+
+        def flaky(project, *args, **kw):
+            if project == self.p:
+                raise RuntimeError('boom')
+            return real(project, *args, **kw)
+        # score_event is stubbed so both projects reach record()
+        with mock.patch('limes.alerts.events.record', side_effect=flaky), \
+                mock.patch('limes.scoring.score_event', return_value=('score_changed', 't')):
+            scoring.snapshot_scores()
+        today = timezone.localdate()
+        self.assertFalse(ScoreSnapshot.objects.filter(project=self.p, date=today).exists())
+        self.assertTrue(ScoreSnapshot.objects.filter(project=other, date=today).exists())
+        self.assertEqual(list(ChangeEvent.objects.values_list('project_id', flat=True)), [other.id])
+        scoring.snapshot_scores()  # next run recovers the lost alert
+        self.assertEqual(ChangeEvent.objects.filter(project=self.p, kind='score_dropped').count(), 1)
+
+    def test_failing_event_does_not_stop_lifecycle(self):
+        root = Asset.objects.get(value='x.com')
+        run = ScanRun.objects.create(project=self.p, root_asset=root, start_scan_date=timezone.now())
+        hosts = [inventory.upsert_hostname_asset(self.p, f'{n}.x.com', parent=root) for n in 'ab']
+        Asset.objects.filter(id__in=[h.id for h in hosts]).update(
+            last_seen=run.start_scan_date - timedelta(minutes=1), missed_count=2)
+        with mock.patch('limes.alerts.events.record', side_effect=RuntimeError('boom')):
+            inventory.finalize_lifecycle(run)
+        self.assertEqual(Asset.objects.filter(id__in=[h.id for h in hosts], state='missing').count(), 2)
+
 
 class AutoConfirmEventTest(DecisionBase):
     def qualifying(self):
@@ -170,4 +204,25 @@ class AutoConfirmEventTest(DecisionBase):
     def test_flag_off_records_nothing(self):
         self.qualifying()
         self.run_all()
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    @override_settings(ATTRIBUTION_AUTO_CONFIRM=True)
+    def test_failing_event_does_not_undo_confirmation(self):
+        a = self.qualifying()
+        with mock.patch('limes.alerts.events.record', side_effect=RuntimeError('boom')):
+            self.assertEqual(self.run_all()['auto_confirmed'], 1)
+        self.assertEqual(self.tier(a), 'owned_root')
+
+    @override_settings(ATTRIBUTION_AUTO_CONFIRM=True)
+    def test_lost_race_records_nothing(self):
+        a = self.qualifying()
+        attribution.score_project(self.p)
+        real = attribution._qualifying_control
+
+        def reject_after_select(asset, fresh_after):
+            Asset.objects.filter(pk=asset.pk).update(scope_tier='rejected')  # a human decided first
+            return real(asset, fresh_after)
+        with mock.patch.object(attribution, '_qualifying_control', side_effect=reject_after_select):
+            self.assertEqual(attribution.apply_decisions(self.p)['auto_confirmed'], 0)
+        self.assertEqual(self.tier(a), 'rejected')
         self.assertEqual(ChangeEvent.objects.count(), 0)

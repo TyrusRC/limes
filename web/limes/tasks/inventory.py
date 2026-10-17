@@ -152,7 +152,7 @@ def finalize_lifecycle(run):
     for asset in qs.iterator(chunk_size=2000):
         asset.mark_missing_or_seen(False); n += 1
         if asset.state == 'missing':  # qs only holds active assets, so this is the transition
-            events.record(run.project, 'asset_missing', f'{asset.value} went missing', asset=asset,
+            events.safe_record(run.project, 'asset_missing', f'{asset.value} went missing', asset=asset,
                           detail={'missed_count': asset.missed_count})
     return n
 
