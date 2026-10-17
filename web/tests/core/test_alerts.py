@@ -238,19 +238,18 @@ class DeliverTest(TestCase):
         self.post = mock.Mock()
 
     def ev(self, immediate=True, kind='issue_new', **kw):
-        return ChangeEvent.objects.create(project=self.p, kind=kind, title='t', severity=3, detail={},
-                                          immediate=immediate, created_at=timezone.now(), **kw)
+        kw.setdefault('title', 't')
+        kw.setdefault('created_at', timezone.now())
+        return ChangeEvent.objects.create(project=self.p, kind=kind, severity=3, detail={},
+                                          immediate=immediate, **kw)
 
     def run_(self, **kw):
         return deliver.deliver_immediate(self.p, chat=self.chat, post=self.post, **kw)
 
     def test_sends_immediate_only_oldest_first(self):
-        a = self.ev()
-        a.title = 'first'
-        a.save()
-        b = self.ev()
-        b.title = 'second'
-        b.save()
+        now = timezone.now()
+        b = self.ev(title='second', created_at=now)
+        a = self.ev(title='first', created_at=now - timedelta(minutes=5))
         d = self.ev(immediate=False)
         self.assertEqual(self.run_(), 2)
         self.assertEqual([c.kwargs['title'] for c in self.chat.call_args_list], ['first', 'second'])
@@ -326,3 +325,73 @@ class DeliverTest(TestCase):
             self.ev()
             self.run_()
         self.post.assert_not_called()
+
+    def test_event_claimed_by_another_run_is_not_resent(self):
+        t0 = timezone.now() - timedelta(minutes=2)
+        self.ev(title='e1', created_at=t0)
+        self.ev(title='e2', created_at=t0 + timedelta(seconds=1))
+        calls = []
+
+        def chat(msg, title=None):
+            calls.append(title)
+            if title == 'e1':  # a second worker runs while the first is mid-batch
+                deliver.deliver_immediate(self.p, chat=chat, post=self.post)
+        self.assertEqual(deliver.deliver_immediate(self.p, chat=chat, post=self.post), 1)
+        self.assertEqual(sorted(calls), ['e1', 'e2'])
+
+    def test_event_digested_after_read_is_skipped(self):
+        t0 = timezone.now() - timedelta(minutes=2)
+        self.ev(title='e1', created_at=t0)
+        e2 = self.ev(title='e2', created_at=t0 + timedelta(seconds=1))
+
+        def chat(msg, title=None):
+            ChangeEvent.objects.filter(pk=e2.pk).update(digested_at=timezone.now())
+        self.chat.side_effect = chat
+        self.assertEqual(self.run_(), 1)
+        self.assertEqual(self.chat.call_count, 1)
+        e2.refresh_from_db()
+        self.assertIsNone(e2.notified_at)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s')
+    def test_webhook_does_not_follow_redirects(self):
+        self.ev()
+        self.run_()
+        self.assertIs(self.post.call_args.kwargs['allow_redirects'], False)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/T0K3N', ALERT_WEBHOOK_SECRET='s')
+    def test_webhook_failure_log_hides_url(self):
+        self.post.side_effect = requests.exceptions.ConnectionError('boom https://hook.test/T0K3N')
+        self.ev()
+        with self.assertLogs('limes.alerts.deliver', level='WARNING') as cm:
+            self.run_()
+        out = '\n'.join(cm.output)
+        self.assertNotIn('T0K3N', out)
+        self.assertIn('ConnectionError', out)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/T0K3N', ALERT_WEBHOOK_SECRET='s')
+    def test_webhook_error_status_is_logged_without_retry(self):
+        self.post.return_value = mock.Mock(status_code=500)
+        self.ev()
+        with self.assertLogs('limes.alerts.deliver', level='WARNING') as cm:
+            self.run_()
+        self.assertIn('500', '\n'.join(cm.output))
+        self.assertNotIn('T0K3N', '\n'.join(cm.output))
+        self.assertEqual(self.post.call_count, 1)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s')
+    def test_dead_webhook_is_tried_once_per_run(self):
+        self.post.side_effect = requests.exceptions.ConnectTimeout()
+        for _ in range(3):
+            self.ev()
+        self.assertEqual(self.run_(), 3)
+        self.assertEqual(self.post.call_count, 1)
+        self.assertEqual(self.chat.call_count, 3)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s')
+    def test_chat_failure_does_not_block_webhook(self):
+        self.chat.side_effect = RuntimeError('down')
+        e = self.ev()
+        self.assertEqual(self.run_(), 1)
+        self.post.assert_called_once()
+        e.refresh_from_db()
+        self.assertIsNotNone(e.notified_at)
