@@ -1793,7 +1793,7 @@ $(document).ready(function() {
 			},
 			"rowGroup": {
 				"startRender": function(rows, group) {
-					return group + ' (' + rows.count() + ' Subdomains)';
+					return htmlEncode(group) + ' (' + rows.count() + ' Subdomains)';
 				}
 			},
 			"order": [[ 8, "desc" ]],
@@ -1833,11 +1833,11 @@ $(document).ready(function() {
 							}
 
 							if (row['content_type']) {
-								content_type = `<div><span class='mt-1 badge badge-soft-blue bs-tooltip' title="Content Type">${row['content_type']}</span></div>`;
+								content_type = `<div><span class='mt-1 badge badge-soft-blue bs-tooltip' title="Content Type">${htmlEncode(row['content_type'])}</span></div>`;
 							}
 
 							if (row['webserver']) {
-								web_server = `<div><span class='mt-1 badge badge-soft-info bs-tooltip' title="Web Server">${row['webserver']}</span></div>`;
+								web_server = `<div><span class='mt-1 badge badge-soft-info bs-tooltip' title="Web Server">${htmlEncode(row['webserver'])}</span></div>`;
 							}
 
 							if (interesting_badge) {
@@ -1848,12 +1848,12 @@ $(document).ready(function() {
 							todo_badge = '';
 
 							if (row['todos_count']) {
-								todo_badge = `<span class="text-danger badge badge-link badge-soft-danger float-end mt-1" onclick="list_subdomain_todos(${row['id']}, '${row['name']}')">${todo_icon}&nbsp;${row['todos_count']} Todos&nbsp;</span>`
+								todo_badge = `<span class="text-danger badge badge-link badge-soft-danger float-end mt-1" onclick="list_subdomain_todos(${row['id']}, '${jsEscape(row['name'])}')">${todo_icon}&nbsp;${row['todos_count']} Todos&nbsp;</span>`
 							}
 
 							endpoint_count_badge = '';
 							if (row['endpoint_count']) {
-								endpoint_count_badge = `<span class="pl-2 pr-2 me-1 badge badge-soft-primary badge-link bs-tooltip" title="Endpoints" onclick="get_endpoint_modal('{{current_project.slug}}', {{history.id}}, ${row['id']}, '${row['name']}')">${row['endpoint_count']} <i class=" fas fa-link"></i></span>`;
+								endpoint_count_badge = `<span class="pl-2 pr-2 me-1 badge badge-soft-primary badge-link bs-tooltip" title="Endpoints" onclick="get_endpoint_modal('{{current_project.slug}}', {{history.id}}, ${row['id']}, '${jsEscape(row['name'])}')">${row['endpoint_count']} <i class=" fas fa-link"></i></span>`;
 							}
 
 
@@ -1875,7 +1875,7 @@ $(document).ready(function() {
 
 							var subscan_count_badge = '';
 							if (row['subscan_count']){
-								subscan_count_badge = `<span class="badge me-1 badge-soft-blue badge-link bs-tooltip" title="SubScans" onclick="get_and_render_subscan_history(${row['id']}, '${row['name']}')">${row['subscan_count']} <i class="fas fa-history"></i></span>`;
+								subscan_count_badge = `<span class="badge me-1 badge-soft-blue badge-link bs-tooltip" title="SubScans" onclick="get_and_render_subscan_history(${row['id']}, '${jsEscape(row['name'])}')">${row['subscan_count']} <i class="fas fa-history"></i></span>`;
 							}
 
 							tech_badge += content_type;
@@ -1885,12 +1885,12 @@ $(document).ready(function() {
 
 							if (row['http_url']) {
 								if (row['cname']) {
-									cname_badge = `<div><span class="text-dark">CNAME<br><span class="text-warning"> ❯ </span>` + row['cname'].replace(',', '<br><span class="text-warning"> ❯ </span>') + `</div>`;
-									return badges + `<div class="clipboard copy-txt"><a href="`+row['http_url']+`" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + data  +`${copy_icon} </span></a>`+ `</div>` + cname_badge + end_vuln_badge + tech_badge + todo_badge;
+									cname_badge = `<div><span class="text-dark">CNAME<br><span class="text-warning"> ❯ </span>` + row['cname'].split(',').map(htmlEncode).join('<br><span class="text-warning"> ❯ </span>') + `</div>`;
+									return badges + `<div class="clipboard copy-txt"><a href="` + safeHref(row['http_url']) + `" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + htmlEncode(data) + `${copy_icon} </span></a>`+ `</div>` + cname_badge + end_vuln_badge + tech_badge + todo_badge;
 								}
-								return badges + `<div class="clipboard copy-txt"><a href="`+row['http_url']+`" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + data + `${copy_icon} </span></a>` + `</div>` + end_vuln_badge + tech_badge + todo_badge;
+								return badges + `<div class="clipboard copy-txt"><a href="` + safeHref(row['http_url']) + `" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + htmlEncode(data) + `${copy_icon} </span></a>` + `</div>` + end_vuln_badge + tech_badge + todo_badge;
 							}
-							return badges + `<div class="clipboard copy-txt"><a href="https://`+data+`" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + data + `${copy_icon} </span></a>` + `</div>` + end_vuln_badge + tech_badge + todo_badge;
+							return badges + `<div class="clipboard copy-txt"><a href="https://` + htmlEncode(data) + `" class="text-primary" target="_blank"><span id='subdomain-${row['id']}'>` + htmlEncode(data) + `${copy_icon} </span></a>` + `</div>` + end_vuln_badge + tech_badge + todo_badge;
 						},
 						"targets": 1
 					},
@@ -1931,10 +1931,10 @@ $(document).ready(function() {
 							{
 								Object.entries(data).forEach(([key, value]) => {
 									if (value['is_cdn']) {
-										ip_badge += `<span class='m-1 badge badge-soft-warning badge-link' title="CDN IP Address" onclick="get_ip_details('${value.address}', {{scan_history_id}})">${value.address}</span>`
+										ip_badge += `<span class='m-1 badge badge-soft-warning badge-link' title="CDN IP Address" onclick="get_ip_details('${jsEscape(value.address)}', {{scan_history_id}})">${htmlEncode(value.address)}</span>`
 									}
 									else{
-										ip_badge += `<span class='m-1 badge badge-soft-primary badge-link' onclick="get_ip_details('${value.address}', {{scan_history_id}})">${value.address}</span>`
+										ip_badge += `<span class='m-1 badge badge-soft-primary badge-link' onclick="get_ip_details('${jsEscape(value.address)}', {{scan_history_id}})">${htmlEncode(value.address)}</span>`
 									}
 								});
 								return ip_badge;
@@ -1954,7 +1954,7 @@ $(document).ready(function() {
 										port_obj = data[ip]['ports'][port]
 										badge_color = port_obj['is_uncommon'] ? 'danger' : 'primary';
 										title = port_obj['is_uncommon'] ? 'Uncommon Port - ' + port_obj['description'] : port_obj['description'];
-										port_badge += `<span class='m-1 badge badge-soft-${badge_color} bs-tooltip badge-link' title='${title}' onclick="get_port_details(${port_obj['number']}, {{scan_history_id}})">${port_obj['number']}/${port_obj['service_name']}</span>`
+										port_badge += `<span class='m-1 badge badge-soft-${badge_color} bs-tooltip badge-link' title='${htmlEncode(title)}' onclick="get_port_details(${port_obj['number']}, {{scan_history_id}})">${port_obj['number']}/${htmlEncode(port_obj['service_name'])}</span>`
 									}
 								}
 								return port_badge;
@@ -1978,7 +1978,8 @@ $(document).ready(function() {
 						"render": function ( data, type, row ) {
 							if (data){
 								//return lightbox with caption as http link
-								return `<a href="/media/`+data+`" data-lightbox="screenshots" data-title="&lt;a target='_blank' href='`+row['http_url']+`'&gt;&lt;h3 style=&quot;color:white&quot;&gt;`+row['name']+`&lt;/h3&gt;&lt;/a&gt;"><img src="/media/`+data+`" class="img-fluid rounded mb-4 mt-4 screenshot" onerror="removeImageElement(this)"></a>`;
+								var caption = `<a target='_blank' href='${safeHref(row['http_url'])}'><h3 style="color:white">${htmlEncode(row['name'])}</h3></a>`;
+								return `<a href="/media/${htmlEncode(data)}" data-lightbox="screenshots" data-title="${htmlEncode(caption)}"><img src="/media/${htmlEncode(data)}" class="img-fluid rounded mb-4 mt-4 screenshot" onerror="removeImageElement(this)"></a>`;
 							}
 							return "";
 						},
@@ -2001,7 +2002,7 @@ $(document).ready(function() {
 							<div class="btn-group mt-2">
 							<button type="button" data-toggle="tooltip" data-placement="top" title="Show Attack Surface" class="btn btn-primary me-1 bs-tooltip" onclick="show_attack_surface_modal(${row['id']})"><i class="fe-eye"></i></button>
 							<button type="button" data-toggle="tooltip" data-placement="top" title="Further Scan Subdomain" class="btn btn-primary btn-scan-subdomain me-1" id="${row['id']}"><i class="fe-zap"></i></button>
-							<button type="button" data-toggle="tooltip" data-placement="top" title="Add Recon Todo/Note" class="btn btn-primary me-1" id="${row['id']}" onclick="add_note_for_subdomain(${row['id']}, '${row['name']}')"><i class="fe-file-plus"></i></button>
+							<button type="button" data-toggle="tooltip" data-placement="top" title="Add Recon Todo/Note" class="btn btn-primary me-1" id="${row['id']}" onclick="add_note_for_subdomain(${row['id']}, '${jsEscape(row['name'])}')"><i class="fe-file-plus"></i></button>
 							<button class="btn btn-primary me-1 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="mdi mdi-dots-horizontal"></i></button>
 							<div class="dropdown-menu dropdown-menu-end">
 							<a class="dropdown-item" href="#" onclick="mark_important_subdomain(this, ${row['id']})" id="${row['id']}"><i class="mdi mdi-alert-rhombus-outline me-2 text-muted font-18 vertical-middle"></i>Mark Important Subdomain</a>
@@ -2012,6 +2013,8 @@ $(document).ready(function() {
 						},
 						"targets": 24,
 					},
+					// cells with no render of their own (incl. hidden ones) still go through innerHTML: show them as text
+					{"targets": "_all", "render": $.fn.dataTable.render.text()},
 				],
 				"dom": "<'dt--top-section'<'row'<'col-12 mb-3 mb-sm-0 col-sm-4 col-md-3 col-lg-4 d-flex justify-content-sm-start justify-content-center'l><'dt--pages-count col-12 col-sm-6 col-md-4 col-lg-4 d-flex justify-content-sm-middle justify-content-center'i><'dt--pagination col-12 col-sm-2 col-md-5 col-lg-4 d-flex justify-content-sm-end justify-content-center'p>>>" +
 				"<'table-responsive'tr>" +

@@ -91,7 +91,7 @@ function get_endpoints(project, scan_history_id=null, domain_id=null, gf_tags=nu
 		},
 		"rowGroup": {
 			"startRender": function(rows, group) {
-				return group + ' (' + rows.count() + ' Endpoints)';
+				return htmlEncode(group) + ' (' + rows.count() + ' Endpoints)';
 			}
 		},
 		"order": [[ 6, "desc" ]],
@@ -116,7 +116,7 @@ function get_endpoints(project, scan_history_id=null, domain_id=null, gf_tags=nu
 					}
 
 					if (row['webserver']) {
-						web_server = `<span class='m-1 badge badge-soft-info' data-toggle="tooltip" data-placement="top" title="Web Server">${row['webserver']}</span>`;
+						web_server = `<span class='m-1 badge badge-soft-info' data-toggle="tooltip" data-placement="top" title="Web Server">${htmlEncode(row['webserver'])}</span>`;
 					}
 
 					var url = split_into_lines(data, 70);
@@ -130,7 +130,7 @@ function get_endpoints(project, scan_history_id=null, domain_id=null, gf_tags=nu
 					`;
 					tech_badge += web_server;
 
-					return `<div class="clipboard copy-txt">` + "<a href='"+ data +`' id="url-${row['id']}" target='_blank' class='text-primary'>`+ url +"</a>" + tech_badge + "<br>" + action_icons ;
+					return `<div class="clipboard copy-txt">` + "<a href='"+ safeHref(data) +`' id="url-${row['id']}" target='_blank' class='text-primary'>`+ url +"</a>" + tech_badge + "<br>" + action_icons ;
 				},
 				"targets": 1,
 			},
@@ -179,6 +179,8 @@ function get_endpoints(project, scan_history_id=null, domain_id=null, gf_tags=nu
 				},
 				"targets": 9,
 			},
+			// remaining cells (incl. hidden ones) as text
+			{"targets": "_all", "render": $.fn.dataTable.render.text()},
 		],
 		"initComplete": function(settings, json) {
 			api = this.api();
@@ -344,11 +346,11 @@ function get_subdomain_changes(scan_history_id){
 					}
 					if (row['http_url']) {
 						if (row['cname']) {
-							return badges + `<a href="`+row['http_url']+`" class="text-primary" target="_blank">`+data+`</a><br><span class="text-dark">CNAME<br><span class="text-warning"> ❯ </span>` + row['cname'].replace(',', '<br><span class="text-warning"> ❯ </span>')+`</span>`;
+							return badges + `<a href="`+safeHref(row['http_url'])+`" class="text-primary" target="_blank">`+htmlEncode(data)+`</a><br><span class="text-dark">CNAME<br><span class="text-warning"> ❯ </span>` + row['cname'].split(',').map(htmlEncode).join('<br><span class="text-warning"> ❯ </span>')+`</span>`;
 						}
-						return badges + `<a href="`+row['http_url']+`" class="text-primary" target="_blank">`+data+`</a>`;
+						return badges + `<a href="`+safeHref(row['http_url'])+`" class="text-primary" target="_blank">`+htmlEncode(data)+`</a>`;
 					}
-					return badges + `<a href="https://`+data+`" class="text-primary" target="_blank">`+data+`</a>`;
+					return badges + `<a href="https://`+htmlEncode(data)+`" class="text-primary" target="_blank">`+htmlEncode(data)+`</a>`;
 				},
 				"targets": 0
 			},
@@ -399,6 +401,8 @@ function get_subdomain_changes(scan_history_id){
 				},
 				"targets": 4,
 			},
+			// remaining cells (incl. hidden ones) as text
+			{"targets": "_all", "render": $.fn.dataTable.render.text()},
 		],
 	});
 }
@@ -445,7 +449,7 @@ function get_endpoint_changes(scan_history_id){
 			{
 				"render": function ( data, type, row ) {
 					var url = split_into_lines(data, 70);
-					return "<a href='"+data+"' target='_blank' class='text-primary'>"+url+"</a>";
+					return "<a href='"+safeHref(data)+"' target='_blank' class='text-primary'>"+url+"</a>";
 				},
 				"targets": 0
 			},
@@ -487,6 +491,8 @@ function get_endpoint_changes(scan_history_id){
 				},
 				"targets": 4,
 			},
+			// remaining cells (incl. hidden ones) as text
+			{"targets": "_all", "render": $.fn.dataTable.render.text()},
 		],
 	});
 }
@@ -955,7 +961,7 @@ $(".add-scan-history-todo").click(function(){
 
 function add_note_for_subdomain(subdomain_id, subdomain_name){
 	console.log(subdomain_name);
-	$('#todo-modal-subdomain-name').html(subdomain_name);
+	$('#todo-modal-subdomain-name').text(subdomain_name);
 	$("#subdomainTodoTitle").val('');
 	$("#subdomainTodoDescription").val('');
 
