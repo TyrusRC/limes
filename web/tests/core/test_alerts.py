@@ -347,6 +347,13 @@ class DeliverTest(TestCase):
         self.assertEqual(self.run_(now=timezone.now() + timedelta(hours=2)), 0)
         self.assertEqual(len(digest._pending(self.p)), 2)
 
+    def test_default_chat_is_queued_not_sent_inline(self):
+        self.ev()
+        with mock.patch('limes.tasks.notifications.send_notif') as notif:
+            deliver.deliver_immediate(self.p, post=self.post)
+        notif.delay.assert_called_once_with('t', title='t')
+        notif.assert_not_called()
+
     @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s3cr3t')
     def test_webhook_signature_verifies(self):
         self.ev()
@@ -584,8 +591,8 @@ class WiringTest(TestCase):
                 mock.patch('limes.alerts.deliver.deliver_immediate', side_effect=SoftTimeLimitExceeded):
             ctx = {'scan_history_id': self.scan.id}
             control.start_scan_run(self.domain, self.scan, 'full', ctx)
-            with self.assertRaises(SoftTimeLimitExceeded):
-                control.report.run(ctx=ctx)
+            with self.assertLogs('limes.tasks', level='WARNING'):
+                control.report.run(ctx=ctx)  # must not raise: a re-raise re-runs report via link_error
         inv.assert_called_once()
         notif.delay.assert_called_once()
 
