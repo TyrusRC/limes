@@ -96,5 +96,5 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic):
     first = _owned(project).filter(kind='root_domain').order_by('id').first()
     if first and first.id == root.id:
         for ip in _owned(project).filter(kind='ip'):
-            step(ip, lambda ip=ip: network.evaluate(obs['ports'](ip, now)))
+            step(ip, lambda ip=ip: network.evaluate(*obs['ports'](ip, now)))
     return done

@@ -227,15 +227,22 @@ class MailDnsEvalTest(SimpleTestCase):
 class NetworkEvalTest(SimpleTestCase):
     def test_risky_ports(self):
         from limes.checks import network
-        res = {r.check: r for r in network.evaluate({3389: ['naabu'], 443: ['internetdb 2026-10-10']})}
+        res = {r.check: r for r in network.evaluate({3389: ['naabu'], 443: ['internetdb 2026-10-10']}, True)}
         self.assertEqual(len(res), 14)
         self.assertEqual(res['net.exposed_rdp'].status, 'fail')
         self.assertEqual(res['net.exposed_rdp'].evidence, {'port': 3389, 'seen_by': ['naabu']})
         self.assertEqual({c for c, r in res.items() if r.status == 'pass'}, set(res) - {'net.exposed_rdp'})
 
+    def test_partial_port_data_never_passes(self):
+        from limes.checks import network
+        res = {r.check: r.status for r in network.evaluate({6379: ['naabu']}, False)}
+        self.assertEqual(res['net.exposed_redis'], 'fail')
+        self.assertEqual(set(res.values()) - {'fail'}, {'error'})
+        self.assertEqual(res['net.exposed_rdp'], 'error')
+
     def test_no_fresh_port_data_is_error(self):
         from limes.checks import network
-        res = network.evaluate(None)
+        res = network.evaluate({}, False)
         self.assertEqual(len(res), 14)
         self.assertEqual({r.status for r in res}, {'error'})
 
@@ -424,13 +431,16 @@ class PortsTest(TestCase):
         ip = IpAddress.objects.create(address='93.184.216.34')
         ip.ports.add(Port.objects.create(number=6379))
         IpAddress.objects.create(address='93.184.216.34')  # a second scan's row, no ports
-        got = collect.ports_for_ip(a, now)
+        got, complete = collect.ports_for_ip(a, now)
+        self.assertTrue(complete)
         self.assertEqual(got[6379], ['naabu'])
         self.assertEqual(list(got), [3389, 6379])
         self.assertTrue(got[3389][0].startswith('internetdb '))
         b = Asset.objects.create(project=project, kind='ip', value='93.184.216.35', scope_tier='owned_host',
                                  enrichment={'internetdb': {'ports': [3389], 'fetched_at': (now - timedelta(days=40)).isoformat()}})
-        self.assertIsNone(collect.ports_for_ip(b, now))
+        self.assertEqual(collect.ports_for_ip(b, now), ({}, False))
+        IpAddress.objects.create(address='93.184.216.35').ports.add(Port.objects.get(number=6379))
+        self.assertEqual(collect.ports_for_ip(b, now), ({6379: ['naabu']}, False))  # naabu alone: never complete
 
 
 class RunTest(TestCase):
@@ -459,7 +469,7 @@ class RunTest(TestCase):
         return {'http': http, 'tls': tls,
                 'mail_dns': lambda root: ({'txt': ['v=spf1 -all'], 'dmarc': ['v=DMARC1; p=reject'], 'mx': []},
                                           {'ds': False, 'caa': True}),
-                'ports': lambda asset, now: None}
+                'ports': lambda asset, now: ({}, False)}
 
     def test_writes_one_row_per_check_and_updates_in_place(self):
         from limes.checks import run

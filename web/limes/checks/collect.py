@@ -224,18 +224,18 @@ def _fresh_internetdb(asset, now):
 
 
 def ports_for_ip(asset, now):
-    """{port: [source, ...]} from fresh InternetDB data and naabu, or None when there is none."""
+    """({port: [source, ...]}, complete). Only fresh InternetDB data is complete: naabu rows
+    carry no date and default scans probe top-100, which omits most risky ports, so naabu can
+    only add ports, never vouch for an absent one."""
     from startScan.models import Port
-    ports, seen = {}, False
+    ports = {}
     fresh = _fresh_internetdb(asset, now)
     if fresh:
-        seen = True
         idb, ts = fresh
         for p in idb.get('ports') or []:
             ports.setdefault(int(p), []).append(f'internetdb {ts.date().isoformat()}')
     # several IpAddress rows can share an address (one per scan): union them all
     naabu = Port.objects.filter(ports__address=asset.value).values_list('number', flat=True).distinct()
     for p in naabu:
-        seen = True
         ports.setdefault(p, []).append('naabu')
-    return dict(sorted(ports.items())) if seen else None
+    return dict(sorted(ports.items())), bool(fresh)
