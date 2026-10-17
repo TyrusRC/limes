@@ -13,6 +13,8 @@ from tests.core.test_scoring import Base
 class ImmediacyTest(SimpleTestCase):
     def test_rules(self):
         self.assertFalse(events.is_immediate('issue_new', 'web.csp_missing', 1))
+        self.assertFalse(events.is_immediate('issue_new', 't1', 2))
+        self.assertTrue(events.is_immediate('issue_regressed', 't1', 3))
         self.assertTrue(events.is_immediate('issue_new', 't1', 3))
         self.assertTrue(events.is_immediate('issue_regressed', 'tls.cert_expiring', 2))
         self.assertTrue(events.is_immediate('issue_new', 'net.exposed_ftp', 2))
@@ -63,17 +65,33 @@ class SyncTest(TestCase):
 
     def test_unassessed_asset_is_not_fixed(self):
         self.sync({self.a.id: {'t1': 1}})
-        self.assertEqual(self.sync({}, assessed=set()), [])
+        got = self.sync({self.a.id: {'t2': 1}}, assessed=set())
+        self.assertNotIn('issue_fixed', [e.kind for e in got])
         self.assertEqual(TrackedIssue.objects.get(key='t1').status, 'open')
 
     def test_events_are_per_project(self):
         self.sync({self.a.id: {'t1': 1}})
         other = Project.objects.create(name='q', slug='q', insert_date=timezone.now())
         b = Asset.objects.create(project=other, kind='hostname', value='b.y.com', scope_tier='owned_host')
-        self.sync({b.id: {'t9': 1}}, assessed={b.id}, project=other)
-        self.assertEqual(self.sync({b.id: {'t9': 3}}, assessed={b.id}, project=other)[0].project, other)
+        self.assertEqual(self.sync({b.id: {'t9': 3}}, assessed={b.id}, project=other), [])
+        self.assertEqual(self.sync({b.id: {'t9': 3, 't8': 3}}, assessed={b.id}, project=other)[0].project, other)
         self.assertEqual(list(TrackedIssue.objects.filter(project=self.p).values_list('key', flat=True)), ['t1'])
+        self.assertEqual(set(TrackedIssue.objects.filter(project=other).values_list('key', flat=True)), {'t8', 't9'})
         self.assertEqual(ChangeEvent.objects.filter(project=self.p).count(), 0)
+
+    def test_first_sync_with_no_issues_still_counts(self):
+        self.assertEqual(self.sync({}), [])
+        (e,) = self.sync({self.a.id: {'t1': 3}})
+        self.assertEqual((e.kind, e.immediate), ('issue_new', True))
+
+    def test_failed_sync_leaves_no_partial_change(self):
+        self.sync({self.a.id: {'t1': 1}})
+        with mock.patch('limes.alerts.events.record', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                self.sync({self.a.id: {'t1': 3}})
+        self.assertEqual(TrackedIssue.objects.get(key='t1').severity, 1)
+        (e,) = self.sync({self.a.id: {'t1': 3}})
+        self.assertEqual(e.kind, 'issue_new')
 
 
 class CurrentIssuesTest(Base):
