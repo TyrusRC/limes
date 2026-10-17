@@ -699,7 +699,7 @@ class AddAssets(APIView):
 		set_authorized = tier == 'co_brand' and 'active_authorized' in data
 		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
 		added, existing, skipped, warnings = 0, 0, 0, []
-		roots = []  # new or promoted owned roots, given a scan target once the transaction commits
+		roots = []  # owned roots added, promoted or re-added, given a scan target once the transaction commits
 		cap = settings.RANGE_ADDRESS_CAP
 		# NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
 		# Upgrade: select_for_update on the project row around this read and the writes.
@@ -751,6 +751,7 @@ class AddAssets(APIView):
 					promote = created or asset.scope_tier in ('candidate', 'dependency')
 					if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
 						existing += 1
+						roots.append(asset)  # idempotent: re-adding links a root whose earlier clash was cleared
 						continue
 					if promote:
 						asset.scope_tier = tier
