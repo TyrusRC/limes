@@ -1133,8 +1133,8 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 				badge_color = 'soft-warning'
 				break;
 			case 'High':
-				color = 'danger'
-				badge_color = 'soft-danger'
+				color = 'high'
+				badge_color = 'high'
 				break;
 			case 'Critical':
 				color = 'critical'
@@ -2701,8 +2701,8 @@ function render_vuln_offcanvas(vuln){
 			default_badge_color = 'soft-warning';
 			break;
 		case 'High':
-			default_color = 'danger';
-			default_badge_color = 'soft-danger';
+			default_color = 'high';
+			default_badge_color = 'high';
 			break;
 		case 'Critical':
 			default_color = 'critical';
