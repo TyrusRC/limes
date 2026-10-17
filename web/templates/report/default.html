@@ -1,3 +1,4 @@
+{% load custom_tags %}
 <html>
   <head>
     <meta charset="utf-8">
@@ -1003,7 +1004,7 @@
                 <br>
                 <span class="mini-heading">Vulnerable URL(s)</span><br>
                 <ul>
-                    <li class="text-blue"><a href="{{vulnerability.http_url}}" target="_blank" rel="noopener noreferrer">{{vulnerability.http_url}}</a></li>
+                    <li class="text-blue"><a href="{{vulnerability.http_url|http_href}}" target="_blank" rel="noopener noreferrer">{{vulnerability.http_url}}</a></li>
                 </ul>
                 <!-- {% regroup vulnerability.list by http_url as vuln_http_url_list %} -->
                 <!-- <ul>

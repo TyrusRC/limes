@@ -1,10 +1,10 @@
 function load_gf_template(pattern_name){
   Swal.fire({
-		title: `Fetching GF template ${pattern_name}...`,
+		title: `Fetching GF template ${htmlEncode(pattern_name)}...`,
 	});
 	swal.showLoading();
 
-  $.getJSON(`/api/getFileContents?gf_pattern&name=${pattern_name}&format=json`, function(response) {
+  $.getJSON(`/api/getFileContents?gf_pattern&name=${encodeURIComponent(pattern_name)}&format=json`, function(response) {
     swal.close();
     if (response.status) {
       $('#modal_title').empty();
@@ -17,7 +17,7 @@ function load_gf_template(pattern_name){
       $('#modal_dialog').modal('show');
     }
     else{
-      swal.fire("Error!", response.message, "error", {
+      swal.fire("Error!", htmlEncode(response.message), "error", {
         button: "Okay",
       });
     }
@@ -31,11 +31,11 @@ function load_gf_template(pattern_name){
 
 function load_nuclei_template(pattern_name){
   Swal.fire({
-		title: `Fetching Nuclei template ${pattern_name}...`,
+		title: `Fetching Nuclei template ${htmlEncode(pattern_name)}...`,
 	});
 	swal.showLoading();
 
-  $.getJSON(`/api/getFileContents?nuclei_template&name=${pattern_name}&format=json`, function(response) {
+  $.getJSON(`/api/getFileContents?nuclei_template&name=${encodeURIComponent(pattern_name)}&format=json`, function(response) {
     swal.close();
     if (response.status) {
       $('#modal_title').empty();
@@ -48,7 +48,7 @@ function load_nuclei_template(pattern_name){
       $('#modal_dialog').modal('show');
     }
     else{
-      swal.fire("Error!", response.message, "error", {
+      swal.fire("Error!", htmlEncode(response.message), "error", {
         button: "Okay",
       });
     }
@@ -64,7 +64,7 @@ function load_nuclei_template(pattern_name){
 // get nuclei config
 $.getJSON(`/api/getFileContents?nuclei_config&format=json`, function(data) {
   $("#nuclei_config_text_area").attr("rows", 17);
-  $("textarea#nuclei_config_text_area").html(data['content']);
+  $("textarea#nuclei_config_text_area").html(htmlEncode(data['content']));
 }).fail(function(){
   $("#nuclei_config_text_area").removeAttr("readonly");
   $("textarea#nuclei_config_text_area").html(`# Your nuclei configuration here.`);

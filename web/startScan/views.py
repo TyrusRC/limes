@@ -1,11 +1,12 @@
 import markdown
 
 from celery import group
-from weasyprint import HTML, CSS
+from weasyprint import HTML, CSS, default_url_fetcher
 from datetime import datetime
 from django.contrib import messages
 from django.db.models import Count, Case, When, IntegerField
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
+from django.utils.html import escape
 from django.shortcuts import get_object_or_404, render
 from django.template.loader import get_template
 from django.urls import reverse
@@ -964,6 +965,24 @@ def delete_scans(request, slug):
     return HttpResponseRedirect(reverse('scan_history', kwargs={'slug': slug}))
 
 
+# The report HTML carries scan data and user-written text, so the PDF renderer
+# may only fetch what the report templates themselves load.
+REPORT_FETCH_PREFIXES = ('data:', 'https://fonts.googleapis.com/', 'https://fonts.gstatic.com/')
+
+
+def report_url_fetcher(url, *args, **kwargs):
+    if not url.startswith(REPORT_FETCH_PREFIXES):
+        raise ValueError(f'report resource not allowed: {url[:80]}')
+    return default_url_fetcher(url, *args, **kwargs)
+
+
+def executive_summary_html(template, values):
+    """Fill the user's Markdown summary; substituted values are text, never markup."""
+    for placeholder, value in values.items():
+        template = template.replace(placeholder, escape(value))
+    return markdown.markdown(template)
+
+
 @has_permission_decorator(PERM_MODIFY_SCAN_REPORT, redirect_url=FOUR_OH_FOUR_URL)
 def create_report(request, id):
     primary_color = '#FFB74D'
@@ -1083,24 +1102,23 @@ def create_report(request, id):
         data['footer_text'] = report.footer_text
         data['show_executive_summary'] = report.show_executive_summary
 
-        # Replace executive_summary_description with template syntax
-        description = report.executive_summary_description
-        description = description.replace('{scan_date}', scan.start_scan_date.strftime('%d %B, %Y'))
-        description = description.replace('{company_name}', report.company_name)
-        description = description.replace('{target_name}', scan.domain.name)
-        description = description.replace('{subdomain_count}', str(subdomains.count()))
-        description = description.replace('{vulnerability_count}', str(vulns.count()))
-        description = description.replace('{critical_count}', str(vulns.filter(severity=4).count()))
-        description = description.replace('{high_count}', str(vulns.filter(severity=3).count()))
-        description = description.replace('{medium_count}', str(vulns.filter(severity=2).count()))
-        description = description.replace('{low_count}', str(vulns.filter(severity=1).count()))
-        description = description.replace('{info_count}', str(vulns.filter(severity=0).count()))
-        description = description.replace('{unknown_count}', str(vulns.filter(severity=-1).count()))
+        values = {
+            '{scan_date}': scan.start_scan_date.strftime('%d %B, %Y'),
+            '{company_name}': report.company_name,
+            '{target_name}': scan.domain.name,
+            '{subdomain_count}': str(subdomains.count()),
+            '{vulnerability_count}': str(vulns.count()),
+            '{critical_count}': str(vulns.filter(severity=4).count()),
+            '{high_count}': str(vulns.filter(severity=3).count()),
+            '{medium_count}': str(vulns.filter(severity=2).count()),
+            '{low_count}': str(vulns.filter(severity=1).count()),
+            '{info_count}': str(vulns.filter(severity=0).count()),
+            '{unknown_count}': str(vulns.filter(severity=-1).count()),
+        }
         if scan.domain.description:
-            description = description.replace('{target_description}', scan.domain.description)
-
-        # Convert to Markdown
-        data['executive_summary_description'] = markdown.markdown(description)
+            values['{target_description}'] = scan.domain.description
+        data['executive_summary_description'] = executive_summary_html(
+            report.executive_summary_description, values)
 
         primary_color = report.primary_color
         secondary_color = report.secondary_color
@@ -1117,7 +1135,7 @@ def create_report(request, id):
         template = get_template('report/default.html')
 
     html = template.render(data)
-    pdf = HTML(string=html).write_pdf()
+    pdf = HTML(string=html, url_fetcher=report_url_fetcher).write_pdf()
     # pdf = HTML(string=html).write_pdf(stylesheets=[CSS(string='@page { size: A4; margin: 0; }')])
 
     if 'download' in request.GET:

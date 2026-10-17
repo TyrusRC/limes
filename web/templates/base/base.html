@@ -131,7 +131,7 @@
       {% for message in messages %}
         <script type="text/javascript">
           Snackbar.show({
-            text: '{{ message }}',
+            text: '{{ message|force_escape|escapejs }}',
             pos: 'top-right',
             {% if message.tags == 'error'%}
               actionTextColor: '#fff',
