@@ -23,7 +23,7 @@ def _ok(kind, value, values=None, warning=None):
     return {'kind': kind, 'value': value, 'values': values or [value], 'error': None, 'warning': warning}
 
 
-_ASN_RE = re.compile(r'^AS\s?(\d{1,10})$', re.I)
+_ASN_RE = re.compile(r'^AS\s?(\d{1,10})$', re.I | re.A)
 _ENUM_OFF = 'range enumeration is off until the operator enables it (LIMES_RANGE_ENUMERATION); it is tracked but not expanded'
 
 
@@ -54,7 +54,7 @@ def classify_asset_entry(raw):
         return _err('empty entry')
     if '*' in s:
         return _err(f'wildcards not allowed: {s}')
-    if re.fullmatch(r'\d+', s):
+    if re.fullmatch(r'\d+', s, re.A):
         return _err(f'bare number {s}: write an ASN as AS{s}')
     m = _ASN_RE.match(s)
     if m:
