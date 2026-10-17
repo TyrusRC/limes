@@ -88,8 +88,8 @@ function asset_cadence_html(a) {
 	var opts = ASSET_CADENCES.map(function(c) {
 		return '<option value="' + c[0] + '"' + (a.cadence_tier === c[0] ? ' selected' : '') + '>' + c[1] + '</option>';
 	}).join('');
-	return '<div class="d-flex align-items-center mb-2"><label class="form-label mb-0 me-2" for="asset_cadence"><b>Cadence</b></label>' +
-		'<select id="asset_cadence" class="form-select form-select-sm w-auto me-2">' + opts + '</select>' +
+	return '<div class="d-flex flex-wrap align-items-center gap-2"><label class="form-label mb-0" for="asset_cadence"><b>Cadence</b></label>' +
+		'<select id="asset_cadence" class="form-select form-select-sm w-auto">' + opts + '</select>' +
 		'<button class="btn btn-xs btn-soft-primary" onclick="set_asset_cadence(' + Number(a.id) + ')">Save</button></div>';
 }
 
@@ -102,21 +102,40 @@ function set_asset_cadence(id) {
 	});
 }
 
+var ASSET_SEVERITY = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low', 0: 'info'};
+
+// Severity as a sev-* pill; takes a name ('high') or a number (3). Unknown values fall back to escaped text.
+function asset_sev_html(sev) {
+	var n = typeof sev === 'number' ? ASSET_SEVERITY[sev] : String(sev || '').toLowerCase();
+	if (['critical', 'high', 'medium', 'low', 'info'].indexOf(n) === -1) return asset_esc(sev);
+	return '<span class="sev-' + n + '">' + n.charAt(0).toUpperCase() + n.slice(1) + '</span>';
+}
+
+function asset_section(title, body) {
+	return '<section><h3 class="l-section-title">' + title + '</h3>' + body + '</section>';
+}
+
+function asset_table(head, rows) {
+	return '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>' + head.map(function(h) { return '<th>' + h + '</th>'; }).join('') +
+		'</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+// Waived rows stay listed (the raw score still counts them) but are muted and badged instead of showing points.
 function asset_penalty_rows(rows, withAsset) {
 	return (rows || []).map(function(r) {
-		return '<tr>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
-			'</td><td>' + asset_esc(r.severity) + '</td><td>' + (r.waived ? '<span class="badge bg-soft-secondary text-secondary">waived</span>' : '-' + asset_esc(r.points)) + '</td></tr>';
+		return '<tr' + (r.waived ? ' class="l-row-waived"' : '') + '>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
+			'</td><td>' + asset_sev_html(r.severity) + '</td><td class="text-nowrap">' +
+			(r.waived ? '<span class="badge l-badge-waived"><i class="fe-shield" aria-hidden="true"></i>Waived</span>' : '-' + asset_esc(r.points)) + '</td></tr>';
 	}).join('');
 }
 
 // Risk section of the asset modal (limes.scoring); null for assets that are not scored.
 function asset_risk_html(risk) {
 	if (!risk) return '';
-	if (risk.assessed === false) return '<h5>Risk</h5><p class="text-muted">Not yet vulnerability-scanned: no score.</p>';
+	if (risk.assessed === false) return asset_section('Risk', '<p class="l-hint mb-0">Not yet vulnerability-scanned: no score.</p>');
 	var rows = asset_penalty_rows(risk.penalties, false);
-	return '<h5>Risk ' + asset_esc(risk.score) + ' <span class="badge bg-soft-primary text-primary">' + asset_esc(risk.grade) +
-		'</span></h5>' + (rows ? '<table class="table table-sm"><thead><tr><th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' +
-		rows + '</tbody></table>' : '<p class="text-muted">No open findings in the latest vulnerability scan.</p>');
+	return asset_section('<span>Risk <span class="l-score-big">' + asset_esc(risk.score) + '</span> <span class="badge bg-soft-primary">' + asset_esc(risk.grade) + '</span></span>',
+		rows ? asset_table(['Issue', 'Severity', 'Points'], rows) : '<p class="l-hint mb-0">No open findings in the latest vulnerability scan.</p>');
 }
 
 // Risk checks table of the asset modal. Evidence carries target header/cookie text: escape every field.
@@ -127,37 +146,40 @@ function asset_checks_html(checks) {
 			var v = c.evidence[k];
 			return asset_esc(k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v)));
 		}).join('<br>');
-		return '<tr><td>' + asset_esc(c.title) + '</td><td>' + asset_esc(c.status) + '</td><td>' + asset_esc(c.severity) +
-			'</td><td>' + asset_esc(c.fix) + '</td><td>' + ev + '</td><td>' + asset_esc(c.last_checked) + '</td></tr>';
+		var st = c.status === 'fail' ? 'badge-soft-danger' : c.status === 'pass' ? 'badge-soft-success' : 'badge-soft-secondary';
+		return '<tr><td>' + asset_esc(c.title) + '</td><td><span class="badge ' + st + '">' + asset_esc(c.status) + '</span></td><td>' + asset_sev_html(c.severity) +
+			'</td><td>' + asset_esc(c.fix) + '</td><td>' + ev + '</td><td class="text-nowrap">' + asset_esc(String(c.last_checked || '').slice(0, 10)) + '</td></tr>';
 	}).join('');
-	return '<h5>Risk checks</h5><table class="table table-sm"><thead><tr><th>Check</th><th>Status</th><th>Severity</th>' +
-		'<th>Fix</th><th>Evidence</th><th>Checked</th></tr></thead><tbody>' + rows + '</tbody></table>';
+	return asset_section('Risk checks', asset_table(['Check', 'Status', 'Severity', 'Fix', 'Evidence', 'Checked'], rows));
 }
 
-// Project score card above the Assets table.
+// Score sub-line under the title, and the top-penalties card above the Assets table.
 function load_asset_score() {
-	var box = document.getElementById('asset_score');
+	var box = document.getElementById('asset_score'), card = document.getElementById('asset_penalties');
+	var line = function(parts) {
+		box.replaceChildren.apply(box, parts.map(function(t) { var e = document.createElement('span'); e.textContent = t; return e; }));
+	};
 	fetch('/api/asset_score/?project=' + encodeURIComponent(asset_project()), {credentials: 'same-origin'})
 		.then(function(r) { if (!r.ok) throw new Error('score'); return r.json(); })
 		.then(function(s) {
 			if (s.score === null) {
-				box.innerHTML = '<p class="text-muted mb-0">' + (Number(s.unassessed) > 0 ?
-					'No owned root has had a vulnerability scan yet: no score.' : 'No owned assets to score yet.') + '</p>';
+				line([Number(s.unassessed) > 0 ? 'No owned root has had a vulnerability scan yet: no score.' : 'No owned assets to score yet.']);
+				card.hidden = true;
 				return;
 			}
-			var pending = Number(s.unassessed) > 0 ? ' &middot; ' + Number(s.unassessed) + ' assets not yet scanned (not scored)' : '';
-			var cov = s.coverage === null ? 'n/a' : Math.round(Number(s.coverage) * 100) + '%';
+			var parts = ['Headline score ' + s.score + ' (' + s.grade + ')'];
+			if (s.raw_score !== s.score) parts.push('Raw ' + s.raw_score + ' (' + s.raw_grade + ') before waivers');
+			parts.push((s.coverage === null ? 'n/a' : Math.round(Number(s.coverage) * 100) + '%') + ' of owned roots scanned for vulnerabilities in 30 days');
+			if (s.check_coverage !== null && s.check_coverage !== undefined) parts.push(Math.round(Number(s.check_coverage) * 100) + '% of owned assets checked in 30 days');
+			if (Number(s.unassessed) > 0) parts.push(Number(s.unassessed) + ' assets not yet scanned (not scored)');
+			parts.push(String(s.version));
+			line(parts);
 			var rows = asset_penalty_rows(s.top_penalties, true);
-			var chk = s.check_coverage === null || s.check_coverage === undefined ? '' : '<p class="text-muted mb-1"><small>' +
-				asset_esc(Math.round(Number(s.check_coverage) * 100) + '% of owned assets checked in 30 days') + '</small></p>';
-			box.innerHTML = '<div class="d-flex align-items-baseline mb-1"><span class="h2 mb-0 me-2">' + asset_esc(s.score) +
-				'</span><span class="badge bg-soft-primary text-primary me-3">' + asset_esc(s.grade) + '</span>' +
-				(s.raw_score !== s.score ? '<small class="text-muted me-3">raw ' + asset_esc(s.raw_score) + ' ' + asset_esc(s.raw_grade) + '</small>' : '') +
-				'<small class="text-muted">' + asset_esc(cov) + ' of owned roots scanned for vulnerabilities in 30 days &middot; ' +
-				asset_esc(s.version) + pending + '</small></div>' + chk + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
-				'<th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' + rows + '</tbody></table>' : '');
+			document.getElementById('asset_penalty_rows').innerHTML = rows;
+			card.hidden = !rows;
 		}).catch(function() {
-			box.innerHTML = '<p class="text-muted mb-0">Score unavailable.</p>';
+			line(['Score unavailable.']);
+			card.hidden = true;
 		});
 }
 
@@ -167,17 +189,16 @@ function asset_confidence_html(a) {
 	var rows = d.contributions.map(function(c) {
 		return '<tr><td>' + asset_esc(c.kind) + '</td><td>' + asset_esc(c.value) + '</td><td>' + asset_esc(c.via) +
 			'</td><td>' + asset_esc(c.weight) + '</td><td>' + asset_esc(c.hop) + '</td></tr>';
-	}).join('') || '<tr><td colspan="5" class="text-muted">No evidence yet.</td></tr>';
+	}).join('') || '<tr><td colspan="5" class="l-muted">No evidence yet.</td></tr>';
 	var dg = d.delegation, delegation = '';
 	if (dg && typeof dg === 'object') {
-		delegation = '<p class="' + (dg.ok === true ? 'text-success' : 'text-muted') + '">' +
+		delegation = '<p class="mb-0 ' + (dg.ok === true ? 'text-success' : 'l-muted') + '">' +
 			asset_esc(dg.ok === true ? 'Delegation verified at the registry' : 'Delegation not verified: ' + dg.reason) + '</p>';
 	}
-	return '<h5>Confidence ' + asset_esc(Number(d.score).toFixed(2)) + ' <small class="text-muted">(' +
-		asset_esc(d.version) + ')</small></h5><table class="table table-sm"><thead><tr><th>Evidence</th><th>Value</th>' +
-		'<th>Via</th><th>Weight</th><th>Hop</th></tr></thead><tbody>' + rows + '</tbody></table>' + delegation +
-		(d.would_auto_confirm === true ? '<p class="text-warning">' +
-			asset_esc('Would auto-confirm (delegation verified); auto-confirm is disabled.') + '</p>' : '');
+	return asset_section('<span>Confidence ' + asset_esc(Number(d.score).toFixed(2)) + ' <span class="l-muted">(' + asset_esc(d.version) + ')</span></span>',
+		asset_table(['Evidence', 'Value', 'Via', 'Weight', 'Hop'], rows) + delegation +
+		(d.would_auto_confirm === true ? '<p class="mb-0 text-warning">' +
+			asset_esc('Would auto-confirm (delegation verified); auto-confirm is disabled.') + '</p>' : ''));
 }
 
 // "Why is this mine": follow parent links up to the root. Depth-capped so a bad cycle can't loop.
@@ -198,7 +219,7 @@ function asset_intel_html(e) {
 	var rows = [], idb = e.internetdb, ripe = e.ripestat;
 	if (idb) {
 		if (idb.no_data) {
-			rows.push('<tr><td>InternetDB</td><td class="text-muted">No data</td><td>' + asset_esc(idb.fetched_at) + '</td></tr>');
+			rows.push('<tr><td>InternetDB</td><td class="l-muted">No data</td><td>' + asset_esc(idb.fetched_at) + '</td></tr>');
 		} else {
 			rows.push('<tr><td>Open ports</td><td>' + asset_esc((idb.ports || []).join(', ')) + '</td><td>' + asset_esc(idb.fetched_at) + '</td></tr>');
 			rows.push('<tr><td>CPEs</td><td>' + asset_esc((idb.cpes || []).join(', ')) + '</td><td></td></tr>');
@@ -212,38 +233,45 @@ function asset_intel_html(e) {
 		rows.push('<tr><td>Holder</td><td>' + asset_esc(ripe.holder) + '</td><td></td></tr>');
 	}
 	if (!rows.length) return '';
-	return '<h5>Intel</h5><table class="table table-sm"><thead><tr><th></th><th>Value</th><th>Fetched</th></tr></thead><tbody>' +
-		rows.join('') + '</tbody></table>';
+	return asset_section('Intel', asset_table(['<span class="visually-hidden">Field</span>', 'Value', 'Fetched'], rows.join('')));
 }
 
 function get_asset_modal(id) {
 	asset_fetch(id).then(asset_parent_chain).then(function(chain) {
 		var a = chain[0];
 		var path = chain.slice().reverse().map(function(c) {
-			return '<span class="badge bg-soft-primary text-primary me-1">' + asset_esc(c.kind) + '</span>' + asset_esc(c.value);
-		}).join(' <i class="fe-arrow-right mx-1"></i> ');
+			return '<span><span class="badge bg-soft-primary me-1">' + asset_esc(c.kind) + '</span>' + asset_esc(c.value) + '</span>';
+		}).join('<i class="fe-arrow-right l-muted" aria-hidden="true"></i>');
 		var sources = (a.sources || []).map(function(s) {
 			return '<tr><td>' + asset_esc(s.source) + '</td><td>' + asset_esc(s.evidence) + '</td><td>' +
 				asset_esc(s.confidence) + '</td><td>' + asset_esc(s.seen_at) + '</td></tr>';
-		}).join('') || '<tr><td colspan="4" class="text-muted">No recorded sources.</td></tr>';
+		}).join('') || '<tr><td colspan="4" class="l-muted">No recorded sources.</td></tr>';
 		$('#modal_title').text(a.value);
-		$('#modal-content').html(
-			'<p><b>Kind</b> ' + asset_esc(a.kind) + ' &middot; <b>Scope</b> ' + asset_esc(a.scope_tier) +
-			' &middot; <b>State</b> ' + asset_esc(a.state) + ' &middot; <b>Vulnerabilities</b> ' + asset_esc(a.vuln_count) + '</p>' +
-			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
+		$('#modal-content').html('<div class="l-asset-modal">' +
+			'<div class="l-meta-row mt-0"><span class="badge">' + asset_esc(a.kind) + '</span><span class="badge">' + asset_esc(a.scope_tier) +
+			'</span><span class="badge">' + asset_esc(a.state) + '</span><span>' + asset_esc(a.vuln_count) + ' vulnerabilities</span></div>' +
+			(a.decision_reason ? '<p class="mb-0"><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
 			asset_cadence_html(a) +
-			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + '<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
-			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
-			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
+			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
+			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
+			asset_intel_html(a.enrichment) + '</div>'
 		);
 		$('#modal-footer').html(asset_actions(a));
+		asset_modal_wide(true);
 		$('#modal_dialog').modal('show');
 	}).catch(function() {
 		asset_toast('Unable to load asset.');
 	});
 }
 
+// The shared modal goes wide for the asset detail and back to its default size when it closes.
+function asset_modal_wide(on) {
+	$('#modal_dialog .modal-dialog').toggleClass('modal-xl', on);
+	if (on) $('#modal_dialog').one('hidden.bs.modal', function() { asset_modal_wide(false); });
+}
+
 function show_add_asset_modal() {
+	asset_modal_wide(false);
 	$('#modal_title').text('Add assets');
 	$('#modal-content').html(
 		'<label class="form-label" for="asset_entries">Domains, hosts, IPs or CIDRs (one per line or comma separated)</label>' +
