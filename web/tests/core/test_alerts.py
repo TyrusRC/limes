@@ -1,12 +1,15 @@
+import hmac
+import json
 from datetime import timedelta
 from unittest import mock
 
+import requests
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from dashboard.models import Project
+from dashboard.models import InAppNotification, Project
 from limes import scoring
-from limes.alerts import events, issues
+from limes.alerts import deliver, events, issues
 from limes.tasks import attribution, inventory
 from startScan.models import Asset, ChangeEvent, RiskCheck, ScanRun, ScoreSnapshot, TrackedIssue
 from tests.core.test_attribution_decisions import DecisionBase
@@ -226,3 +229,100 @@ class AutoConfirmEventTest(DecisionBase):
             self.assertEqual(attribution.apply_decisions(self.p)['auto_confirmed'], 0)
         self.assertEqual(self.tier(a), 'rejected')
         self.assertEqual(ChangeEvent.objects.count(), 0)
+
+
+class DeliverTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.chat = mock.Mock()
+        self.post = mock.Mock()
+
+    def ev(self, immediate=True, kind='issue_new', **kw):
+        return ChangeEvent.objects.create(project=self.p, kind=kind, title='t', severity=3, detail={},
+                                          immediate=immediate, created_at=timezone.now(), **kw)
+
+    def run_(self, **kw):
+        return deliver.deliver_immediate(self.p, chat=self.chat, post=self.post, **kw)
+
+    def test_sends_immediate_only_oldest_first(self):
+        a = self.ev()
+        a.title = 'first'
+        a.save()
+        b = self.ev()
+        b.title = 'second'
+        b.save()
+        d = self.ev(immediate=False)
+        self.assertEqual(self.run_(), 2)
+        self.assertEqual([c.kwargs['title'] for c in self.chat.call_args_list], ['first', 'second'])
+        for e in (a, b, d):
+            e.refresh_from_db()
+        self.assertIsNotNone(a.notified_at)
+        self.assertIsNotNone(b.notified_at)
+        self.assertIsNone(d.notified_at)
+        self.assertEqual(InAppNotification.objects.count(), 2)
+
+    def test_delivered_events_are_not_resent(self):
+        self.ev()
+        self.assertEqual(self.run_(), 1)
+        self.assertEqual(self.run_(), 0)
+        self.assertEqual(self.chat.call_count, 1)
+
+    def test_digested_events_are_not_sent(self):
+        e = self.ev()
+        e.digested_at = timezone.now()
+        e.save()
+        self.assertEqual(self.run_(), 0)
+
+    def test_hourly_cap(self):
+        for _ in range(12):
+            self.ev()
+        self.assertEqual(self.run_(), 10)
+        self.assertEqual(ChangeEvent.objects.filter(notified_at__isnull=True).count(), 2)
+        ChangeEvent.objects.exclude(notified_at__isnull=True).update(notified_at=timezone.now() - timedelta(minutes=30))
+        self.assertEqual(self.run_(), 0)
+        ChangeEvent.objects.exclude(notified_at__isnull=True).update(
+            notified_at=timezone.now() - timedelta(minutes=61))
+        self.assertEqual(self.run_(), 2)
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s3cr3t')
+    def test_webhook_signature_verifies(self):
+        self.ev()
+        self.run_()
+        (call,) = self.post.call_args_list
+        data, headers = call.kwargs['data'], call.kwargs['headers']
+        self.assertEqual(call.args[0], 'https://hook.test/x')
+        self.assertEqual(call.kwargs['timeout'], 5)
+        self.assertTrue(hmac.compare_digest(headers['X-Limes-Signature'], deliver.sign(data, 's3cr3t')))
+        self.assertEqual(headers['Content-Type'], 'application/json')
+        self.assertEqual(json.loads(data)['event'], 'issue_new')
+        self.assertNotIn('s3cr3t', data.decode())
+
+    @override_settings(ALERT_WEBHOOK_URL='http://hook.test/x', ALERT_WEBHOOK_SECRET='s')
+    def test_http_webhook_refused_by_default(self):
+        self.ev()
+        self.run_()
+        self.post.assert_not_called()
+        self.chat.assert_called_once()
+        self.ev()
+        with override_settings(ALERT_WEBHOOK_ALLOW_HTTP=True):
+            self.run_()
+        self.post.assert_called_once()
+
+    @override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET='s')
+    def test_webhook_failure_does_not_block_other_channels(self):
+        self.post.side_effect = requests.exceptions.ConnectTimeout()
+        e = self.ev()
+        self.assertEqual(self.run_(), 1)
+        self.chat.assert_called_once()
+        self.assertEqual(InAppNotification.objects.count(), 1)
+        e.refresh_from_db()
+        self.assertIsNotNone(e.notified_at)
+
+    def test_no_webhook_configured(self):
+        self.ev()
+        with override_settings(ALERT_WEBHOOK_URL='https://hook.test/x', ALERT_WEBHOOK_SECRET=''):
+            self.run_()
+        with override_settings(ALERT_WEBHOOK_URL='', ALERT_WEBHOOK_SECRET='s'):
+            self.ev()
+            self.run_()
+        self.post.assert_not_called()
