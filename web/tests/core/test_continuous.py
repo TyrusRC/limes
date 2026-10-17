@@ -50,6 +50,14 @@ class StartAsmScanTest(Base):
 
 
 class DueRootsTest(Base):
+    def test_project_filter_leaves_other_projects_out(self):
+        self.root('mine.com')
+        other = Project.objects.create(name='o', slug='o', insert_date=timezone.now())
+        Domain.objects.create(project=other, name='theirs.com', insert_date=timezone.now())
+        Asset.objects.create(project=other, kind='root_domain', value='theirs.com', scope_tier='owned_root', cadence_tier='standard')
+        self.assertEqual(sorted(self.due()), ['mine.com', 'theirs.com'])
+        self.assertEqual([a.value for a in continuous.due_roots(self.now, project=self.p)], ['mine.com'])
+
     def test_never_scanned_root_is_due(self):
         self.root('new.com')
         self.assertEqual(self.due(), ['new.com'])

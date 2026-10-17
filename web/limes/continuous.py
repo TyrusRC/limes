@@ -61,14 +61,16 @@ def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
     return True, f'ASM scan started for {asset.value}'
 
 
-def due_roots(now):
+def due_roots(now, project=None):
     """Owned roots whose cadence has elapsed and that have no scan in progress, most overdue first
-    (never-scanned first). Due-ness counts from the last scan's start, whatever its outcome, so a
-    failing root is retried once per interval, never every tick.
+    (never-scanned first), optionally limited to one project. Due-ness counts from the last scan's
+    start, whatever its outcome, so a failing root is retried once per interval, never every tick.
     NOTE: loads every candidate root each call; fine for hundreds. Upgrade: one annotated query."""
     due = []
-    for asset in Asset.objects.filter(kind='root_domain', scope_tier='owned_root',
-                                      cadence_tier__in=list(CADENCE_INTERVALS)).order_by('id'):
+    roots = Asset.objects.filter(kind='root_domain', scope_tier='owned_root', cadence_tier__in=list(CADENCE_INTERVALS))
+    if project is not None:
+        roots = roots.filter(project=project)
+    for asset in roots.order_by('id'):
         domain = Domain.objects.filter(project_id=asset.project_id, name=asset.value).first()
         if not domain:
             continue  # no scan target for this root: nothing to start
