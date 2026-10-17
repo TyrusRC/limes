@@ -1,5 +1,6 @@
 import datetime
 import functools
+import itertools
 import os
 import socket
 import ssl
@@ -575,3 +576,39 @@ class DeadlineSocketRealTest(SimpleTestCase):
                 mock.patch.object(late, 'timeout', side_effect=TimeoutError('host check deadline reached')):
             with self.assertRaises(requests.exceptions.Timeout):
                 get('http://h.example.com/')
+
+
+class LateDeadlineTest(SimpleTestCase):
+    """The deadline running out after the dial (before the request is sent, or mid-body) is a timeout ('error'),
+    never a connection error ('nothing listening'); a real refusal in time still is 'nothing listening'."""
+    def test_expiry_after_connect_or_mid_body_is_error(self):
+        from limes import safe_fetch
+        from limes.checks import collect
+        srv = _Server(body=b'x' * 200000, keep_alive=True)
+        self.addCleanup(srv.close)
+        url = f'http://good.test:{srv.port}/'
+        # clock reads: Deadline(), the pre-request check, the dial; the send is the first to see the deadline gone
+        ticks = itertools.chain([0, 0, 0], itertools.repeat(100))
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1', deadline=safe_fetch.Deadline(30, lambda: next(ticks)))
+        with self.assertRaises(requests.exceptions.Timeout):
+            get(url, timeout=5)
+        ticks = itertools.chain([0, 0, 0], itertools.repeat(100))
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1', deadline=safe_fetch.Deadline(30, lambda: next(ticks)))
+        self.assertEqual(collect._guard(lambda: get(url, timeout=5)), 'error')
+        clock = Clock()
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1', deadline=safe_fetch.Deadline(30, clock))
+        r = get(url, timeout=5, stream=True)
+        clock.t = 100  # gone between the headers and the body
+        with self.assertRaises(requests.exceptions.Timeout):
+            r.content
+        r.close()
+
+    def test_refusal_in_time_is_still_nothing_listening(self):
+        from limes import safe_fetch
+        from limes.checks import collect
+        s = socket.socket()
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()  # nothing listens there now
+        get = safe_fetch.pinned_get('good.test', '127.0.0.1', deadline=safe_fetch.Deadline(30, Clock()))
+        self.assertIsNone(collect._guard(lambda: get(f'http://good.test:{port}/', timeout=5)))

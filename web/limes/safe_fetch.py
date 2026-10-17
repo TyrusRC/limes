@@ -233,8 +233,33 @@ def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
         headers['Host'] = host if port is None else f'{host}:{port}'
         kw['allow_redirects'] = False  # callers follow same-host hops themselves (collect._fetch_https)
         pinned = urlunsplit((scheme, _netloc(ip, port), parts.path or '/', parts.query, ''))
-        return session.get(pinned, headers=headers, **kw)
+        try:
+            resp = session.get(pinned, headers=headers, **kw)
+        except requests.exceptions.RequestException as e:
+            raise _timeout_if_expired(e, deadline)
+        if hasattr(resp, 'iter_content'):  # a streamed body read later is held to the same rule
+            resp.iter_content = _guarded_iter(resp.iter_content, deadline)
+        return resp
     return get
+
+
+def _timeout_if_expired(exc, deadline):
+    """The deadline running out after the dial (on send, or mid-body) surfaces as a ConnectionError, which reads as
+    'nothing listening': report it as the Timeout it is. A failure while time is left is passed through."""
+    if deadline.expired() and not isinstance(exc, requests.exceptions.Timeout):
+        out = requests.exceptions.Timeout('host check deadline reached')
+        out.__cause__ = exc
+        return out
+    return exc
+
+
+def _guarded_iter(iter_content, deadline):
+    def guarded(*a, **kw):
+        try:
+            yield from iter_content(*a, **kw)
+        except requests.exceptions.RequestException as e:
+            raise _timeout_if_expired(e, deadline)
+    return guarded
 
 
 def pinned_tls_connect(ip, create_connection=socket.create_connection, context_factory=collect.tls_context, deadline=None):
