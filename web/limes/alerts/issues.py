@@ -21,7 +21,8 @@ def _event(project, kind, row, asset):
 
 def sync_issues(project, now=None):
     """Bring TrackedIssue in line with the current issues; return the events recorded.
-    The first sync for a project creates rows silently. An issue is fixed only if its asset is still assessed."""
+    The first sync for a project creates rows silently. A finding is fixed only if its asset is still assessed;
+    a check only when its own row is fresh and passing (error, not_applicable, stale or missing leave it open)."""
     now = now or timezone.now()
     with transaction.atomic():
         # locks the project's sync row so concurrent syncs serialize; created means first sync, which is silent
@@ -30,6 +31,7 @@ def sync_issues(project, now=None):
         issues, assessed = scoring.current_issues(project, now=now)
         rows = {(r.asset_id, r.key): r for r in TrackedIssue.objects.filter(project=project)}
         assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed)}
+        passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
         out = []
         for asset_id, keys in issues.items():
             asset = assets.get(asset_id)
@@ -54,7 +56,8 @@ def sync_issues(project, now=None):
                 if kind:
                     out.append(_event(project, kind, row, asset))
         for (asset_id, key), row in rows.items():
-            if row.status == 'open' and key not in issues.get(asset_id, {}) and asset_id in assessed and asset_id in assets:
+            gone = (asset_id, key) in passed if row.source == 'check' else asset_id in assessed
+            if row.status == 'open' and key not in issues.get(asset_id, {}) and gone and asset_id in assets:
                 row.status, row.fixed_at = 'fixed', now
                 row.save()
                 out.append(_event(project, 'issue_fixed', row, assets[asset_id]))
