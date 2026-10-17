@@ -17,7 +17,8 @@ SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
 
-__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck']
+__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
+           'TrackedIssue', 'ChangeEvent']
 
 
 class Tag(models.Model):
@@ -170,3 +171,37 @@ class RiskCheck(models.Model):
 
     class Meta:
         unique_together = ('asset', 'check_id')
+
+
+class TrackedIssue(models.Model):
+    """One issue (finding template or check id) on one asset, kept across scans so a change is seen once."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='tracked_issues')
+    key = models.CharField(max_length=255)
+    source = models.CharField(max_length=10)  # 'check' or 'finding'
+    severity = models.IntegerField()
+    status = models.CharField(max_length=8, default='open')  # open | fixed
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+    fixed_at = models.DateTimeField(null=True, blank=True)
+    reopened = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ('asset', 'key')
+
+
+class ChangeEvent(models.Model):
+    """A change worth telling someone about. Delivery state lives in notified_at / digested_at."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='change_events')
+    kind = models.CharField(max_length=32)
+    severity = models.IntegerField(null=True, blank=True)
+    asset = models.ForeignKey(Asset, null=True, blank=True, on_delete=models.SET_NULL)
+    title = models.CharField(max_length=300)
+    detail = models.JSONField(default=dict)
+    immediate = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    digested_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['project', 'created_at'])]
