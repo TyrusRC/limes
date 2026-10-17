@@ -873,6 +873,8 @@ class IssueList(APIView):
 		out = []
 		live = IssueWaiver.objects.filter(IssueWaiver.active_q(now))
 		live = live.select_related('created_by').order_by('-created_at', '-id')
+		# NOTE: loads every waiver an issue ever had, to read the newest one. Waivers are hand-made, so the history
+		# per issue stays small; if it grows, filter this to the newest per issue with a Subquery on OuterRef('issue_id').
 		latest = IssueWaiver.objects.select_related('created_by').order_by('-created_at', '-id')
 		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
 			Prefetch('waivers', queryset=live, to_attr='live_waivers'),

@@ -117,8 +117,7 @@ def _monitoring(project, now):
     from limes import continuous
     from startScan.models import ScanHistory
     scans = ScanHistory.objects.filter(domain__project=project)
-    # NOTE: due_roots spans every project; fine for hundreds of roots, cached for STATS_TTL
-    due = [a for a in continuous.due_roots(now) if a.project_id == project.id][:5]
+    due = continuous.due_roots(now, project=project)[:5]
     last_auto = scans.filter(initiated_by__isnull=True).order_by('-start_scan_date').values_list('start_scan_date', flat=True).first()
     last_scan = scans.order_by('-start_scan_date').values_list('start_scan_date', flat=True).first()
     return {'enabled': settings.CONTINUOUS_SCANS,
