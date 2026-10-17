@@ -5,8 +5,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from dashboard.models import Project
-from limes import waivers
-from startScan.models import Asset, TrackedIssue
+from limes import scoring, waivers
+from startScan.models import Asset, ScoreSnapshot, TrackedIssue, Vulnerability
+from tests.core.test_scoring import Base as ScoringBase
 
 
 class WaiverRulesTest(TestCase):
@@ -66,3 +67,70 @@ class WaiverRulesTest(TestCase):
         for bad in ('', '  ', 'x' * 5001):
             with self.assertRaises(waivers.WaiverError):
                 waivers.add_note(self.issue, self.u1, bad)
+
+
+class ScoreV3Test(ScoringBase):
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create(username='u')
+        self.scan_ = self.scan()
+        self.host_ = self.host('a.x.com')
+
+    def issue(self, key='t1', sev=3, asset=None):
+        return TrackedIssue.objects.create(project=self.p, asset=asset or self.host_, key=key, source='finding', severity=sev)
+
+    def test_waiver_excludes_penalty_from_adjusted_score_only(self):
+        self.vuln(self.scan_, self.host_, 3)
+        issue = self.issue()
+        s = scoring.project_score(self.p)
+        self.assertEqual((s['score'], s['raw_score']), (799, 799))
+        waivers.create_waiver(issue, 'accepted_risk', 'ok', self.user)
+        s = scoring.project_score(self.p)
+        self.assertEqual((s['score'], s['raw_score'], s['waived_count'], s['version']), (950, 799, 1, 'limes-score-v3'))
+        b = scoring.asset_breakdown(self.host_)
+        self.assertEqual(b['score'], 950)
+        self.assertTrue(b['penalties'][0]['waived'])
+
+    def test_waiver_expiry_restores_penalty_at_expires_at(self):
+        self.vuln(self.scan_, self.host_, 3)
+        exp = self.now + timedelta(days=5)
+        waivers.create_waiver(self.issue(), 'accepted_risk', 'ok', self.user, expires_at=exp, now=self.now)
+        self.assertEqual(scoring.project_score(self.p, now=exp - timedelta(seconds=1))['score'], 950)
+        self.assertEqual(scoring.project_score(self.p, now=exp)['score'], 799)
+
+    def test_false_positive_without_expiry_stays_waived(self):
+        self.vuln(self.scan_, self.host_, 3)
+        waivers.create_waiver(self.issue(), 'false_positive', 'fp', self.user)
+        self.assertEqual(scoring.project_score(self.p, now=self.now + timedelta(days=3000))['score'], 950)
+
+    def test_long_key_waiver_matches(self):
+        name = 'n' * 400
+        Vulnerability.objects.create(scan_history=self.scan_, asset=self.host_, name=name, template_id='',
+                                     severity=3, http_url='https://h/', open_status=True)
+        self.assertEqual(scoring.project_score(self.p)['score'], 799)
+        waivers.create_waiver(self.issue(key=scoring.issue_key(name)), 'accepted_risk', 'ok', self.user)
+        self.assertEqual(scoring.project_score(self.p)['score'], 950)
+
+    def test_forecast(self):
+        self.vuln(self.scan_, self.host_, 3, template='t1')
+        self.vuln(self.scan_, self.host_, 2, template='t2')
+        high, med = self.issue('t1', 3), self.issue('t2', 2)
+        cur = scoring.project_score(self.p)['score']
+        self.assertEqual(cur, 799)
+        f = scoring.forecast(self.p, [high.id])
+        self.assertEqual((f['score'], f['delta'], f['grade']), (925, 925 - cur, 'A'))
+        other = Project.objects.create(name='o', slug='o', insert_date=timezone.now())
+        foreign = TrackedIssue.objects.create(project=other, asset=Asset.objects.create(
+            project=other, kind='hostname', value='b.o.com', scope_tier='owned_host'), key='t1', source='finding', severity=3)
+        self.assertEqual(scoring.forecast(self.p, [999999, foreign.id])['delta'], 0)
+        waivers.create_waiver(high, 'accepted_risk', 'ok', self.user)
+        cur = scoring.project_score(self.p)['score']
+        self.assertEqual(scoring.forecast(self.p, [high.id])['delta'], 0)
+        self.assertEqual(scoring.forecast(self.p, [med.id, high.id])['delta'], 950 - cur)
+
+    def test_snapshot_stores_raw_score(self):
+        self.vuln(self.scan_, self.host_, 3)
+        waivers.create_waiver(self.issue(), 'accepted_risk', 'ok', self.user)
+        scoring.snapshot_scores()
+        snap = ScoreSnapshot.objects.get(project=self.p)
+        self.assertEqual((snap.score, snap.raw_score), (950, 799))
