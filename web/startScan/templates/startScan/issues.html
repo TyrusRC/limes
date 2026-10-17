@@ -5,48 +5,124 @@
 Issues
 {% endblock title %}
 
+{% block page_title %}Issues{% endblock page_title %}
+
 {% block main_content %}
-<div class="row justify-content-center">
-  <div class="col-12">
-    <div class="card">
-      <div class="card-body">
-        <h4 class="header-title mb-3">Issues</h4>
-        <div id="issue_score" class="mb-3"></div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-4">
-            <select id="f_severity" class="form-select form-select-sm">
-              <option value="">All severities</option>
-              <option value="4">critical</option><option value="3">high</option><option value="2">medium</option><option value="1">low</option>
-            </select>
-          </div>
-          <div class="col-md-4">
-            <select id="f_source" class="form-select form-select-sm">
-              <option value="">All sources</option>
-              <option>check</option><option>finding</option>
-            </select>
-          </div>
-          <div class="col-md-4">
-            <select id="f_waived" class="form-select form-select-sm">
-              <option value="">Waived and not waived</option>
-              <option value="true">Waived</option><option value="false">Not waived</option>
-            </select>
+{% with can_write=user|can:'modify_targets' %}
+<p class="l-page-sub" id="issue_score" aria-live="polite"></p>
+
+<section class="card" aria-label="Filters">
+  <div class="l-filter-bar">
+    <div class="l-field">
+      <label for="f_severity">Severity</label>
+      <select id="f_severity" class="form-select">
+        <option value="">All severities</option>
+        <option value="4">Critical</option><option value="3">High</option><option value="2">Medium</option><option value="1">Low</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_source">Source</label>
+      <select id="f_source" class="form-select">
+        <option value="">Findings and checks</option>
+        <option value="finding">Findings only</option><option value="check">Checks only</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_waived">Waiver status</label>
+      <select id="f_waived" class="form-select">
+        <option value="">Waived and not waived</option>
+        <option value="false">Not waived</option><option value="true">Waived</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<div class="l-banner" id="issue_forecast" role="status" aria-live="polite" hidden>
+  <span class="l-banner-icon" aria-hidden="true"><i class="fe-trending-up"></i></span>
+  <div class="l-banner-text">
+    <strong>Forecast if fixed: <span id="fc_score"></span> (<span id="fc_grade"></span>), <span class="l-banner-gain" id="fc_delta"></span></strong>
+    <div><span id="fc_count"></span><span id="fc_current"></span></div>
+  </div>
+  <div class="l-banner-actions">
+    <button class="btn btn-ghost" type="button" id="fc_clear">Clear selection</button>
+  </div>
+</div>
+
+<section class="card l-table-card" aria-label="Issue list">
+  <table id="issue_results" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}">
+    <thead>
+      <tr>
+        <th class="l-col-check"><input type="checkbox" class="form-check-input" id="issue_pick_all" aria-label="Select all issues on this page"></th>
+        <th>Asset</th><th>Issue</th><th>Severity</th><th>Source</th><th>First seen</th><th>Status</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<div class="modal fade" id="issue_modal" tabindex="-1" aria-labelledby="im_title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable l-issue-dialog">
+    <div class="modal-content">
+      <div class="modal-header align-items-start">
+        <div class="l-modal-head">
+          <h2 class="modal-title" id="im_title"></h2>
+          <div class="l-meta-row">
+            <span id="im_sev"></span>
+            <span class="mono" id="im_asset"></span>
+            <span id="im_source"></span>
+            <span>First seen <span id="im_first"></span></span>
           </div>
         </div>
-        <div id="issue_forecast" class="alert alert-info py-2 mb-3" style="display:none"></div>
-        <div class="table-responsive">
-        <table id="issue_results" class="table table-hover table-striped w-100" data-project="{{ current_project.slug }}" data-can-write="{% if user|can:'modify_targets' %}1{% else %}0{% endif %}">
-          <thead>
-            <tr>
-              <th></th><th>Asset</th><th>Issue</th><th>Severity</th><th>Source</th><th>First seen</th><th>Waiver</th><th>Notes</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body l-issue-body">
+        <div class="l-issue-col">
+          <h3 class="l-section-title">Current waiver</h3>
+          <div id="im_waiver"></div>
+          {% if can_write %}
+          <hr class="l-divider">
+          <form class="l-issue-form" id="issue_waive_form" novalidate>
+            <h3 class="l-section-title" id="im_form_title">Waive</h3>
+            <div class="l-form-row">
+              <div class="l-field">
+                <label for="issue_kind">Kind</label>
+                <select id="issue_kind" class="form-select"><option value="accepted_risk">Accepted risk</option><option value="false_positive">False positive</option></select>
+              </div>
+              <div class="l-field">
+                <label for="issue_expiry">Expires on</label>
+                <input type="date" id="issue_expiry" class="form-control" aria-describedby="issue_expiry_hint">
+              </div>
+            </div>
+            <div class="l-field">
+              <label for="issue_reason">Reason</label>
+              <textarea id="issue_reason" class="form-control" rows="3" maxlength="5000" required placeholder="Why is this acceptable? Required."></textarea>
+              <span class="l-hint" id="issue_expiry_hint">Accepted risk needs an expiry within 12 months. A false positive stays open-ended unless you pick a date.</span>
+            </div>
+            <div class="l-form-actions">
+              <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancel</button>
+              <button class="btn btn-primary" type="submit" id="issue_waive">Save waiver</button>
+            </div>
+          </form>
+          {% else %}
+          <p class="l-hint mb-0">You can view issues but not change them.</p>
+          {% endif %}
+        </div>
+        <div class="l-issue-col">
+          <h3 class="l-section-title">Notes <span class="l-muted" id="im_note_count"></span></h3>
+          <ul class="l-notes" id="issue_notes"></ul>
+          {% if can_write %}
+          <form class="l-field" id="issue_note_form" novalidate>
+            <label for="issue_note_text">Add a note</label>
+            <textarea id="issue_note_text" class="form-control" rows="3" maxlength="5000" placeholder="Context for your team. Visible to everyone on this project."></textarea>
+            <div class="l-form-actions"><button class="btn btn-light" type="submit" id="issue_note_add"><i class="fe-message-square" aria-hidden="true"></i>Add note</button></div>
+          </form>
+          {% endif %}
         </div>
       </div>
     </div>
   </div>
 </div>
+{% endwith %}
 {% endblock main_content %}
 
 {% block page_level_script %}

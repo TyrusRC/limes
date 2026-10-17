@@ -22,14 +22,14 @@ Limes Settings
   <div class="col-12">
     <div class="card">
       <div class="card-body">
-        <h4 class="header-title text-danger">Danger Zone</h4>
+        <h4 class="header-title">Disk usage</h4>
         <div id="chart">
         </div>
         <div class="text-center">
           Total Storage: <b>{{total}} Gb</b> Used Space: <b>{{used}} Gb</b> Free Space: <b>{{free}} Gb</b>
         </div>
         <div class="">
-          <h4 class="header-title text-danger">Danger Zone</h4>
+          <h4 class="header-title text-danger mt-4">Danger Zone</h4>
           <div class="widget-content widget-content-area" style="border:1px solid #e7515a;">
             <div class="row ms-2 me-2">
               <div class="col-xl-9 col-lg-9 col-md-6 col-sm-6 col-12 mt-2">
@@ -86,7 +86,7 @@ $(document).ready(function(){
         hollow: {
           margin: 0,
           size: "70%",
-          background: "#293450"
+          background: "transparent"
         },
         track: {
           dropShadow: {
