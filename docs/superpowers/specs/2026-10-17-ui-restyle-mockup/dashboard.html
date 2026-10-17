@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · Limes</title>
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-net" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="m12 12 6-6"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m22 17-8.5-8.5-5 5L2 7"/><path d="M16 17h6v-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+</svg>
+
+<div class="app">
+  <nav class="sidenav" aria-label="Primary">
+    <a class="sidenav-brand" href="dashboard.html" aria-label="Limes home">
+      <img class="logo-light" src="wordmark-light.svg" alt="Limes">
+      <img class="logo-dark" src="wordmark-dark.svg" alt="Limes">
+    </a>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="dashboard.html" aria-current="page"><svg class="icon"><use href="#i-dash"/></svg>Overview</a></li>
+      <li><a class="nav-link" href="issues.html" ><svg class="icon"><use href="#i-alert"/></svg>Issues<span class="nav-count">145</span></a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-globe"/></svg>Domains</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-net"/></svg>IP addresses</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-server"/></svg>Services</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-lock"/></svg>Certificates</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-pulse"/></svg>Changes</a></li>
+    </ul>
+    <div class="nav-section">Operate</div>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-radar"/></svg>Scans</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-file"/></svg>Reports</a></li>
+      <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-bell"/></svg>Alerts</a></li>
+    </ul>
+    <div class="sidenav-foot">
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-gear"/></svg>Settings</a></li>
+        <li><a class="nav-link" href="#"><svg class="icon"><use href="#i-help"/></svg>Help</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <button class="project-switch" type="button" aria-haspopup="listbox" aria-label="Switch project, current: Example Corp">
+        <span class="project-avatar" aria-hidden="true">EX</span>
+        Example Corp <span class="muted">example.com</span>
+        <svg class="icon icon-sm muted"><use href="#i-chev"/></svg>
+      </button>
+      <form class="search" role="search" onsubmit="return false">
+        <label class="sr-only" for="q">Search</label>
+        <svg class="icon icon-sm"><use href="#i-search"/></svg>
+        <input id="q" type="search" placeholder="Search assets, issues, IPs, CVEs">
+        <span class="kbd" aria-hidden="true">/</span>
+      </form>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost btn-icon" type="button" id="theme-toggle" aria-label="Switch to dark theme" aria-pressed="false">
+          <svg class="icon theme-moon"><use href="#i-moon"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-icon" type="button" aria-label="Notifications"><svg class="icon"><use href="#i-bell"/></svg></button>
+        <span class="avatar" role="img" aria-label="Signed in as Jordan Smith">JS</span>
+      </div>
+    </header>
+
+    <main class="content" id="main">
+      <div class="page-head">
+        <div>
+          <h1>Overview</h1>
+          <p class="page-sub"><span>Example Corp</span><span class="dot-sep"></span><span>Last scan 2 hours ago</span><span class="dot-sep"></span><span>Scoring model limes-score-v3</span></p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" type="button"><svg class="icon icon-sm"><use href="#i-dl"/></svg>Export report</button>
+          <button class="btn btn-primary" type="button"><svg class="icon icon-sm"><use href="#i-play"/></svg>Run scan</button>
+        </div>
+      </div>
+
+      <div class="grid-12">
+        <!-- Score -->
+        <section class="card span-3 score-card" aria-labelledby="h-score">
+          <div class="card-head"><h2 id="h-score">Security score</h2><span class="meta">of 950</span></div>
+          <div class="card-body">
+            <div class="gauge" role="img" aria-label="Score 749 out of 950, grade B">
+              <svg viewBox="0 0 196 196" aria-hidden="true">
+                <g transform="rotate(135 98 98)" fill="none" stroke-width="14" stroke-linecap="round">
+                  <circle class="gauge-track" cx="98" cy="98" r="84" stroke-dasharray="395.8 527.8"/>
+                  <circle class="gauge-value" cx="98" cy="98" r="84" stroke-dasharray="312.1 527.8"/>
+                </g>
+              </svg>
+              <div class="gauge-center"><span class="gauge-score num">749</span><span class="gauge-max">headline score</span></div>
+              <div class="gauge-ends" aria-hidden="true"><span>0</span><span>950</span></div>
+            </div>
+            <div class="score-meta">
+              <span class="grade grade-lg" aria-hidden="true">B</span>
+              <div class="score-meta-text"><strong>Grade B</strong><span class="muted">650–799 · 51 points to A</span></div>
+            </div>
+            <div class="score-raw">
+              <span>Raw <strong class="num">690</strong> before waivers</span>
+              <a href="issues.html">14 waived</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trend -->
+        <section class="card span-6" aria-labelledby="h-trend">
+          <div class="card-head">
+            <div class="trend-head"><h2 id="h-trend">Score trend</h2><span class="meta">Last 30 days</span></div>
+            <span class="delta delta-up"><svg class="icon" style="width:12px;height:12px"><use href="#i-up"/></svg>+21 since Sep 17</span>
+          </div>
+          <div class="card-body">
+            <svg class="chart" viewBox="0 0 640 262" role="img" aria-label="Score rose from 728 to 749 over 30 days, with a drop to 731 on Oct 12">
+              <g class="axis" text-anchor="end">
+                <text x="26" y="14.0">775</text><text x="26" y="87.3">750</text><text x="26" y="160.7">725</text><text x="26" y="234.0">700</text>
+              </g>
+              <g transform="translate(34 10)">
+                <line class="grid" x1="0" x2="600" y1="0.0" y2="0.0"/><line class="grid" x1="0" x2="600" y1="73.3" y2="73.3"/><line class="grid" x1="0" x2="600" y1="146.7" y2="146.7"/><line class="grid" x1="0" x2="600" y1="220.0" y2="220.0"/>
+                <polygon class="area" points="6.0,137.9 26.3,137.9 46.6,129.1 66.8,132.0 87.1,123.2 107.4,123.2 127.7,117.3 147.9,134.9 168.2,149.6 188.5,149.6 208.8,143.7 229.0,132.0 249.3,120.3 269.6,120.3 289.9,111.5 310.1,99.7 330.4,99.7 350.7,105.6 371.0,90.9 391.2,85.1 411.5,85.1 431.8,79.2 452.1,67.5 472.3,67.5 492.6,108.5 512.9,129.1 533.2,114.4 553.4,96.8 573.7,85.1 594.0,76.3 594,220 6,220"/>
+                <line class="event" x1="492.6" x2="492.6" y1="0" y2="220"/>
+                <polyline class="line" points="6.0,137.9 26.3,137.9 46.6,129.1 66.8,132.0 87.1,123.2 107.4,123.2 127.7,117.3 147.9,134.9 168.2,149.6 188.5,149.6 208.8,143.7 229.0,132.0 249.3,120.3 269.6,120.3 289.9,111.5 310.1,99.7 330.4,99.7 350.7,105.6 371.0,90.9 391.2,85.1 411.5,85.1 431.8,79.2 452.1,67.5 472.3,67.5 492.6,108.5 512.9,129.1 533.2,114.4 553.4,96.8 573.7,85.1 594.0,76.3"/>
+                <circle class="event-dot" cx="492.6" cy="108.5" r="4"/>
+                <circle class="marker" cx="594" cy="76.3" r="4.5"/>
+              </g>
+              <g class="axis" text-anchor="middle">
+                <text x="40" y="256">Sep 17</text><text x="180" y="256">Sep 24</text><text x="322" y="256">Oct 1</text><text x="464" y="256">Oct 8</text><text x="610" y="256">Oct 16</text>
+              </g>
+            </svg>
+            <div class="chart-legend"><span><i class="swatch"></i>Headline score</span><span><i class="swatch-event"></i>Oct 12 · −14 after new critical on vpn.example.com</span></div>
+          </div>
+        </section>
+
+        <!-- Attack surface -->
+        <section class="card span-3 card-fill" aria-labelledby="h-surface">
+          <div class="card-head"><h2 id="h-surface">Attack surface</h2><a class="meta" href="#">View all</a></div>
+          <div class="stat-grid" style="margin-top:var(--space-4)">
+            <div class="stat"><div class="stat-label"><svg class="icon icon-sm"><use href="#i-globe"/></svg>Domains</div><div class="stat-value num">48</div><div class="stat-delta"><span class="up">+2</span> this week</div></div>
+            <div class="stat"><div class="stat-label"><svg class="icon icon-sm"><use href="#i-net"/></svg>IP addresses</div><div class="stat-value num">112</div><div class="stat-delta">no change</div></div>
+            <div class="stat"><div class="stat-label"><svg class="icon icon-sm"><use href="#i-server"/></svg>Services</div><div class="stat-value num">236</div><div class="stat-delta"><span class="up">+5</span> this week</div></div>
+            <div class="stat"><div class="stat-label"><svg class="icon icon-sm"><use href="#i-lock"/></svg>Certificates</div><div class="stat-value num">61</div><div class="stat-delta">3 expiring soon</div></div>
+          </div>
+        </section>
+
+        <!-- Severity -->
+        <section class="card span-12" aria-labelledby="h-sev">
+          <h2 class="sr-only" id="h-sev">Open issues by severity</h2>
+          <div class="sev-strip">
+            <a class="sev-tile" href="issues.html"><div class="sev-tile-top"><span class="pill pill-critical">Critical</span><span class="sev-tile-sub">+1 this week</span></div><div class="sev-tile-count num">3</div><div class="sev-bar"><span class="bg-critical" style="width:5%"></span></div></a>
+            <a class="sev-tile" href="issues.html"><div class="sev-tile-top"><span class="pill pill-high">High</span><span class="sev-tile-sub">−2 this week</span></div><div class="sev-tile-count num">11</div><div class="sev-bar"><span class="bg-high" style="width:19%"></span></div></a>
+            <a class="sev-tile" href="issues.html"><div class="sev-tile-top"><span class="pill pill-medium">Medium</span><span class="sev-tile-sub">no change</span></div><div class="sev-tile-count num">27</div><div class="sev-bar"><span class="bg-medium" style="width:47%"></span></div></a>
+            <a class="sev-tile" href="issues.html"><div class="sev-tile-top"><span class="pill pill-low">Low</span><span class="sev-tile-sub">+4 this week</span></div><div class="sev-tile-count num">46</div><div class="sev-bar"><span class="bg-low" style="width:79%"></span></div></a>
+            <a class="sev-tile" href="issues.html"><div class="sev-tile-top"><span class="pill pill-info">Info</span><span class="sev-tile-sub">+1 this week</span></div><div class="sev-tile-count num">58</div><div class="sev-bar"><span class="bg-info" style="width:100%"></span></div></a>
+          </div>
+        </section>
+
+        <!-- Risky assets -->
+        <section class="card span-8" aria-labelledby="h-assets">
+          <div class="card-head"><h2 id="h-assets">Riskiest assets</h2><a class="meta" href="#">All assets</a></div>
+          <div class="card-flush table-wrap">
+            <table class="table">
+              <thead><tr><th scope="col">Asset</th><th scope="col">Type</th><th scope="col">Score</th><th scope="col">Open issues <span class="muted">(C · H · M · L)</span></th><th scope="col">Last seen</th></tr></thead>
+              <tbody>
+                <tr><td><div class="cell-asset"><a href="#">vpn.example.com</a><span class="sub mono">203.0.113.24</span></div></td><td><span class="tag">Domain</span></td><td><div class="cell-score"><span class="grade grade-sm grade-d">D</span><span class="num">412</span></div></td><td><span class="sev-counts"><span class="sev-count c">2</span><span class="sev-count h">3</span><span class="sev-count m">1</span><span class="sev-count zero">0</span></span></td><td class="muted">2 hours ago</td></tr>
+                <tr><td><div class="cell-asset"><a class="mono" href="#">203.0.113.57</a><span class="sub">ssh · rdp · 2 open ports</span></div></td><td><span class="tag">IP</span></td><td><div class="cell-score"><span class="grade grade-sm grade-d">D</span><span class="num">455</span></div></td><td><span class="sev-counts"><span class="sev-count c">1</span><span class="sev-count h">2</span><span class="sev-count m">4</span><span class="sev-count l">1</span></span></td><td class="muted">2 hours ago</td></tr>
+                <tr><td><div class="cell-asset"><a href="#">legacy.example.org</a><span class="sub mono">203.0.113.90</span></div></td><td><span class="tag">Domain</span></td><td><div class="cell-score"><span class="grade grade-sm grade-c">C</span><span class="num">538</span></div></td><td><span class="sev-counts"><span class="sev-count zero">0</span><span class="sev-count h">3</span><span class="sev-count m">5</span><span class="sev-count l">2</span></span></td><td class="muted">Yesterday</td></tr>
+                <tr><td><div class="cell-asset"><a href="#">mail.example.com</a><span class="sub mono">203.0.113.31</span></div></td><td><span class="tag">Domain</span></td><td><div class="cell-score"><span class="grade grade-sm grade-c">C</span><span class="num">602</span></div></td><td><span class="sev-counts"><span class="sev-count zero">0</span><span class="sev-count h">1</span><span class="sev-count m">4</span><span class="sev-count l">3</span></span></td><td class="muted">2 hours ago</td></tr>
+                <tr><td><div class="cell-asset"><a href="#">api.example.com</a><span class="sub mono">203.0.113.40</span></div></td><td><span class="tag">Domain</span></td><td><div class="cell-score"><span class="grade grade-sm">B</span><span class="num">688</span></div></td><td><span class="sev-counts"><span class="sev-count zero">0</span><span class="sev-count h">1</span><span class="sev-count m">2</span><span class="sev-count l">4</span></span></td><td class="muted">2 hours ago</td></tr>
+                <tr><td><div class="cell-asset"><a href="#">shop.example.com</a><span class="sub mono">203.0.113.44</span></div></td><td><span class="tag">Domain</span></td><td><div class="cell-score"><span class="grade grade-sm">B</span><span class="num">701</span></div></td><td><span class="sev-counts"><span class="sev-count zero">0</span><span class="sev-count zero">0</span><span class="sev-count m">3</span><span class="sev-count l">5</span></span></td><td class="muted">3 days ago</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Changes -->
+        <section class="card span-4" aria-labelledby="h-changes">
+          <div class="card-head"><h2 id="h-changes">Recent changes</h2><a class="meta" href="#">All changes</a></div>
+          <ul class="feed card-flush">
+            <li><span class="feed-icon fi-new" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span><div><div class="feed-title">New critical issue: RDP exposed on <span class="mono">203.0.113.57</span></div><div class="feed-sub">issue_new · check open-port-risk</div></div><span class="feed-time">2h</span></li>
+            <li><span class="feed-icon fi-fixed" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span><div><div class="feed-title">Fixed: TLS 1.0 enabled on mail.example.com</div><div class="feed-sub">issue_fixed · +9 points</div></div><span class="feed-time">5h</span></li>
+            <li><span class="feed-icon fi-expired" aria-hidden="true"><svg class="icon"><use href="#i-clock"/></svg></span><div><div class="feed-title">Waiver expired: no DMARC policy on example.org</div><div class="feed-sub">waiver_expired · accepted risk ended Oct 14</div></div><span class="feed-time">3d</span></li>
+            <li><span class="feed-icon fi-drop" aria-hidden="true"><svg class="icon"><use href="#i-down"/></svg></span><div><div class="feed-title">Score dropped 752 → 738 (−14)</div><div class="feed-sub">score_dropped · scan #418</div></div><span class="feed-time">5d</span></li>
+            <li><span class="feed-icon fi-fixed" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span><div><div class="feed-title">Fixed: nginx 1.18 version disclosure on shop.example.com</div><div class="feed-sub">issue_fixed · +3 points</div></div><span class="feed-time">6d</span></li>
+          </ul>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle'), use = btn.querySelector('use');
+  function apply(t) {
+    var dark = t === 'dark';
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+    btn.setAttribute('aria-pressed', String(dark));
+    btn.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    use.setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('limes-theme'); } catch (e) {}
+  apply(new URLSearchParams(location.search).get('theme') || saved || 'light');
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(next);
+    try { localStorage.setItem('limes-theme', next); } catch (e) {}
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -4,60 +4,71 @@
 Assets
 {% endblock title %}
 
+{% block page_title %}Assets{% endblock page_title %}
+
 {% block main_content %}
-<div class="row justify-content-center">
-  <div class="col-12">
-    <div class="card">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="header-title mb-0">Assets</h4>
-          <button type="button" class="btn btn-primary btn-sm" onclick="show_add_asset_modal()">Add assets</button>
-        </div>
-        <div id="asset_score" class="mb-3"></div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-3">
-            <select id="f_kind" class="form-select form-select-sm">
-              <option value="">All kinds</option>
-              <option>root_domain</option><option>hostname</option><option>ip</option><option>cidr</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <select id="f_scope_tier" class="form-select form-select-sm">
-              <option value="">All scope tiers</option>
-              <option>owned_root</option><option>owned_host</option><option>co_brand</option><option>candidate</option><option>rejected</option><option>dependency</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <select id="f_state" class="form-select form-select-sm">
-              <option value="">All states</option>
-              <option>active</option><option>missing</option><option>stale</option><option>retired</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <input type="text" id="f_tag" class="form-control form-control-sm" placeholder="Tag">
-          </div>
-          <div class="col-md-12">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="f_show_low">
-              <label class="form-check-label" for="f_show_low">Show low-confidence candidates</label>
-            </div>
-          </div>
-        </div>
-        <div class="table-responsive">
-        <table id="asset_results" class="table table-hover table-striped w-100" data-project="{{ current_project.slug }}">
-          <thead>
-            <tr>
-              <th>Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
-              <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        </div>
+<div class="l-page-bar">
+  <p class="l-page-sub" id="asset_score" aria-live="polite"></p>
+  <button type="button" class="btn btn-primary" onclick="show_add_asset_modal()"><i class="fe-plus" aria-hidden="true"></i>Add assets</button>
+</div>
+
+<section class="card" id="asset_penalties" aria-labelledby="h_penalties" hidden>
+  <div class="card-header"><h2 class="card-title mb-0" id="h_penalties">Top penalties</h2></div>
+  <div class="table-responsive">
+    <table class="table mb-0">
+      <thead><tr><th>Asset</th><th>Issue</th><th>Severity</th><th>Points</th></tr></thead>
+      <tbody id="asset_penalty_rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" aria-label="Filters">
+  <div class="l-filter-bar">
+    <div class="l-field">
+      <label for="f_kind">Kind</label>
+      <select id="f_kind" class="form-select">
+        <option value="">All kinds</option>
+        <option value="root_domain">Root domain</option><option value="hostname">Hostname</option><option value="ip">IP address</option><option value="cidr">CIDR</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_scope_tier">Scope tier</label>
+      <select id="f_scope_tier" class="form-select">
+        <option value="">All scope tiers</option>
+        <option value="owned_root">Owned root</option><option value="owned_host">Owned host</option><option value="co_brand">Co-brand</option><option value="candidate">Candidate</option><option value="rejected">Rejected</option><option value="dependency">Dependency</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_state">State</label>
+      <select id="f_state" class="form-select">
+        <option value="">All states</option>
+        <option value="active">Active</option><option value="missing">Missing</option><option value="stale">Stale</option><option value="retired">Retired</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="f_tag">Tag</label>
+      <input type="text" id="f_tag" class="form-control" placeholder="Any tag">
+    </div>
+    <div class="l-field l-field-check">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="f_show_low">
+        <label class="form-check-label" for="f_show_low">Show low-confidence candidates</label>
       </div>
     </div>
   </div>
-</div>
+</section>
+
+<section class="card l-table-card" aria-label="Asset list">
+  <table id="asset_results" class="table table-hover w-100" data-project="{{ current_project.slug }}">
+    <thead>
+      <tr>
+        <th>Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
+        <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
 {% endblock main_content %}
 
 {% block page_level_script %}
@@ -86,23 +97,29 @@ $(document).ready(function() {
     serverSide: true,
     processing: true,
     stripeClasses: [],
+    autoWidth: false,
+    dom: "<'l-dt-bar'if><'table-responsive't><'l-dt-bar l-dt-foot'lp>",
+    language: {info: 'Showing _START_\u2013_END_ of _TOTAL_', infoEmpty: 'No assets', search: '', searchPlaceholder: 'Filter this list'},
     ajax: { url: assetUrl() },
     columns: [
-      {data: 'value', render: function(d, t, row) {
-        return '<a href="#" onclick="get_asset_modal(' + Number(row.id) + ');return false;">' + esc(d) + '</a>';
+      {data: 'value', className: 'l-col-wide', render: function(d, t, row) {
+        var mono = row.kind === 'ip' || row.kind === 'cidr' ? ' mono' : '';
+        return '<button type="button" class="l-link-btn asset_open' + mono + '" data-id="' + Number(row.id) + '">' + esc(d) + '</button>';
       }},
-      {data: 'kind', render: esc}, {data: 'scope_tier', render: esc}, {data: 'state', render: esc},
+      {data: 'kind', className: 'text-nowrap', render: esc}, {data: 'scope_tier', className: 'text-nowrap', render: esc}, {data: 'state', render: esc},
       {data: 'http_status', defaultContent: ''},
       {data: 'page_title', render: function(d) { return esc(d || ''); }},
       {data: 'technologies', orderable: false, render: join},
       {data: 'ip_addresses', orderable: false, render: join},
-      {data: 'last_seen', render: esc},
+      {data: 'last_seen', className: 'text-nowrap', render: function(d) { return esc(String(d || '').slice(0, 16).replace('T', ' ')); }},
       {data: 'tags', orderable: false, render: join},
       {data: 'confidence', render: function(d) { return d === null || d === undefined ? '' : esc(Number(d).toFixed(2)); }},
-      {data: 'id', orderable: false, searchable: false, render: function(d, t, row) { return asset_actions(row); }}
+      {data: 'id', orderable: false, searchable: false, className: 'l-col-actions', render: function(d, t, row) { return asset_actions(row); }}
     ],
     order: [[8, 'desc']]
   });
+  $('#asset_results_filter input').attr('aria-label', 'Filter this list');
+  $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });
   ['kind', 'scope_tier', 'state', 'tag'].forEach(function(k) {
     document.getElementById('f_' + k).addEventListener('change', function() {

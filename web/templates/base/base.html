@@ -7,92 +7,51 @@
     <title>{% block title %} {% endblock title %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <link rel="icon" type="image/svg+xml" href="/staticfiles/img/logo.svg">
     <link rel="shortcut icon" href="/staticfiles/img/favicon.png">
+    <script src="{% static 'limes/theme.js' %}"></script>
     <link href="{% static 'bootstrap/bootstrap.min.css' %}" rel="stylesheet" type="text/css" id="bootstrap-stylesheet" />
-    <link href="{% static 'assets/css/app.min.css' %}" rel="stylesheet" type="text/css" id="main-stylesheet" />
-    <link href="{% static 'bootstrap/bootstrap-dark.min.css' %}" rel="stylesheet" type="text/css" id="bootstrap-dark-stylesheet" />
-    <link href="{% static 'assets/css/app-dark.min.css' %}" rel="stylesheet" type="text/css" id="main-dark-stylesheet" />
     <link href="{% static 'assets/css/icons.min.css' %}" rel="stylesheet" type="text/css" />
     <link href="{% static 'plugins/snackbar/snackbar.min.css' %}" rel="stylesheet" type="text/css" />
     <link href="{% static 'plugins/sweetalert2/sweetalert2.min.css' %}" rel="stylesheet" type="text/css" />
     <link href="{% static 'plugins/switches/switches.min.css' %}" rel="stylesheet" type="text/css" />
-    <link href="{% static 'custom/custom.css' %}" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
     <link rel="stylesheet" type="text/css" href="{% static 'plugins/datatable/global.css' %}">
     <link href="https://cdn.datatables.net/rowgroup/1.4.0/css/rowGroup.dataTables.min.css" rel="stylesheet" type="text/css" />
-    <style media="screen">
-      @font-face {
-        font-family: "Cerebri Sans,sans-serif";
-        src: url("{% static 'fonts/cerebrisans-light.eot' %}");
-        src: local("Cerebri-sans Light"), url("{% static 'fonts/cerebrisans-light.woff' %}") format("woff");
-        font-weight: 300; }
-
-      @font-face {
-        font-family: "Cerebri Sans,sans-serif";
-        src: url("{% static 'fonts/cerebrisans-regular.eot' %}");
-        src: local("Cerebri-sans Regular"), url("{% static 'fonts/cerebrisans-regular.woff' %}") format("woff");
-        font-weight: 400; }
-
-      @font-face {
-        font-family: "Cerebri Sans,sans-serif";
-        src: url("{% static 'fonts/cerebrisans-medium.eot' %}");
-        src: local("Cerebri-sans Medium"), url("{% static 'fonts/cerebrisans-medium.woff' %}") format("woff");
-        font-weight: 500; }
-
-      @font-face {
-        font-family: "Cerebri Sans,sans-serif";
-        src: url("{% static 'fonts/cerebrisans-semibold.eot' %}");
-        src: local("Cerebri-sans Semibold"), url("{% static 'fonts/cerebrisans-semibold.woff' %}") format("woff");
-        font-weight: 600; }
-
-      @font-face {
-        font-family: "Cerebri Sans,sans-serif";
-        src: url("{% static 'fonts/cerebrisans-bold.eot' %}");
-        src: local("Cerebri-sans Bold"), url("{% static 'fonts/cerebrisans-bold.woff' %}") format("woff");
-        font-weight: 700; }
-    </style>
+    <link href="{% static 'limes/limes.css' %}" rel="stylesheet" type="text/css" />
+    <link href="{% static 'custom/custom.css' %}" rel="stylesheet" type="text/css" />
     <!-- load any page wise jquery or stylesheet -->
     {% block custom_js_css_link %}
     {% endblock custom_js_css_link %}
   </head>
 
-  <body class="loading" data-layout-mode="horizontal" data-limes-version="{{ LIMES_CURRENT_VERSION }}" data-current-project="{{ current_project.slug }}">
-    <!-- Topbar begins -->
-    {% include 'base/_items/top_bar.html' %}
-    {# topbar ends #}
-    <div id="wrapper"></div>
-      {# top nav begins #}
-      {% include 'base/_items/top_nav.html' %}
-      {# top nav ends #}
-      <input type="hidden" name="current_project" value="{{current_project.slug}}">
-      <div class="content-page">
-        <div class="content">
-          <div class="container-fluid">
-            <div class="row">
-              <div class="col-12">
-                <div class="page-title-box">
-                  <div class="page-title-right">
-                    <ol class="breadcrumb m-0">
-                      {% block breadcrumb_title %}
-                      {% endblock breadcrumb_title %}
-                    </ol>
-                  </div>
-                  <h4 class="page-title">{% block page_title %}{% endblock page_title %}</h4>
-                </div>
-              </div>
+  <body data-limes-version="{{ LIMES_CURRENT_VERSION }}" data-current-project="{{ current_project.slug }}">
+    <a class="visually-hidden-focusable l-skip" href="#main">Skip to content</a>
+    <div class="l-app">
+      {% include 'base/_items/sidebar.html' %}
+      <div class="l-main">
+        {% include 'base/_items/top_bar.html' %}
+        <input type="hidden" name="current_project" value="{{current_project.slug}}">
+        <main class="l-content" id="main">
+          <div class="page-title-box">
+            <div class="page-title-right">
+              <ol class="breadcrumb m-0">
+                {% block breadcrumb_title %}
+                {% endblock breadcrumb_title %}
+              </ol>
             </div>
-            {% block main_content %}
-            {% endblock main_content %}
+            <h1 class="page-title">{% block page_title %}{% endblock page_title %}</h1>
           </div>
+          {% block main_content %}
+          {% endblock main_content %}
           <div id="additional-content"></div>
-        </div>
+        </main>
         {% include 'base/_items/modal.html' %}
         {% include 'base/_items/xl_scrollable_modal.html' %}
         {% include 'base/_items/offcanvas.html' %}
       </div>
-      {% include 'base/_items/right_bar.html' %}
-      {% comment %} {% include 'base/_items/footer.html' %} {% endcomment %}
     </div>
+    {% include 'base/_items/right_bar.html' %}
     <script src="{% static 'assets/js/vendor.min.js' %}"></script>
     <script src="https://unpkg.com/@popperjs/core@2"></script>
     <script src="https://unpkg.com/tippy.js@6"></script>
@@ -121,37 +80,48 @@
         render_search_history('{{current_project.slug}}');
 
         getScanStatusSidebar(project='{{current_project.slug}}', reload=false);
+        $('.right-bar-toggle').on('click', function () {
+          getScanStatusSidebar(project='{{current_project.slug}}', reload=false);
+        });
 
         // tippy for notification or scan acitivity
         tippy('.top-activity-counter', {
           content: 'Scan Activity',
         });
-        if (localStorage.getItem('limes-theme') == "dark") {
-          $('#dark-mode-check').prop("checked", true).change();
-        }
-        else{
-          $('#dark-mode-check').prop("checked", false).change();
-        }
         handleHashInUrl();
+
+        // Closing the offcanvas sidebar on a narrow screen leaves aria-hidden on it; once the
+        // viewport is wide enough for the static sidebar, close it and drop the dialog attributes.
+        var nav = document.getElementById('l-sidebar');
+        var unDialog = function () { ['aria-hidden', 'aria-modal', 'role'].forEach(function (a) { nav.removeAttribute(a); }); };
+        window.matchMedia('(min-width: 992px)').addEventListener('change', function (e) {
+          if (!e.matches) return;
+          var oc = bootstrap.Offcanvas.getInstance(nav);
+          if (oc && nav.classList.contains('show')) {
+            nav.addEventListener('hidden.bs.offcanvas', unDialog, {once: true});
+            oc.hide();
+          } else {
+            unDialog();
+          }
+        });
       });
 
       function render_search_history(slug){
+        // queries are user-typed: build nodes with text(), never interpolate into HTML
         fetch('/api/search/history/')
         .then(response => response.json())
         .then(function (response) {
+          var box = $('#search-history-items');
           if (response.status) {
-            for (var history in response.results) {
-              $('#search-history-items').append(`
-                <a href="/${slug}/search?query=${htmlEncode(encodeURIComponent(response.results[history].query))}" class="dropdown-item notify-item">
-                  <span>${htmlEncode(response.results[history].query)}</span>
-                </a>
-              `);
-            }
+            response.results.forEach(function (item) {
+              $('<a class="dropdown-item"></a>')
+                .attr('href', '/' + encodeURIComponent(slug) + '/search?query=' + encodeURIComponent(item.query))
+                .text(item.query)
+                .appendTo(box);
+            });
           }
           else{
-            $('#search-history-items').append(`
-              <span class="ms-2">No recent searches.</span>
-            `);
+            $('<span class="dropdown-item-text text-muted"></span>').text('No recent searches.').appendTo(box);
           }
         });
       }

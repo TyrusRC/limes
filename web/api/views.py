@@ -873,14 +873,22 @@ class IssueList(APIView):
 		out = []
 		live = IssueWaiver.objects.filter(IssueWaiver.active_q(now))
 		live = live.select_related('created_by').order_by('-created_at', '-id')
+		# NOTE: loads every waiver an issue ever had, to read the newest one. Waivers are hand-made, so the history
+		# per issue stays small; if it grows, filter this to the newest per issue with a Subquery on OuterRef('issue_id').
+		latest = IssueWaiver.objects.select_related('created_by').order_by('-created_at', '-id')
 		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
-			Prefetch('waivers', queryset=live, to_attr='live_waivers'))
+			Prefetch('waivers', queryset=live, to_attr='live_waivers'),
+			Prefetch('waivers', queryset=latest, to_attr='all_waivers'))
 		for i in issues.order_by('-severity', 'first_seen', 'id'):
 			w = i.live_waivers[0] if i.live_waivers else None
+			# the newest waiver ran out (not revoked, not replaced): the issue counts again, say so
+			last = i.all_waivers[0] if i.all_waivers else None
+			expired = last if not w and last and not last.revoked_at and last.expires_at and last.expires_at <= now else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
 						'source': i.source, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
-						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count})
+						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count,
+						'expired_waiver': _waiver_json(expired) if expired else None})
 		return Response(out)
 
 

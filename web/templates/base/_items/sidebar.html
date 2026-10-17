@@ -1,0 +1,66 @@
+{% load static %}
+{% load permission_tags %}
+{% with cur=request.resolver_match.url_name slug=current_project.slug %}
+<nav class="l-sidebar offcanvas offcanvas-start" id="l-sidebar" tabindex="-1" aria-label="Primary">
+  <div class="l-sidebar-head">
+    <a class="l-brand" href="{% url 'dashboardIndex' slug %}" aria-label="Limes overview">
+      <img src="{% static 'img/logo.svg' %}" alt="" width="30" height="30">
+      <span class="l-wordmark">limes</span>
+    </a>
+    <button type="button" class="btn btn-ghost btn-icon d-lg-none" data-bs-dismiss="offcanvas" aria-label="Close menu">
+      <i class="fe-x" aria-hidden="true"></i>
+    </button>
+  </div>
+  <div class="l-sidebar-body">
+    <div class="l-nav-section" id="nav-monitor">Monitor</div>
+    <ul class="l-nav-list" aria-labelledby="nav-monitor">
+      <li><a class="l-nav-link" href="{% url 'dashboardIndex' slug %}"{% if cur == 'dashboardIndex' %} aria-current="page"{% endif %}><i class="fe-grid" aria-hidden="true"></i>Overview</a></li>
+      <li><a class="l-nav-link" href="{% url 'issues' slug %}"{% if cur == 'issues' %} aria-current="page"{% endif %}><i class="fe-alert-octagon" aria-hidden="true"></i>Issues</a></li>
+      <li><a class="l-nav-link" href="{% url 'assets' slug %}"{% if cur == 'assets' %} aria-current="page"{% endif %}><i class="fe-box" aria-hidden="true"></i>Assets</a></li>
+      <li><a class="l-nav-link" href="{% url 'all_subdomains' slug %}"{% if cur == 'all_subdomains' %} aria-current="page"{% endif %}><i class="fe-globe" aria-hidden="true"></i>Subdomains</a></li>
+      <li><a class="l-nav-link" href="{% url 'all_endpoints' slug %}"{% if cur == 'all_endpoints' %} aria-current="page"{% endif %}><i class="fe-link" aria-hidden="true"></i>Endpoints</a></li>
+      <li><a class="l-nav-link" href="{% url 'all_vulns' slug %}"{% if cur == 'all_vulns' %} aria-current="page"{% endif %}><i class="fe-alert-triangle" aria-hidden="true"></i>Vulnerabilities</a></li>
+    </ul>
+    <div class="l-nav-section" id="nav-operate">Operate</div>
+    <ul class="l-nav-list" aria-labelledby="nav-operate">
+      <li><a class="l-nav-link" href="{% url 'list_target' slug %}"{% if cur == 'list_target' or cur == 'add_target' or cur == 'update_target' or cur == 'target_summary' %} aria-current="page"{% endif %}><i class="fe-crosshair" aria-hidden="true"></i>Targets</a></li>
+      <li><a class="l-nav-link" href="{% url 'list_organization' slug %}"{% if cur == 'list_organization' or cur == 'add_organization' or cur == 'update_organization' %} aria-current="page"{% endif %}><i class="fe-briefcase" aria-hidden="true"></i>Organizations</a></li>
+      <li><a class="l-nav-link" href="{% url 'scan_history' slug %}"{% if cur == 'scan_history' or cur == 'detail_scan' or cur == 'detail_vuln_scan' %} aria-current="page"{% endif %}><i class="fe-activity" aria-hidden="true"></i>Scan History</a></li>
+      <li><a class="l-nav-link" href="{% url 'subscan_history' slug %}"{% if cur == 'subscan_history' %} aria-current="page"{% endif %}><i class="fe-layers" aria-hidden="true"></i>Subscans</a></li>
+      <li><a class="l-nav-link" href="{% url 'scheduled_scan_view' slug %}"{% if cur == 'scheduled_scan_view' %} aria-current="page"{% endif %}><i class="fe-clock" aria-hidden="true"></i>Scheduled Scans</a></li>
+      <li><a class="l-nav-link" href="{% url 'list_note' slug %}"{% if cur == 'list_note' %} aria-current="page"{% endif %}><i class="fe-check-square" aria-hidden="true"></i>Recon Notes</a></li>
+    </ul>
+    {% if user|can:'modify_scan_configurations' or user|can:'modify_wordlists' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' or user|can:'modify_scan_report' %}
+    <div class="l-nav-section" id="nav-configure">Configure</div>
+    <ul class="l-nav-list" aria-labelledby="nav-configure">
+      {% if user|can:'modify_scan_configurations' %}
+      <li><a class="l-nav-link" href="{% url 'scan_engine_index' slug %}"{% if cur == 'scan_engine_index' or cur == 'add_engine' or cur == 'update_engine' %} aria-current="page"{% endif %}><i class="fe-cpu" aria-hidden="true"></i>Scan Engines</a></li>
+      {% endif %}
+      {% if user|can:'modify_wordlists' %}
+      <li><a class="l-nav-link" href="{% url 'wordlist_list' slug %}"{% if cur == 'wordlist_list' or cur == 'add_wordlist' %} aria-current="page"{% endif %}><i class="fe-list" aria-hidden="true"></i>Wordlists</a></li>
+      {% endif %}
+      {% if user|can:'modify_interesting_lookup' %}
+      <li><a class="l-nav-link" href="{% url 'interesting_lookup' slug %}"{% if cur == 'interesting_lookup' %} aria-current="page"{% endif %}><i class="fe-search" aria-hidden="true"></i>Interesting Lookup</a></li>
+      {% endif %}
+      {% if user|can:'modify_scan_configurations' %}
+      <li><a class="l-nav-link" href="{% url 'proxy_settings' slug %}"{% if cur == 'proxy_settings' %} aria-current="page"{% endif %}><i class="fe-shuffle" aria-hidden="true"></i>Proxies</a></li>
+      <li><a class="l-nav-link" href="{% url 'tool_settings' slug %}"{% if cur == 'tool_settings' %} aria-current="page"{% endif %}><i class="fe-sliders" aria-hidden="true"></i>Tool Settings</a></li>
+      {% endif %}
+      {% if user|can:'modify_system_configurations' %}
+      <li><a class="l-nav-link" href="{% url 'api_vault' slug %}"{% if cur == 'api_vault' %} aria-current="page"{% endif %}><i class="fe-lock" aria-hidden="true"></i>API Vault</a></li>
+      <li><a class="l-nav-link" href="{% url 'llm_toolkit' slug %}"{% if cur == 'llm_toolkit' %} aria-current="page"{% endif %}><i class="fe-message-square" aria-hidden="true"></i>LLM Toolkit</a></li>
+      {% endif %}
+      {% if user|can:'modify_scan_report' %}
+      <li><a class="l-nav-link" href="{% url 'report_settings' slug %}"{% if cur == 'report_settings' %} aria-current="page"{% endif %}><i class="fe-file-text" aria-hidden="true"></i>Report Settings</a></li>
+      {% endif %}
+      {% if user|can:'modify_scan_configurations' %}
+      <li><a class="l-nav-link" href="{% url 'notification_settings' slug %}"{% if cur == 'notification_settings' %} aria-current="page"{% endif %}><i class="fe-bell" aria-hidden="true"></i>Notification Settings</a></li>
+      {% endif %}
+      {% if user|can:'modify_system_configurations' %}
+      <li><a class="l-nav-link" href="{% url 'limes_settings' slug %}"{% if cur == 'limes_settings' %} aria-current="page"{% endif %}><i class="fe-settings" aria-hidden="true"></i>Limes Settings</a></li>
+      {% endif %}
+    </ul>
+    {% endif %}
+  </div>
+</nav>
+{% endwith %}

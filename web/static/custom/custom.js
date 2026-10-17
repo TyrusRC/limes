@@ -215,22 +215,17 @@ function parse_comma_values_into_span(data, color, outline = null) {
 function get_severity_badge(severity) {
 	switch (severity) {
 		case 'Info':
-			return "<span class='badge badge-soft-primary'>&nbsp;&nbsp;INFO&nbsp;&nbsp;</span>";
-			break;
+			return "<span class='badge sev-info'>Info</span>";
 		case 'Low':
-			return "<span class='badge badge-low'>&nbsp;&nbsp;LOW&nbsp;&nbsp;</span>";
-			break;
+			return "<span class='badge sev-low'>Low</span>";
 		case 'Medium':
-			return "<span class='badge badge-soft-warning'>&nbsp;&nbsp;MEDIUM&nbsp;&nbsp;</span>";
-			break;
+			return "<span class='badge sev-medium'>Medium</span>";
 		case 'High':
-			return "<span class='badge badge-soft-danger'>&nbsp;&nbsp;HIGH&nbsp;&nbsp;</span>";
-			break;
+			return "<span class='badge sev-high'>High</span>";
 		case 'Critical':
-			return "<span class='badge badge-critical'>&nbsp;&nbsp;CRITICAL&nbsp;&nbsp;</span>";
-			break;
+			return "<span class='badge sev-critical'>Critical</span>";
 		case 'Unknown':
-		return "<span class='badge badge-soft-info'>&nbsp;&nbsp;UNKNOWN&nbsp;&nbsp;</span>";
+			return "<span class='badge sev-info'>Unknown</span>";
 		default:
 			return "";
 	}
@@ -1138,8 +1133,8 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 				badge_color = 'soft-warning'
 				break;
 			case 'High':
-				color = 'danger'
-				badge_color = 'soft-danger'
+				color = 'high'
+				badge_color = 'high'
 				break;
 			case 'Critical':
 				color = 'critical'
@@ -1182,7 +1177,7 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 			});
 		}
 		cve_cwe_badge += '</div>';
-		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + safeHref(vuln_obj['http_url']) + "' target='_blank' class='text-danger'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : htmlEncode(vuln_obj['http_url']);
+		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + safeHref(vuln_obj['http_url']) + "' target='_blank'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : htmlEncode(vuln_obj['http_url']);
 		$('#vuln_tbody').append(`
 			<tr>
 			<td>${vuln_type}</td>
@@ -2706,8 +2701,8 @@ function render_vuln_offcanvas(vuln){
 			default_badge_color = 'soft-warning';
 			break;
 		case 'High':
-			default_color = 'danger';
-			default_badge_color = 'soft-danger';
+			default_color = 'high';
+			default_badge_color = 'high';
 			break;
 		case 'Critical':
 			default_color = 'critical';

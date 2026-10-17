@@ -72,6 +72,22 @@ class IssueApiTest(TestCase):
             self.assertEqual(waived(), [])
             self.assertIsNone([r for r in self.list() if r['id'] == self.i1.id][0]['waiver'])
 
+    def test_expired_waiver_reported_until_replaced_or_revoked(self):
+        now = timezone.now()
+        exp = now - timedelta(days=1)
+        IssueWaiver.objects.create(issue=self.i1, kind='accepted_risk', reason='r', expires_at=exp,
+                                   created_at=now - timedelta(days=30))
+        row = lambda: [r for r in self.list() if r['id'] == self.i1.id][0]
+        self.assertIsNone(row()['waiver'])
+        self.assertEqual(row()['expired_waiver']['kind'], 'accepted_risk')
+        self.assertIsNone([r for r in self.list() if r['id'] == self.i2.id][0]['expired_waiver'])
+        # a newer active waiver supersedes it
+        self.post(self.admin, '/api/action/issue/waive/', issue_id=self.i1.id, kind='false_positive', reason='fp')
+        self.assertIsNone(row()['expired_waiver'])
+        # revoking the newer one does not bring the old expiry back
+        self.post(self.admin, '/api/action/issue/revoke/', issue_id=self.i1.id)
+        self.assertIsNone(row()['expired_waiver'])
+
     def test_forecast_caps_issue_list(self):
         r = self.post(self.admin, '/api/score_forecast/', issues=list(range(1, 502)))
         self.assertFalse(r.json()['status'])
@@ -199,3 +215,31 @@ class IssueApiTest(TestCase):
             self.post(self.admin, '/api/action/issue/waive/', issue_id=i.id, kind='false_positive', reason='r')
             IssueNote.objects.create(issue=i, text='n')
         self.assertEqual(count(), few)
+
+
+class IssuePageTest(TestCase):
+    """The waive and note forms are rendered only for users who may write; read-only roles get the notice."""
+
+    def setUp(self):
+        user_logged_in.disconnect(on_user_logged_in)
+        self.addCleanup(user_logged_in.connect, on_user_logged_in)
+        Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
+
+    def page(self, role):
+        u = User.objects.create_user(role, password='p')
+        assign_role(u, role)
+        self.client.force_login(u)
+        self.client.get('/scan/p1/issues')  # warm-up (lazy prefs creation)
+        r = self.client.get('/scan/p1/issues')
+        self.assertEqual(r.status_code, 200)
+        return r.content.decode()
+
+    def test_forms_follow_write_permission(self):
+        html = self.page('sys_admin')
+        for needle in ('id="issue_waive_form"', 'id="issue_note_form"', 'data-can-write="1"'):
+            self.assertIn(needle, html)
+        html = self.page('auditor')
+        for needle in ('id="issue_waive_form"', 'id="issue_note_form"', 'id="issue_waive"', 'id="issue_note_add"'):
+            self.assertNotIn(needle, html)
+        self.assertIn('data-can-write="0"', html)
+        self.assertIn('You can view issues but not change them.', html)
