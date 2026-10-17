@@ -27,6 +27,18 @@
 | 5 | Scan burst after linking existing roots | Keep `MAX_IN_FLIGHT = 2` and `MAX_DISPATCH_PER_TICK = 1`. Say in the migration comment and the deploy notes that the first ticks scan every root that was previously unlinked. | Tasks 2, 6 |
 | 6 | Existing PSL misclassifications | A management command reclassifies `hostname` rows whose value is registrable (`example.co.uk`). It is idempotent, logs each change and is tested. | Task 2 |
 
+## Controller rulings added after the plan review (binding)
+
+| # | Topic | Ruling | Owner |
+|---|---|---|---|
+| 7 | Cap accounting | One shared address-counting function in `owned_ranges` serves the add-time per-entry and project caps and the ASN check at enumeration. An over-cap ASN stores **no** owned `cidr` children and counts toward no cap. | Tasks 1, 4 |
+| 8 | TLS with a pinned IP | Certificate verification stays on and is checked against the **hostname**, never the IP. Test: a certificate for a different name, signed by a test CA that the injected context trusts, still fails with a hostname mismatch although the connection went to the vetted IP; the matching name succeeds. | Task 5 |
+| 9 | Existing risk-check tests | `test_risk_checks` and the TLS verify-code tests pass with **unchanged assertions**; the only edit allowed there is the `setUp` patch of `resolve_vetted`. If an assertion must change, stop and report. The existing `same_host_https` gate (userinfo and backslash fixes) stays in front of the pinned getter, so redirect and HSTS results do not change. | Task 5 |
+| 10 | Connection inventory | The checks connect through `requests` (pinned), a raw `ssl` socket (pinned) and `dns.resolver` (DNS only). Scan tools (subfinder, naabu, httpx, nuclei, assay, mantis crawling) resolve on their own and cannot be pinned: they stay covered only by the existing pre-scan root scope guard. Say so in a `NOTE:` in `safe_fetch.py`. | Task 5 |
+| 11 | Queues | `monitor_assets` and `enumerate_ranges` are routed to the **IO** queue in `celery_routing.TASK_PLAN` (network-bound, 15-minute limit). The dispatcher ticks stay on ORCHESTRATE. Both tasks hold an advisory lock, honour a time budget and set `expires` on the beat entry. | Tasks 4, 5 |
+| 12 | Data migration | The migration that links existing roots uses `apps.get_model` with inline logic. It does not import `ensure_scan_target`. | Task 2 |
+| 13 | Add form wording | The Add assets form labels the tiers: "Owned root: discovers subdomains" and "Host: monitored only", and says that a host added alone is watched but its subdomains are not discovered. | Task 6 |
+
 ## Global Constraints
 
 - **Django and style:**
