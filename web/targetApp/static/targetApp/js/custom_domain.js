@@ -1,7 +1,7 @@
 function delete_target(id, domain_name) {
   const delAPI = "../../delete/target/" + id;
   swal.queue([{
-    title: 'Are you sure you want to delete '+ domain_name +'?',
+    title: 'Are you sure you want to delete '+ htmlEncode(domain_name) +'?',
     text: "You won't be able to revert this!",
     type: 'warning',
     showCancelButton: true,

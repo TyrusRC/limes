@@ -12,7 +12,7 @@ from django.db.models import Count
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.safestring import mark_safe
+from django.utils.html import format_html, format_html_join
 from rolepermissions.decorators import has_permission_decorator
 
 from limes.common_func import *
@@ -571,13 +571,13 @@ def update_organization(request, slug, id):
             return http.HttpResponseRedirect(reverse('list_organization', kwargs={'slug': slug}))
     else:
         domain_list = organization.get_domains().values_list('id', flat=True)
-        domain_list = [str(id) for id in domain_list]
+        domain_list = format_html('[{}]', format_html_join(', ', "'{}'", ((id,) for id in domain_list)))
         form.set_value(organization.name, organization.description)
     context = {
         'list_organization_li': 'active',
         'organization_data_active': 'true',
         "organization": organization,
-        "domain_list": mark_safe(domain_list),
+        "domain_list": domain_list,
         "form": form
     }
     return render(request, 'organization/update.html', context)

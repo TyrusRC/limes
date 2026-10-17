@@ -32,7 +32,7 @@ Settings, API Keys & Tool Settings
         <h4 class="header-title">Currently available GF patterns</h4>
         {% for pattern in gf_patterns %}
         {% if not forloop.first %}
-        <span class="btn btn-soft-primary rounded-pill btn-sm m-1 bs-tooltip" data-toggle="tooltip" data-placement="top" title="Click to View Pattern" onclick="load_gf_template('{{pattern}}')">{{pattern}}</span>
+        <span class="btn btn-soft-primary rounded-pill btn-sm m-1 bs-tooltip" data-toggle="tooltip" data-placement="top" title="Click to View Pattern" onclick="load_gf_template('{{ pattern|escapejs }}')">{{pattern}}</span>
         {% endif %}
         {% endfor %}
         <form method="post" enctype="multipart/form-data">
@@ -103,7 +103,7 @@ Settings, API Keys & Tool Settings
             <h6 class="header-title">Currently available custom Nuclei templates</h6>
             {% for template in nuclei_templates %}
             {% with file=template|split:"/" %}
-            <span class="btn btn-soft-primary rounded-pill btn-sm m-1 bs-tooltip" title="Click to View Template" onclick="load_nuclei_template('{{file.3}}')">{{file.3}}</span>
+            <span class="btn btn-soft-primary rounded-pill btn-sm m-1 bs-tooltip" title="Click to View Template" onclick="load_nuclei_template('{{ file.3|escapejs }}')">{{file.3}}</span>
             {% endwith %}
             {% empty %}
             <div class="alert alert-danger border-0 mb-4">

@@ -1,5 +1,5 @@
 function get_ips_from_port(port_number, history_id){
-	document.getElementById("detailScanModalLabel").innerHTML='IPs with port ' + port_number + ' OPEN';
+	document.getElementById("detailScanModalLabel").innerHTML='IPs with port ' + htmlEncode(port_number) + ' OPEN';
 	var ip_badge = '';
 	fetch('../port/ip/'+port_number+'/'+history_id+'/')
 	.then(response => response.json())
@@ -8,7 +8,7 @@ function get_ips_from_port(port_number, history_id){
 
 function get_ports_for_ip(ip, history_id){
 	console.log(ip, history_id);
-	document.getElementById("detailScanModalLabel").innerHTML='Open Ports identified for ' + ip;
+	document.getElementById("detailScanModalLabel").innerHTML='Open Ports identified for ' + htmlEncode(ip);
 	var port_badge = '';
 	fetch('../ip/ports/'+ip+'/'+history_id+'/')
 	.then(response => response.json())
@@ -22,7 +22,7 @@ function render_ports(data)
 	Object.entries(JSON.parse(data)).forEach(([key, value]) => {
 		badge_color = value[3] ? 'danger' : 'info';
 		title = value[3] ? 'Uncommon Port - ' + value[2] : value[2];
-		port_badge += `<span class='m-1 badge  badge-soft-${badge_color} bs-tooltip' title='${title}'>${value[0]}/${value[1]}</span>`
+		port_badge += `<span class='m-1 badge  badge-soft-${badge_color} bs-tooltip' title='${htmlEncode(title)}'>${htmlEncode(value[0])}/${htmlEncode(value[1])}</span>`
 	});
 	ip_address_content.innerHTML = port_badge;
 	$('.bs-tooltip').tooltip();
@@ -35,7 +35,7 @@ function render_ips(data)
 	Object.entries(JSON.parse(data)).forEach(([key, value]) => {
 		badge_color = value[1] ? 'warning' : 'info';
 		title = value[1] ? 'CDN IP Address' : '';
-		ip_badge += `<span class='m-1 badge  badge-soft-${badge_color} bs-tooltip' title='${title}'>${value[0]}</span>`
+		ip_badge += `<span class='m-1 badge  badge-soft-${badge_color} bs-tooltip' title='${htmlEncode(title)}'>${htmlEncode(value[0])}</span>`
 	});
 	content.innerHTML = ip_badge;
 	$('.bs-tooltip').tooltip();
@@ -56,7 +56,7 @@ function get_endpoints(project, scan_history_id=null, domain_id=null, gf_tags=nu
 	}
 
 	if (gf_tags){
-		lookup_url += `&gf_tag=${gf_tags}`
+		lookup_url += `&gf_tag=${encodeURIComponent(gf_tags)}`
 	}
 	var endpoint_datatable_columns = [
 		{'data': 'id'},
@@ -384,7 +384,7 @@ function get_subdomain_changes(scan_history_id){
 			{
 				"render": function ( data, type, row ) {
 					if (data){
-						return `<span class='text-center' style="display:block; text-align:center; margin:0 auto;">${data}</span>`;
+						return `<span class='text-center' style="display:block; text-align:center; margin:0 auto;">${htmlEncode(data)}</span>`;
 					}
 					return "";
 				},
@@ -509,6 +509,8 @@ function get_screenshot(scan_id){
 	gridzyElement.setAttribute('data-gridzy-desiredwidth', 350);
 	gridzyElement.setAttribute('data-gridzySearchField', "#screenshot-search");
 	var interesting_badge = `<span class="m-1 float-end badge  badge-soft-danger">Interesting</span>`;
+	// filter class tokens and option values are built from scan data: keep them to word chars so a quote or space cannot break the selector
+	const filter_token = v => String(v).replace(/[^\w-]/g, '_');
 	$.getJSON(`/api/listSubdomains/?scan_id=${scan_id}&no_page&only_screenshot`, function(data) {
 		$("#screenshot-loader").remove();
 		$("#filter-screenshot").show();
@@ -527,7 +529,7 @@ function get_screenshot(scan_id){
 			search_field = `${data[subdomain]['page_title']} ${data[subdomain]['name']} ${data[subdomain]['http_status']} ${ip_search_values} ${interesting_field}`;
 			link.setAttribute('data-lightbox', 'screenshot-gallery')
 			link.setAttribute('href', '/media/' + data[subdomain]['screenshot_path'])
-			link.setAttribute('data-title', `<a target='_blank' href='`+data[subdomain]['http_url']+`'><h3 style="color:white">`+data[subdomain]['name']+`</h3></a>`);
+			link.setAttribute('data-title', `<a target='_blank' href='`+safeHref(data[subdomain]['http_url'])+`'><h3 style="color:white">`+htmlEncode(data[subdomain]['name'])+`</h3></a>`);
 			link.classList.add('img-fluid');
 			link.classList.add('rounded');
 			link.classList.add('screenshot-gallery');
@@ -550,8 +552,8 @@ function get_screenshot(scan_id){
 				http_status_badge = 'warning';
 			}
 			page_title = data[subdomain]['page_title'] ? htmlEncode(data[subdomain]['page_title']) + '</br>': '' ;
-			subdomain_link = data[subdomain]['http_url'] ? `<a href="${data[subdomain]['http_url']}" target="_blank">${data[subdomain]['name']}</a>` : `<a href="https://${data[subdomain]['name']}" target="_blank">${data[subdomain]['name']}</a>`
-			http_status = data[subdomain]['http_status'] ? `<span class="m-1 float-end badge  badge-soft-${http_status_badge}">${data[subdomain]['http_status']}</span>` : '';
+			subdomain_link = data[subdomain]['http_url'] ? `<a href="${safeHref(data[subdomain]['http_url'])}" target="_blank">${htmlEncode(data[subdomain]['name'])}</a>` : `<a href="https://${htmlEncode(data[subdomain]['name'])}" target="_blank">${htmlEncode(data[subdomain]['name'])}</a>`
+			http_status = data[subdomain]['http_status'] ? `<span class="m-1 float-end badge  badge-soft-${http_status_badge}">${htmlEncode(data[subdomain]['http_status'])}</span>` : '';
 			figcaption.innerHTML = data[subdomain]['is_interesting'] ? page_title + subdomain_link + interesting_badge + http_status : page_title + subdomain_link + http_status;
 			figure.appendChild(figcaption);
 			link.appendChild(newImage);
@@ -559,15 +561,15 @@ function get_screenshot(scan_id){
 			gridzyElement.appendChild(link);
 
 			// add http status to filter values
-			filter_values = 'http_' + data[subdomain]['http_status'] + ' ';
+			filter_values = 'http_' + filter_token(data[subdomain]['http_status']) + ' ';
 
 			// dynamic filtering menu
 			http_status = data[subdomain]['http_status'];
 			http_status_select = document.getElementById('http_select_filter');
-			if(!$('#http_select_filter').find("option:contains('" + http_status + "')").length){
+			if(![...http_status_select.options].some(o => o.textContent === String(http_status))){
 				var option = document.createElement('option');
-				option.value = ".http_" + http_status;
-				option.innerHTML = http_status;
+				option.value = ".http_" + filter_token(http_status);
+				option.textContent = http_status;
 				http_status_select.appendChild(option);
 			}
 
@@ -575,7 +577,7 @@ function get_screenshot(scan_id){
 			ips = data[subdomain]['ip_addresses']
 			for(var ip in ips){
 				ip_address = ips[ip]['address'];
-				filter_values += 'ip_' + ip_address.replace(/\./g,"_") + ' ';
+				filter_values += 'ip_' + filter_token(ip_address) + ' ';
 				if (ip_array.indexOf(ip_address) === -1){
 					ip_array.push(ip_address);
 				}
@@ -585,12 +587,12 @@ function get_screenshot(scan_id){
 					port_number = ips[ip]['ports'][port]['number'];
 					service_name = ips[ip]['ports'][port]['service_name'];
 
-					filter_values += 'port_' + port_number + ' ';
+					filter_values += 'port_' + filter_token(port_number) + ' ';
 					if (port_array.indexOf(port_number) === -1){
 						port_array.push(port_number);
 					}
 
-					filter_values += 'service_' + service_name + ' ';
+					filter_values += 'service_' + filter_token(service_name) + ' ';
 					if (service_array.indexOf(service_name) === -1){
 						service_array.push(service_name);
 					}
@@ -601,7 +603,7 @@ function get_screenshot(scan_id){
 			technology = data[subdomain]['technologies'];
 			for(var tech in technology){
 				tech_name = technology[tech]['name']
-				filter_values += 'tech_' + tech_name.replace(/ /g,"_").toLowerCase() + ' ';
+				filter_values += 'tech_' + filter_token(tech_name.toLowerCase()) + ' ';
 				if (tech_array.indexOf(tech_name) === -1){
 					tech_array.push(tech_name);
 				}
@@ -616,10 +618,10 @@ function get_screenshot(scan_id){
 		if (port_select) {
 			port_array.sort((a, b) => a - b);
 			for(var port in port_array){
-				if(!$('#ports_select_filter').find("option:contains('" + port_array[port] + "')").length){
+				if(![...port_select.options].some(o => o.textContent === String(port_array[port]))){
 					var option = document.createElement('option');
-					option.value = ".port_" + port_array[port];
-					option.innerHTML = port_array[port];
+					option.value = ".port_" + filter_token(port_array[port]);
+					option.textContent = port_array[port];
 					port_select.appendChild(option);
 				}
 			}
@@ -628,10 +630,10 @@ function get_screenshot(scan_id){
 		// add ip to select
 		ip_select = document.getElementById('ips_select_filter');
 		for(var ip in ip_array){
-			if(!$('#ips_select_filter').find("option:contains('" + ip_array[ip] + "')").length){
+			if(![...ip_select.options].some(o => o.textContent === ip_array[ip])){
 				var option = document.createElement('option');
-				option.value = ".ip_" + ip_array[ip];
-				option.innerHTML = ip_array[ip];
+				option.value = ".ip_" + filter_token(ip_array[ip]);
+				option.textContent = ip_array[ip];
 				ip_select.appendChild(option);
 			}
 		}
@@ -640,10 +642,10 @@ function get_screenshot(scan_id){
 		service_select = document.getElementById('services_select_filter');
 		if (service_select) {
 			for(var service in service_array){
-				if(!$('#services_select_filter').find("option:contains('" + service_array[service] + "')").length){
+				if(![...service_select.options].some(o => o.textContent === service_array[service])){
 					var option = document.createElement('option');
-					option.value = ".service_" + service_array[service];
-					option.innerHTML = service_array[service];
+					option.value = ".service_" + filter_token(service_array[service]);
+					option.textContent = service_array[service];
 					service_select.appendChild(option);
 				}
 			}
@@ -651,10 +653,10 @@ function get_screenshot(scan_id){
 
 		tech_select = document.getElementById('tech_select_filter');
 		for(var tech in tech_array){
-			if(!$('#tech_select_filter').find("option:contains('" + tech_array[tech] + "')").length){
+			if(![...tech_select.options].some(o => o.textContent === tech_array[tech])){
 				var option = document.createElement('option');
-				option.value = ".tech_" + tech_array[tech].replace(/ /g,"_").toLowerCase();
-				option.innerHTML = tech_array[tech];
+				option.value = ".tech_" + filter_token(tech_array[tech].toLowerCase());
+				option.textContent = tech_array[tech];
 				tech_select.appendChild(option);
 			}
 		}
@@ -710,14 +712,7 @@ function get_screenshot(scan_id){
 		$('#http_select_filter, #ips_select_filter, #services_select_filter, #ports_select_filter, #tech_select_filter').on('change', function() {
 			values = $(this).val();
 			console.log(values);
-			if(values.length && this.id == 'ips_select_filter'){
-				var replaces_str = values.map(function(values){return values.replace(/(?<=\..*)\./g, '_');});
-				console.log(replaces_str);
-				gridzyInstance.setOptions({
-					filter: replaces_str
-				});
-			}
-			else if(values.length && this.id != 'ips_select_filter'){
+			if(values.length){
 				gridzyInstance.setOptions({
 					filter: values
 				});
@@ -840,17 +835,26 @@ function get_endpoint_modal(project, scan_id, subdomain_id, subdomain_name){
 }
 
 function create_log_element(log) {
+	// command and output come from scan tools (incl. host responses): set as text, never parsed as markup
 	let logElement = document.createElement("p");
-	innerHTML = `
-	<p>
-	  <p data-bs-toggle="collapse" data-bs-target="#collapse${log.id}" class="text-primary">
-		<i class="fe-terminal"></i>${log.command}
-	  </p>
-	</p>`
-	if (log.output != ''){
-		innerHTML += `<div class="collapse" id="collapse${log.id}"><code style="white-space: pre-line" class="card card-body">${log.output}</code></div>`;
+	let command = document.createElement("p");
+	command.className = "text-primary";
+	command.setAttribute("data-bs-toggle", "collapse");
+	command.setAttribute("data-bs-target", "#collapse" + log.id);
+	command.innerHTML = '<i class="fe-terminal"></i>';
+	command.append(log.command || '');
+	logElement.appendChild(command);
+	if (log.output){
+		let collapse = document.createElement("div");
+		collapse.className = "collapse";
+		collapse.id = "collapse" + log.id;
+		let output = document.createElement("code");
+		output.style.whiteSpace = "pre-line";
+		output.className = "card card-body";
+		output.textContent = log.output;
+		collapse.appendChild(output);
+		logElement.appendChild(collapse);
 	}
-	logElement.innerHTML = innerHTML;
 	return logElement;
 }
 
@@ -905,7 +909,7 @@ function add_todo_for_scanhistory_modal(scan_history_id){
 			subdomain_obj = data['subdomains'][subdomain];
 			var option = document.createElement('option');
 			option.value = subdomain_obj['id'];
-			option.innerHTML = subdomain_obj['name'];
+			option.textContent = subdomain_obj['name'];
 			subdomain_dropdown.appendChild(option);
 		}
 	});
@@ -1005,7 +1009,7 @@ function add_note_for_subdomain_handler(subdomain_id){
 			});
 		}
 		else{
-			swal.fire("Error!", response.message, "warning", {
+			swal.fire("Error!", htmlEncode(response.message), "warning", {
 				button: "Okay",
 			});
 		}
@@ -1030,7 +1034,7 @@ function download_subdomains(scan_id=null, domain_id=null, domain_name=null){
 	}
 
 	if (domain_name) {
-		$('.modal-title').html(count + ' Subdomains for : <b>' + domain_name + '</b>');
+		$('.modal-title').html(count + ' Subdomains for : <b>' + htmlEncode(domain_name) + '</b>');
 	}
 	else{
 		$('.modal-title').html(count + ' Subdomains');
@@ -1051,9 +1055,9 @@ function download_subdomains(scan_id=null, domain_id=null, domain_name=null){
 				subdomain_obj = data['subdomains'][subdomain];
 				subdomains += subdomain_obj['name'] + '\n'
 			}
-			$('#all_subdomains_text_area').append(subdomains);
+			$('#all_subdomains_text_area').val(subdomains);
 			$("#modal-footer").empty();
-			$("#modal-footer").append(`<a href="javascript:download('subdomains-${domain_name}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
+			$("#modal-footer").append(`<a href="javascript:download('subdomains-${jsEscape(domain_name)}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
 			$("#modal-footer").append(`<a href="javascript:;" data-clipboard-action="copy" class="m-1 btn btn-primary copyable float-end btn-md" data-toggle="tooltip" data-placement="top" title="Copy Subdomains!" data-clipboard-target="#all_subdomains_text_area"><i class="fe-copy me-1"></i> Copy Subdomains</a>`);
 		}
 		else{
@@ -1083,7 +1087,7 @@ function download_interesting_subdomains(project, scan_id=null, domain_id=null, 
 	}
 
 	if (domain_name) {
-		$('.modal-title').html( count + ' Interesting Subdomains for : <b>' + domain_name + '</b>');
+		$('.modal-title').html( count + ' Interesting Subdomains for : <b>' + htmlEncode(domain_name) + '</b>');
 	}
 	else{
 		$('.modal-title').html( count + ' Interesting Subdomains');
@@ -1101,9 +1105,9 @@ function download_interesting_subdomains(project, scan_id=null, domain_id=null, 
 			for (subdomain in data){
 				subdomains += data[subdomain]['name'] + '\n'
 			}
-			$('#interesting_subdomains_text_area').append(subdomains);
+			$('#interesting_subdomains_text_area').val(subdomains);
 			$("#modal-footer").empty();
-			$("#modal-footer").append(`<a href="javascript:download('interesting_subdomains-${domain_name}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
+			$("#modal-footer").append(`<a href="javascript:download('interesting_subdomains-${jsEscape(domain_name)}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
 			$("#modal-footer").append(`<a href="javascript:;" data-clipboard-action="copy" class="m-1 btn btn-primary copyable float-end btn-md" data-toggle="tooltip" data-placement="top" title="Copy Subdomains!" data-clipboard-target="#interesting_subdomains_text_area"><i class="fe-copy me-1"></i> Copy Subdomains</a>`);
 		}
 		else{
@@ -1132,7 +1136,7 @@ function download_interesting_endpoints(scan_id, domain_name){
 		url = `/api/listInterestingEndpoints/?format=json&no_page`;
 	}
 	if (domain_name) {
-		$('.modal-title').html( count + ' Interesting Endpoints for : <b>' + domain_name + '</b>');
+		$('.modal-title').html( count + ' Interesting Endpoints for : <b>' + htmlEncode(domain_name) + '</b>');
 	}
 	else{
 		$('.modal-title').html( count + ' Interesting Endpoints');
@@ -1150,9 +1154,9 @@ function download_interesting_endpoints(scan_id, domain_name){
 			for (endpoint in data){
 				endpoints += data[endpoint]['http_url'] + '\n'
 			}
-			$('#interesting_endpoints_text_area').append(endpoints);
+			$('#interesting_endpoints_text_area').val(endpoints);
 			$("#modal-footer").empty();
-			$("#modal-footer").append(`<a href="javascript:download('interesting_endpoints-${domain_name}.txt', endpoints);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Endpoints as txt</a>`);
+			$("#modal-footer").append(`<a href="javascript:download('interesting_endpoints-${jsEscape(domain_name)}.txt', endpoints);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Endpoints as txt</a>`);
 			$("#modal-footer").append(`<a href="javascript:;" data-clipboard-action="copy" class="m-1 btn btn-primary copyable float-end btn-md" data-toggle="tooltip" data-placement="top" title="Copy Endpoints!" data-clipboard-target="#interesting_endpoints_text_area"><i class="fe-copy me-1"></i> Copy Endpoints</a>`);
 		}
 		else{
@@ -1183,7 +1187,7 @@ function download_important_subdomains(scan_id=null, domain_id=null, domain_name
 		url = `/api/querySubdomains?format=json&no_lookup_interesting&only_important&target_id=${domain_id}`;
 	}
 	if (domain_name) {
-		$('.modal-title').html(count + ' Subdomains marked as important : <b>' + domain_name + '</b>');
+		$('.modal-title').html(count + ' Subdomains marked as important : <b>' + htmlEncode(domain_name) + '</b>');
 	}
 	else{
 		$('.modal-title').html(count + ' Subdomains marked as important');
@@ -1202,9 +1206,9 @@ function download_important_subdomains(scan_id=null, domain_id=null, domain_name
 				subdomain_obj = data['subdomains'][subdomain];
 				subdomains += subdomain_obj['name'] + '\n'
 			}
-			$('#all_subdomains_text_area').append(subdomains);
+			$('#all_subdomains_text_area').val(subdomains);
 			$("#modal-footer").empty();
-			$("#modal-footer").append(`<a href="javascript:download('important-subdomains-${domain_name}.txt', subdomains);" class="m-1 btn btn-primary copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
+			$("#modal-footer").append(`<a href="javascript:download('important-subdomains-${jsEscape(domain_name)}.txt', subdomains);" class="m-1 btn btn-primary copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
 			$("#modal-footer").append(`<a href="javascript:;" data-clipboard-action="copy" class="m-1 btn btn-dark copyable float-end btn-md" data-toggle="tooltip" data-placement="top" title="Copy Subdomains!" data-clipboard-target="#all_subdomains_text_area"><i class="fe-copy me-1"></i> Copy Subdomains</a>`);
 		}
 		else{
@@ -1236,11 +1240,11 @@ function download_endpoints(scan_id=null, domain_id=null, domain_name='', patter
 	}
 
 	if (pattern) {
-		url += `&pattern=${pattern}`;
+		url += `&pattern=${encodeURIComponent(pattern)}`;
 	}
 
 	if (domain_name) {
-		$('.modal-title').html( count + ' Endpoints for : <b>' + domain_name + '</b>');
+		$('.modal-title').html( count + ' Endpoints for : <b>' + htmlEncode(domain_name) + '</b>');
 	}
 	else{
 		$('.modal-title').html(count + ' Endpoints');
@@ -1258,10 +1262,10 @@ function download_endpoints(scan_id=null, domain_id=null, domain_name='', patter
 			endpoint_obj = data['endpoints'][endpoint];
 			endpoints += endpoint_obj['http_url'] + '\n'
 		}
-		$('#all_endpoints_text_area').append(endpoints);
+		$('#all_endpoints_text_area').val(endpoints);
 		$("#modal-footer").empty();
 		if (domain_name) {
-			$("#modal-footer").append(`<a href="javascript:download('endpoints-${domain_name}.txt', endpoints);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Endpoints as txt</a>`);
+			$("#modal-footer").append(`<a href="javascript:download('endpoints-${jsEscape(domain_name)}.txt', endpoints);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Endpoints as txt</a>`);
 		}
 		else{
 			$("#modal-footer").append(`<a href="javascript:download('endpoints-all.txt', endpoints);" class="m-1 btn btn-primary copyable float-end btn-md"><i class="fe-download me-1"></i> Download Endpoints as txt</a>`);
@@ -1371,8 +1375,8 @@ function load_engine_tasks(engine_name){
 			html += `
 			<div class="mt-1">
 				<div class="form-check">
-					<input type="checkbox" class="form-check-input" id="${task}">
-					<label class="form-check-label" for="${task}">${task}</label>
+					<input type="checkbox" class="form-check-input" id="${htmlEncode(task)}">
+					<label class="form-check-label" for="${htmlEncode(task)}">${htmlEncode(task)}</label>
 				</div>
 			</div>`
 		});
@@ -1435,9 +1439,9 @@ function downloadSelectedSubdomains(domain_name){
 					subdomain_obj = response['results'][subdomain];
 					subdomains += subdomain_obj + '\n'
 				}
-				$('#selected_subdomains_text_area').append(subdomains);
+				$('#selected_subdomains_text_area').val(subdomains);
 				$("#modal-footer").empty();
-				$("#modal-footer").append(`<a href="javascript:download('subdomains-${domain_name}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
+				$("#modal-footer").append(`<a href="javascript:download('subdomains-${jsEscape(domain_name)}.txt', subdomains);" class="m-1 btn btn-dark copyable float-end btn-md"><i class="fe-download me-1"></i> Download Subdomains as txt</a>`);
 				$("#modal-footer").append(`<a href="javascript:;" data-clipboard-action="copy" class="m-1 btn btn-primary copyable float-end btn-md" data-toggle="tooltip" data-placement="top" title="Copy Subdomains!" data-clipboard-target="#selected_subdomains_text_area"><i class="fe-copy me-1"></i> Copy Subdomains</a>`);
 			}
 			else{

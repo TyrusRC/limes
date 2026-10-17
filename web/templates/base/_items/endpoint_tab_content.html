@@ -85,18 +85,18 @@
 							</button>
 							<div class="dropdown-menu" style="">
 								{% if detail_scan %}
-									<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{history.domain.name}}')">Download All Endpoints</a>
+									<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}')">Download All Endpoints</a>
 									{% if 'fetch_url' in history.tasks and history.used_gf_patterns%}
 										{% for key,value in matched_gf_count.items %}
 											{% if value > 0 %}
-												<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{history.domain.name}}', '{{key}}')">Download Endpoints with pattern {{key|upper}}</a>
+												<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}', '{{ key|escapejs|urlencode }}')">Download Endpoints with pattern {{key|upper}}</a>
 											{% endif %}
 										{% endfor %}
 									{% endif %}
 								{% endif %}
 
 								{% if target_summary %}
-									<a class="dropdown-item" href="javascript:download_endpoints(scan_id=null, domain_id={{target.id}}, domain_name='{{target.name}}', pattern=null)">Download All Endpoints</a>
+									<a class="dropdown-item" href="javascript:download_endpoints(scan_id=null, domain_id={{target.id}}, domain_name='{{ target.name|escapejs|urlencode }}', pattern=null)">Download All Endpoints</a>
 								{% endif %}
 
 								{% if all_endpoints %}

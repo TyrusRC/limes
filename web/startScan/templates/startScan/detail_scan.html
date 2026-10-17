@@ -118,11 +118,11 @@ Scan Findings
 									<i class="fe-more-vertical"></i>
 								</a>
 								<div class="dropdown-menu" style="">
-									<a class="dropdown-item" href="javascript:download_subdomains({{scan_history_id}}, '{{history.domain.name}}')">Download All Subdomains</a>
-									<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{history.domain.name}}')">Download All Endpoints</a>
-									<a class="dropdown-item" href="javascript:download_important_subdomains({{scan_history_id}}, '{{history.domain.name}}');">Download Important Subdomains</a>
-									<a class="dropdown-item" href="javascript:download_interesting_subdomains({{scan_history_id}}, '{{history.domain.name}}');">Download Interesting Subdomains</a>
-									<a class="dropdown-item" href="javascript:download_interesting_endpoints({{scan_history_id}}, '{{history.domain.name}}');">Download Interesting Endpoints</a>
+									<a class="dropdown-item" href="javascript:download_subdomains({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}')">Download All Subdomains</a>
+									<a class="dropdown-item" href="javascript:download_endpoints({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}')">Download All Endpoints</a>
+									<a class="dropdown-item" href="javascript:download_important_subdomains({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}');">Download Important Subdomains</a>
+									<a class="dropdown-item" href="javascript:download_interesting_subdomains({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}');">Download Interesting Subdomains</a>
+									<a class="dropdown-item" href="javascript:download_interesting_endpoints({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}');">Download Interesting Endpoints</a>
 								</div>
 							</div>
 						</div>
@@ -405,7 +405,7 @@ Scan Findings
 						<div class="card" style="height: 95%">
 							<div class="card-body">
 								<div class="card-widgets">
-									<a href="javascript: fetch_whois('{{history.domain}}', true);" data-toggle="tooltip" title="Reload Whois"><i class="mdi mdi-refresh"></i></a>
+									<a href="javascript: fetch_whois('{{ history.domain|escapejs|urlencode }}', true);" data-toggle="tooltip" title="Reload Whois"><i class="mdi mdi-refresh"></i></a>
 								</div>
 								<h4 class="header-title mb-0"><i class="fe-activity"></i>&nbsp;Target Information</h4>
 								<div class="row mt-3">
@@ -456,7 +456,7 @@ Scan Findings
 												{% if not history.domain.domain_info %}
 												<div class="alert alert-danger alert-dismissible fade show" role="alert" id="whois_not_fetched_alert">
 													<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-													WHOIS Record Has not been fetched, would you like to <a href="javascript: fetch_whois('{{history.domain}}', true);">fetch it now?</a>
+													WHOIS Record Has not been fetched, would you like to <a href="javascript: fetch_whois('{{ history.domain|escapejs|urlencode }}', true);">fetch it now?</a>
 												</div>
 												{% endif %}
 												<div class="alert alert-info alert-dismissible fade show" role="alert" id="whois_fetching_alert" style="display: none">
@@ -716,7 +716,7 @@ Scan Findings
 												{% if history.domain.domain_info.related_domains.all %}
 													<div class="alert alert-success">{{history.domain.domain_info.related_domains.all.count}} Related Domains identified</div>
 													{% for domain in history.domain.domain_info.related_domains.all %}
-														<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add {{domain}} as target." onclick="add_target('{{domain}}')">{{domain}}</span>
+														<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add {{domain}} as target." onclick="add_target('{{ domain|escapejs }}')">{{domain}}</span>
 													{% endfor %}
 												{% else %}
 													<div class="alert alert-info">No Related Domains identified</div>
@@ -726,7 +726,7 @@ Scan Findings
 												{% if history.domain.domain_info.related_tlds.all %}
 													<div class="alert alert-success">{{history.domain.domain_info.related_tlds.all.count}} Related TLDs identified</div>
 													{% for domain in history.domain.domain_info.related_tlds.all %}
-														<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add {{domain}} as target." onclick="add_target('{{domain}}')">{{domain}}</span>
+														<span class="badge badge-soft-primary badge-link waves-effect waves-light me-1" data-toggle="tooltip" title="Add {{domain}} as target." onclick="add_target('{{ domain|escapejs }}')">{{domain}}</span>
 													{% endfor %}
 												{% else %}
 													<div class="alert alert-info">No Related TLDs identified</div>
@@ -1060,7 +1060,7 @@ Scan Findings
 								<i class="mdi mdi-dots-vertical"></i>
 							</a>
 							<div class="dropdown-menu dropdown-menu-end">
-								<a class="dropdown-item" href="javascript:download_interesting_subdomains({{scan_history_id}}, '{{history.domain.name}}');">Download Interesting Subdomains</a>
+								<a class="dropdown-item" href="javascript:download_interesting_subdomains({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}');">Download Interesting Subdomains</a>
 							</div>
 						</div>
 						<h4 class="header-title mb-0"><span id="interesting_subdomain_count_badge"><span class="spinner-border spinner-border-sm me-1"></span></span> Interesting Subdomains</h4>
@@ -1087,7 +1087,7 @@ Scan Findings
 								<i class="mdi mdi-dots-vertical"></i>
 							</a>
 							<div class="dropdown-menu dropdown-menu-end">
-								<a class="dropdown-item" href="javascript:download_interesting_endpoints({{scan_history_id}}, '{{history.domain.name}}');">Download Interesting Endpoints</a>
+								<a class="dropdown-item" href="javascript:download_interesting_endpoints({{scan_history_id}}, '{{ history.domain.name|escapejs|urlencode }}');">Download Interesting Endpoints</a>
 							</div>
 						</div>
 						<h4 class="header-title mb-0"><span id="interesting_endpoint_count_badge"><span class="spinner-border spinner-border-sm me-1"></span></span> Interesting Endpoints</h4>

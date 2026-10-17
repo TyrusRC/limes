@@ -199,7 +199,7 @@ $(document).ready(function() {
         for (var i = 0; i < selectedData.length; i++) {
           col1_data = selectedData[i];
           domain_name = col1_data.match(/([^\n]+)/g)[0];
-          target_array.push(domain_name);
+          target_array.push(extractContent(domain_name).trim());
         }
 
         target_array = Array.from(new Set(target_array));
@@ -207,7 +207,7 @@ $(document).ready(function() {
           select = document.getElementById('filterByTarget');
           var option = document.createElement('option');
           option.value = target_array[target];
-          option.innerHTML = target_array[target];
+          option.textContent = target_array[target];
           select.appendChild(option);
         }
 
@@ -224,7 +224,7 @@ $(document).ready(function() {
           select = document.getElementById('filterByScanType');
           var option = document.createElement('option');
           option.value = scan_type_array[engine];
-          option.innerHTML = scan_type_array[engine];
+          option.textContent = scan_type_array[engine];
           select.appendChild(option);
         }
       }
@@ -235,11 +235,11 @@ $(document).ready(function() {
     $.getJSON(`/api/listOrganizations?&format=json`, function(data) {
       data = data['organizations']
       for (organization in data) {
-        name = htmlEncode(data[organization]['name']);
+        name = data[organization]['name'];
         select = document.getElementById('filterByOrganization');
         var option = document.createElement('option');
         option.value = name;
-        option.innerHTML = name;
+        option.textContent = name;
         select.appendChild(option);
       }
     }).fail(function() {});
@@ -250,18 +250,18 @@ $(document).ready(function() {
       select = document.getElementById('filterByScanStatus');
       var option = document.createElement('option');
       option.value = status_types[status];
-      option.innerHTML = status_types[status];
+      option.textContent = status_types[status];
       select.appendChild(option);
     }
 
     var org_filter = document.getElementById('filterByOrganization');
     org_filter.addEventListener('click', function() {
       table.search(this.value).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Organization: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Organization: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by organization ${this.value}`,
+        text: `Filtering by organization ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -288,11 +288,11 @@ $(document).ready(function() {
         default:
         badge_color = 'primary'
       }
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-${badge_color}">Scan Status: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-${badge_color}">Scan Status: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by scan status ${this.value}`,
+        text: `Filtering by scan status ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -300,11 +300,11 @@ $(document).ready(function() {
     var engine_filter = document.getElementById('filterByScanType');
     engine_filter.addEventListener('click', function() {
       table.search(this.value).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Scan Engine: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Scan Engine: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by Engine ${this.value}`,
+        text: `Filtering by Engine ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
@@ -312,11 +312,11 @@ $(document).ready(function() {
     var target_filter = document.getElementById('filterByTarget');
     target_filter.addEventListener('click', function() {
       table.search(extractContent(this.value)).draw();
-      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Target/Domain: ${this.value}
+      document.getElementById('filteringText').innerHTML = `<span class="badge badge-soft-primary">Target/Domain: ${htmlEncode(this.value)}
       <span id="clearFilterChip" class="badge-link" onclick="document.getElementById('resetFilters').click()">X</span>
       </span>`;
       Snackbar.show({
-        text: `Filtering by Engine ${this.value}`,
+        text: `Filtering by Engine ${htmlEncode(this.value)}`,
         pos: 'top-center'
       });
     }, false);
