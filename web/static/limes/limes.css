@@ -643,9 +643,10 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 }
 .nav-tabs .nav-link:hover, .nav-tabs .nav-link:focus { color: var(--ink); border-color: transparent; border-bottom-color: var(--border-strong); }
 .nav-tabs .nav-link.active, .nav-tabs .nav-item.show .nav-link { color: var(--brand-ink); background: transparent; border-color: transparent; border-bottom-color: var(--brand); font-weight: 600; }
-.nav-tabs.nav-bordered { border-bottom: 1px solid var(--border); }
-.nav-tabs.nav-bordered .nav-item .nav-link { border-bottom: 2px solid transparent; }
-.nav-tabs.nav-bordered .nav-item .nav-link.active { border-bottom: 2px solid var(--brand); }
+/* !important: bootstrap.min.css sets the theme's blue on .nav-bordered with !important */
+.nav-tabs.nav-bordered { border-bottom: 1px solid var(--border) !important; }
+.nav-tabs.nav-bordered .nav-item .nav-link { border: 0 !important; border-bottom: 2px solid transparent !important; }
+.nav-tabs.nav-bordered .nav-item .nav-link.active { border-bottom: 2px solid var(--brand) !important; }
 .nav-pills .nav-link { color: var(--ink-2); border-radius: var(--radius); font-size: var(--text-sm); font-weight: 500; }
 .nav-pills .nav-link:hover { background: var(--surface-hover); color: var(--ink); }
 .nav-pills .nav-link.active, .nav-pills .show > .nav-link { color: var(--brand-ink); background: var(--brand-tint); font-weight: 600; }
@@ -672,6 +673,9 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 
 /* ---------- Alerts ---------- */
 .alert { border-radius: var(--radius-lg); border: 1px solid transparent; padding: var(--space-3) var(--space-4); font-size: var(--text-sm); }
+/* .alert's padding shorthand would otherwise drop Bootstrap's room for the close button */
+.alert-dismissible { padding-right: calc(2 * var(--space-4) + 1em); }
+.alert-dismissible .btn-close { padding: var(--space-3) var(--space-4); }
 .alert-primary, .alert-success { color: var(--ink); background: var(--brand-tint); border-color: var(--brand); }
 .alert-danger { color: var(--ink); background: var(--sev-critical-bg); border-color: var(--sev-critical); }
 .alert-warning { color: var(--ink); background: var(--sev-medium-bg); border-color: var(--sev-medium); }
@@ -846,11 +850,11 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 :root .compose-box { background: transparent; }
 :root .compose-box .compose-content h5 { color: var(--ink); }
 :root #addTaskModal .modal-footer .btn.add-tsk, :root #addTaskModal .modal-footer .btn.edit-tsk { background: var(--brand-solid); color: var(--on-brand); border-color: var(--brand-solid); border-radius: var(--radius); }
-:root .todo-inbox .todo-item { border-bottom-color: var(--border); }
+:root .todo-inbox .todo-item:not(:last-child) { border-bottom-color: var(--border); }
 :root .todo-inbox .todo-item .todo-item-inner .todo-heading { color: var(--ink); }
 :root .todo-inbox .todo-item .todo-item-inner p.todo-text { color: var(--ink-2); }
 :root .todo-inbox .search { border-bottom-color: var(--border); }
-:root .todo-inbox .search input { background: transparent; color: var(--ink); }
+:root .todo-inbox .search input { background: transparent; color: var(--ink); border-color: var(--border); }
 /* markdown editor on Report Settings (EasyMDE, paper theme) */
 :root .EasyMDEContainer .CodeMirror, :root .CodeMirror.cm-s-paper { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
 :root .CodeMirror.cm-s-paper .CodeMirror-cursor { border-left-color: var(--ink); }
