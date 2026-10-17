@@ -1,7 +1,6 @@
 x-app: &app
-  build:
-    context: ./web
   image: limes:local
+  pull_policy: never  # built once, by the migrate service below
   restart: unless-stopped
   env_file: .env
   environment: &app-env
@@ -80,6 +79,9 @@ services:
 
   migrate:
     <<: *app
+    build:
+      context: ./web
+    pull_policy: build
     restart: "no"
     entrypoint: /usr/src/app/migrate-entrypoint.sh
     environment:
@@ -165,6 +167,7 @@ services:
 
   ollama:
     image: ollama/ollama
+    profiles: [llm]  # optional local LLM (~9 GB image): `make up LLM=1`
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
