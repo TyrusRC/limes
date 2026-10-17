@@ -61,28 +61,13 @@ class InventoryTest(Base):
 
 
 class ChangesTest(Base):
-    def test_seven_day_windows_and_order(self):
+    def test_new_owned_counts_the_last_seven_days(self):
         recent, old = self.asset('recent.x.com'), self.asset('old.x.com')
+        self.asset('cand.x.com', tier='candidate')
         Asset.objects.filter(pk=recent.pk).update(first_seen=self.now - timedelta(days=6))
         Asset.objects.filter(pk=old.pk).update(first_seen=self.now - timedelta(days=8))
         Asset.objects.filter(pk=self.root.pk).update(first_seen=self.now - timedelta(days=30))
-        m1 = self.asset('m1.x.com', state='missing')
-        m2 = self.asset('m2.x.com', state='missing')
-        Asset.objects.filter(pk=m1.pk).update(last_seen=self.now - timedelta(days=5), first_seen=self.now - timedelta(days=30))
-        Asset.objects.filter(pk=m2.pk).update(last_seen=self.now - timedelta(days=2), first_seen=self.now - timedelta(days=30))
-        ch = asm_stats(self.p)['changes']
-        self.assertEqual([r['value'] for r in ch['new_owned']], ['recent.x.com'])
-        self.assertEqual([r['value'] for r in ch['missing']], ['m2.x.com', 'm1.x.com'])
-
-    def test_auto_confirmed_this_week(self):
-        for value, days in (('fresh.net', 2), ('stale.net', 8)):
-            self.asset(value, tier='owned_root', kind='root_domain',
-                       decision_reason='auto-confirmed (attribution-v1) 0.97: NS ...',
-                       sources=[{'source': 'attribution', 'evidence': 'e',
-                                 'seen_at': (self.now - timedelta(days=days)).isoformat()}])
-        self.asset('manual.net', tier='owned_root', kind='root_domain', decision_reason='confirmed by hand',
-                   sources=[{'source': 'manual', 'evidence': 'e', 'seen_at': self.now.isoformat()}])
-        self.assertEqual([r['value'] for r in asm_stats(self.p)['changes']['auto_confirmed']], ['fresh.net'])
+        self.assertEqual(asm_stats(self.p)['changes'], {'new_owned': 1})
 
 
 class FindingsTest(Base):
@@ -94,7 +79,19 @@ class FindingsTest(Base):
         for sev in (4, 3, 3, 1, 0):
             Vulnerability.objects.create(scan_history=new, asset=a, name=f'v{sev}', severity=sev, open_status=True)
         Vulnerability.objects.create(scan_history=new, asset=a, name='closed', severity=4, open_status=False)
-        self.assertEqual(asm_stats(self.p)['findings'], {'critical': 1, 'high': 2, 'medium': 0, 'low': 1})
+        # issues, not rows: the two 'v3' rows are one issue, as in the score
+        self.assertEqual(asm_stats(self.p)['findings'], {'critical': 1, 'high': 1, 'medium': 0, 'low': 1})
+
+    def test_waived_issue_leaves_its_tile_and_failed_checks_count(self):
+        from startScan.models import IssueWaiver, RiskCheck, TrackedIssue
+        a = self.asset('a.x.com')
+        s = self.scan()
+        for name, sev in (('crit', 4), ('high', 3)):
+            Vulnerability.objects.create(scan_history=s, asset=a, name=name, template_id=name, severity=sev, open_status=True)
+        RiskCheck.objects.create(asset=a, check_id='web.hsts_missing', status='fail', severity=2, evidence={})
+        issue = TrackedIssue.objects.create(project=self.p, asset=a, key='crit', source='finding', severity=4)
+        IssueWaiver.objects.create(issue=issue, kind='accepted_risk', reason='r')
+        self.assertEqual(asm_stats(self.p)['findings'], {'critical': 0, 'high': 1, 'medium': 1, 'low': 0})
 
     def test_other_project_findings_never_counted(self):
         o = self.asset('o.y.com', project=self.other)
@@ -144,8 +141,8 @@ class EmptyAndCacheTest(Base):
         s = asm_stats(empty)
         self.assertEqual((s['risk']['score'], s['risk']['grade'], s['risk']['trend']), (None, 'N/A', []))
         self.assertEqual(s['inventory']['owned_root'], 0)
-        self.assertEqual(s['changes'], {'new_owned': [], 'missing': [], 'auto_confirmed': []})
-        self.assertEqual(s['activity'], [])
+        self.assertEqual(s['changes'], {'new_owned': 0})
+        self.assertEqual(s['findings'], {'critical': 0, 'high': 0, 'medium': 0, 'low': 0})
 
     def test_cached_until_invalidated(self):
         with mock.patch('dashboard.stats.asm_stats', wraps=asm_stats) as compute:
@@ -178,7 +175,13 @@ class RecentChangesTest(Base):
         self.assertEqual([r['title'] for r in rows], [f't{i}' for i in range(11, 1, -1)])
         self.assertEqual(rows[0]['asset'], 'a.x.com')
         self.assertIsNone(rows[1]['asset'])
-        self.assertEqual(set(rows[0]), {'kind', 'title', 'severity', 'created_at', 'asset'})
+        self.assertEqual(set(rows[0]), {'kind', 'label', 'title', 'severity', 'created_at', 'asset'})
+        self.assertEqual(rows[0]['label'], 'New issue')
+
+    def test_every_change_kind_has_a_label(self):
+        from dashboard.stats import CHANGE_LABELS
+        from limes.alerts.events import KINDS
+        self.assertEqual(set(CHANGE_LABELS), set(KINDS))
 
 
 class OverviewDataTest(Base):
@@ -239,6 +242,9 @@ class OverviewPageTest(Base):
         self.assertNotIn(self.XSS, html)
         self.assertIn('&lt;img src=x onerror=alert(1)&gt;.x.com', html)  # riskiest assets and feed
         self.assertIn('New: &lt;img', html)
+        self.assertIn('New issue · &lt;img', html)  # human label, asset still escaped
+        self.assertIn('id="dash_monitoring"', html)
+        self.assertIn('Last automatic scan: <time', html)  # the test scan has no user
         self.assertNotIn('id="dash_raw"', html)
         IssueWaiver.objects.create(kind='accepted_risk', reason='r', issue=TrackedIssue.objects.create(
             project=self.p, asset=a, key='t', source='finding', severity=3))
@@ -251,3 +257,25 @@ class OverviewPageTest(Base):
         self.assertIn('No owned assets yet.', html)
         self.assertIn('No changes recorded yet.', html)
         self.assertNotIn('ov-gauge-value', html)
+
+
+class LiveTrendTest(Base):
+    def test_last_point_is_the_live_headline(self):
+        from startScan.models import IssueWaiver, TrackedIssue
+        a = self.asset('a.x.com')
+        Vulnerability.objects.create(scan_history=self.scan(), asset=a, name='crit', template_id='crit', severity=4,
+                                     open_status=True)
+        today = timezone.localdate()
+        for i in (2, 0):  # yesterday-but-one and today's (now stale) snapshot
+            ScoreSnapshot.objects.create(project=self.p, date=today - timedelta(days=i), version='limes-score-v3',
+                                         score=599, grade='C')
+        IssueWaiver.objects.create(issue=TrackedIssue.objects.create(project=self.p, asset=a, key='crit',
+                                                                     source='finding', severity=4),
+                                   kind='accepted_risk', reason='r')
+        risk = asm_stats(self.p)['risk']
+        self.assertEqual(risk['score'], 950)
+        self.assertEqual([(t['date'], t['score']) for t in risk['trend']],
+                         [((today - timedelta(days=2)).isoformat(), 599), (today.isoformat(), 950)])
+        ScoreSnapshot.objects.filter(date=today).delete()  # no snapshot yet today: the live point is appended
+        self.assertEqual(asm_stats(self.p)['risk']['trend'][-1], {'date': today.isoformat(), 'score': 950,
+                                                                   'version': 'limes-score-v3'})

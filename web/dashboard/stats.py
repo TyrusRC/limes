@@ -13,6 +13,9 @@ LIST_LIMIT = 10
 RISKY_LIMIT = 6
 OWNED = ('owned_root', 'owned_host')
 SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+CHANGE_LABELS = {'issue_new': 'New issue', 'issue_fixed': 'Fixed', 'issue_regressed': 'Came back',
+                 'score_dropped': 'Score dropped', 'score_changed': 'Score changed', 'waiver_expired': 'Waiver expired',
+                 'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed'}
 
 
 def _key(project_id):
@@ -28,7 +31,11 @@ def _risk(project):
     from startScan.models import ScoreSnapshot
     risk = scoring.project_score(project)
     snaps = ScoreSnapshot.objects.filter(project=project).order_by('-date').values('date', 'score', 'version')[:30]
-    risk['trend'] = [{'date': s['date'].isoformat(), 'score': s['score'], 'version': s['version']} for s in reversed(list(snaps))]
+    trend = [{'date': s['date'].isoformat(), 'score': s['score'], 'version': s['version']} for s in reversed(list(snaps))]
+    if risk['score'] is not None:  # today's point is the live score, so the series ends at the headline
+        today = {'date': timezone.localdate().isoformat(), 'score': risk['score'], 'version': risk['version']}
+        trend = (trend[:-1] if trend and trend[-1]['date'] == today['date'] else trend[-29:]) + [today]
+    risk['trend'] = trend
     risk['band'] = grade_band(risk['score'])
     risk['max_score'] = scoring.MAX_SCORE
     return risk
@@ -46,21 +53,31 @@ def grade_band(score):
             'to_next': floors[i - 1][0] - score if i else None}
 
 
-def _risky_assets(project):
-    """Assessed assets below the maximum, weakest first, scored the way the headline is (waivers left out).
-    NOTE: recomputes the baselines project_score already built; cached for STATS_TTL. Upgrade: share them."""
+def _live_issues(project):
+    """{asset: {category: severity}} for assessed assets, without actively waived issues: the inputs the
+    headline score uses. NOTE: rebuilds the baselines project_score already built; cached for STATS_TTL."""
     from limes import scoring
     from startScan.models import Asset
     penalties, assessed = scoring.current_issues(project)
     waived = scoring.waived_keys(project)
+    return {a: scoring._live(a.id, penalties.get(a.id, {}), waived)
+            for a in Asset.objects.filter(id__in=assessed).only('id', 'value', 'kind', 'last_seen')}
+
+
+def _sev_counts(categories):
+    sevs = list(categories)
+    return {name: sevs.count(sev) for sev, name in SEVERITY_FIELDS.items()}
+
+
+def _risky_assets(live):
+    """Assessed assets below the maximum, weakest first, scored the way the headline is."""
+    from limes import scoring
     rows = []
-    for a in Asset.objects.filter(id__in=assessed).only('id', 'value', 'kind', 'last_seen'):
-        live = scoring._live(a.id, penalties.get(a.id, {}), waived)
-        score = scoring._score(live)
+    for a, cats in live.items():
+        score = scoring._score(cats)
         if score < scoring.MAX_SCORE:
-            sevs = list(live.values())
             rows.append({'value': a.value, 'kind': a.kind, 'score': score, 'grade': scoring.grade(score),
-                         'last_seen': a.last_seen, 'counts': {n: sevs.count(v) for v, n in SEVERITY_FIELDS.items()}})
+                         'last_seen': a.last_seen, 'counts': _sev_counts(cats.values())})
     rows.sort(key=lambda r: (r['score'], r['value']))
     return rows[:RISKY_LIMIT]
 
@@ -88,33 +105,12 @@ def _review(project):
 
 def _changes(project, now):
     from startScan.models import Asset
-    owned = Asset.objects.filter(project=project, scope_tier__in=OWNED)
-    new = owned.filter(first_seen__gte=now - WEEK).order_by('-first_seen', 'id')[:LIST_LIMIT]
-    missing = owned.filter(state='missing').order_by('-last_seen', 'id')[:LIST_LIMIT]
-    auto = []
-    for a in owned.filter(decision_reason__startswith='auto-confirmed', sources__contains=[{'source': 'attribution'}]):
-        seen = max((s.get('seen_at') or '' for s in a.sources or [] if s.get('source') == 'attribution'), default='')
-        if seen >= (now - WEEK).isoformat():
-            auto.append({'value': a.value, 'kind': a.kind, 'seen_at': seen})
-    auto.sort(key=lambda r: r['seen_at'], reverse=True)
-    return {'new_owned': _rows(new, 'first_seen'), 'missing': _rows(missing, 'last_seen'),
-            'auto_confirmed': auto[:LIST_LIMIT]}
+    return {'new_owned': Asset.objects.filter(project=project, scope_tier__in=OWNED, first_seen__gte=now - WEEK).count()}
 
 
-def _rows(assets, field):
-    return [{'value': a.value, 'kind': a.kind, field: getattr(a, field)} for a in assets]
-
-
-def _findings(project):
-    from limes import scoring
-    from startScan.models import Vulnerability
-    base = scoring.baselines(project)
-    assets = scoring.assessed_assets(project, base)
-    counts = (Vulnerability.objects.filter(scan_history__in=[s.id for s in base.values()], open_status=True,
-                                           asset_id__in=list(assets), severity__gte=1)
-              .values_list('severity').annotate(n=Count('id')))
-    by_sev = dict(counts)
-    return {name: by_sev.get(sev, 0) for sev, name in SEVERITY_FIELDS.items()}
+def _findings(live):
+    """Open issues (findings and failed checks) on assessed assets, actively waived ones left out."""
+    return _sev_counts(sev for cats in live.values() for sev in cats.values())
 
 
 def _monitoring(project, now):
@@ -134,23 +130,22 @@ def _monitoring(project, now):
 def _recent_changes(project):
     from startScan.models import ChangeEvent
     evs = ChangeEvent.objects.filter(project=project).select_related('asset').order_by('-created_at', '-id')[:LIST_LIMIT]
-    return [{'kind': e.kind, 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
+    return [{'kind': e.kind, 'label': CHANGE_LABELS.get(e.kind, e.kind), 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
              'asset': e.asset.value if e.asset else None} for e in evs]
 
 
 def asm_stats(project):
-    from startScan.models import ScanActivity
     now = timezone.now()
+    live = _live_issues(project)
     return {
         'risk': _risk(project),
         'inventory': _inventory(project),
         'review': _review(project),
         'changes': _changes(project, now),
         'recent_changes': _recent_changes(project),
-        'findings': _findings(project),
-        'risky_assets': _risky_assets(project),
+        'findings': _findings(live),
+        'risky_assets': _risky_assets(live),
         'monitoring': _monitoring(project, now),
-        'activity': list(ScanActivity.objects.filter(scan_of__domain__project=project).order_by('-time')[:15]),
     }
 
 
