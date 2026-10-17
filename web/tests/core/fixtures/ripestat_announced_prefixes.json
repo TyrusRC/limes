@@ -1,0 +1,10 @@
+{"status": "ok", "data": {"resource": "64500", "prefixes": [
+  {"prefix": "198.18.0.0/24", "timelines": []},
+  {"prefix": "203.0.114.0/24", "timelines": [{"starttime": "2026-01-01T00:00:00", "endtime": "2026-10-17T00:00:00"}]},
+  {"prefix": "203.0.114.77/24", "timelines": []},
+  {"prefix": "2606:4700::/48", "timelines": []},
+  {"prefix": "not-a-prefix"},
+  {"prefix": 12},
+  {"nope": true},
+  "junk"
+]}}

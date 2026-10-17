@@ -1,4 +1,5 @@
 """RIPEstat network/AS lookups (passive, keyless)."""
+import ipaddress
 from urllib.parse import quote
 
 BASE = 'https://stat.ripe.net/data'
@@ -28,3 +29,24 @@ def parse_network_info(obj):
 def parse_as_overview(obj):
     holder = _data(obj).get('holder')
     return {'holder': holder if isinstance(holder, str) else None}
+
+
+def announced_prefixes_url(asn):
+    n = str(asn).strip().upper()
+    n = n[2:] if n.startswith('AS') else n
+    return f'{BASE}/announced-prefixes/data.json?resource=AS{quote(n)}&sourceapp=limes'
+
+
+def parse_announced_prefixes(obj):
+    """Canonical, deduplicated network strings in answer order; anything that is not a prefix is dropped."""
+    rows = _data(obj).get('prefixes')
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        raw = row.get('prefix') if isinstance(row, dict) else None
+        try:
+            net = str(ipaddress.ip_network(raw, strict=False)) if isinstance(raw, str) else None
+        except ValueError:
+            net = None
+        if net and net not in out:
+            out.append(net)
+    return out
