@@ -116,6 +116,37 @@ class CurrentIssuesTest(Base):
         self.assertIn(host.id, assessed)
 
 
+class CheckFixedTest(Base):
+    """A check-sourced issue is fixed only by its own fresh pass; error, stale or missing leave it open."""
+    def setUp(self):
+        super().setUp()
+        self.h = self.host('a.x.com')
+        self.tls = RiskCheck.objects.create(asset=self.h, check_id='tls.cert_expired', status='fail', severity=3)
+        RiskCheck.objects.create(asset=self.h, check_id='web.csp_missing', status='pass', severity=1)
+        issues.sync_issues(self.p)
+
+    def set_tls(self, status, ago=timedelta(0)):
+        RiskCheck.objects.filter(pk=self.tls.pk).update(status=status, last_checked=timezone.now() - ago)
+
+    def test_error_flap_is_neither_fixed_nor_regressed(self):
+        self.set_tls('error')
+        self.assertEqual(issues.sync_issues(self.p), [])
+        self.set_tls('fail')
+        self.assertEqual(issues.sync_issues(self.p), [])
+        self.assertEqual(TrackedIssue.objects.get(key='tls.cert_expired').status, 'open')
+
+    def test_stale_check_is_not_fixed(self):
+        self.scan()  # the root's baseline makes the host assessed regardless of checks
+        self.set_tls('fail', ago=timedelta(days=31))
+        self.assertEqual(issues.sync_issues(self.p), [])
+        self.assertEqual(TrackedIssue.objects.get(key='tls.cert_expired').status, 'open')
+
+    def test_fresh_pass_is_fixed(self):
+        self.set_tls('pass')
+        (e,) = issues.sync_issues(self.p)
+        self.assertEqual((e.kind, e.detail['key']), ('issue_fixed', 'tls.cert_expired'))
+
+
 class OtherEventsTest(Base):
     def snap(self, score, grade, date=None):
         return ScoreSnapshot(project=self.p, date=date or timezone.localdate(), version='v', score=score, grade=grade)
