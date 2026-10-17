@@ -97,6 +97,10 @@ function jsEscape(str) {
 		return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
 	});
 }
+// href value for a link built from scan data: only http(s) URLs, so a stored javascript: URL cannot run on click.
+function safeHref(url) {
+	return /^https?:\/\//i.test(String(url).trim()) ? htmlEncode(url) : '#';
+}
 
 function deleteScheduledScan(id) {
 	const delAPI = "/scan/delete/scheduled_task/" + id;
@@ -1088,7 +1092,7 @@ function render_endpoint_in_xlmodal(endpoint_count, subdomain_name, result) {
 
 function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 	// This function will render the vulnerability datatable in xl modal
-	$('#xl-modal-content').append(`<h5> ${vuln_count} Vulnerabilities Discovered on subdomain ${subdomain_name}</h5>`);
+	$('#xl-modal-content').append(`<h5> ${vuln_count} Vulnerabilities Discovered on subdomain ${htmlEncode(subdomain_name)}</h5>`);
 	$('#xl-modal-content').append(`<ol id="vuln_results_ol" class="list-group list-group-numbered"></ol>`);
 	$('#xl-modal-content').append(`
 		<div class="">
@@ -1111,7 +1115,7 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 	$('#vuln_tbody').empty();
 	for (var vuln in result) {
 		var vuln_obj = result[vuln];
-		var vuln_type = vuln_obj['type'] ? `<span class="badge badge-soft-primary">&nbsp;&nbsp;${vuln_obj['type'].toUpperCase()}&nbsp;&nbsp;</span>` : '';
+		var vuln_type = vuln_obj['type'] ? `<span class="badge badge-soft-primary">&nbsp;&nbsp;${htmlEncode(vuln_obj['type'].toUpperCase())}&nbsp;&nbsp;</span>` : '';
 		var tags = '';
 		var cvss_metrics_badge = '';
 		switch (vuln_obj['severity']) {
@@ -1140,14 +1144,14 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 		if (vuln_obj['tags']) {
 			tags = '<div>';
 			vuln_obj['tags'].forEach(tag => {
-				tags += `<span class="badge badge-${badge_color} me-1 mb-1" data-toggle="tooltip" data-placement="top" title="Tags">${tag.name}</span>`;
+				tags += `<span class="badge badge-${badge_color} me-1 mb-1" data-toggle="tooltip" data-placement="top" title="Tags">${htmlEncode(tag.name)}</span>`;
 			});
 			tags += '</div>';
 		}
 		if (vuln_obj['cvss_metrics']) {
-			cvss_metrics_badge = `<div><span class="badge badge-outline-primary my-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${vuln_obj['cvss_metrics']}</span></div>`;
+			cvss_metrics_badge = `<div><span class="badge badge-outline-primary my-1" data-toggle="tooltip" data-placement="top" title="CVSS Metrics">${htmlEncode(vuln_obj['cvss_metrics'])}</span></div>`;
 		}
-		var vuln_title = `<b class="text-${color}">` + vuln_obj['name'] + `</b>` + cvss_metrics_badge + tags;
+		var vuln_title = `<b class="text-${color}">` + htmlEncode(vuln_obj['name']) + `</b>` + cvss_metrics_badge + tags;
 		var badge = 'danger';
 		var cvss_score = '';
 		if (vuln_obj['cvss_score']) {
@@ -1158,21 +1162,21 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 			} else if (vuln_obj['cvss_score'] > 6.9 && vuln_obj['cvss_score'] <= 8.9) {
 				badge = 'danger';
 			}
-			cvss_score = `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${vuln_obj['cvss_score']}</span>`;
+			cvss_score = `<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${htmlEncode(vuln_obj['cvss_score'])}</span>`;
 		}
 		var cve_cwe_badge = '<div>';
 		if (vuln_obj['cve_ids']) {
 			vuln_obj['cve_ids'].forEach(cve => {
-				cve_cwe_badge += `<a href="https://google.com/search?q=${cve.name.toUpperCase()}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${cve.name.toUpperCase()}</a>`;
+				cve_cwe_badge += `<a href="https://google.com/search?q=${encodeURIComponent(cve.name.toUpperCase())}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${htmlEncode(cve.name.toUpperCase())}</a>`;
 			});
 		}
 		if (vuln_obj['cwe_ids']) {
 			vuln_obj['cwe_ids'].forEach(cwe => {
-				cve_cwe_badge += `<a href="https://google.com/search?q=${cwe.name.toUpperCase()}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${cwe.name.toUpperCase()}</a>`;
+				cve_cwe_badge += `<a href="https://google.com/search?q=${encodeURIComponent(cwe.name.toUpperCase())}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${htmlEncode(cwe.name.toUpperCase())}</a>`;
 			});
 		}
 		cve_cwe_badge += '</div>';
-		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + htmlEncode(vuln_obj['http_url']) + "' target='_blank' class='text-danger'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : vuln_obj['http_url'];
+		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + safeHref(vuln_obj['http_url']) + "' target='_blank' class='text-danger'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : htmlEncode(vuln_obj['http_url']);
 		$('#vuln_tbody').append(`
 			<tr>
 			<td>${vuln_type}</td>
@@ -2289,7 +2293,7 @@ function get_http_badge(http_status){
 
 
 function get_and_render_cve_details(cve_id){
-	var api_url = `/api/tools/cve_details/?cve_id=${cve_id}&format=json`;
+	var api_url = `/api/tools/cve_details/?cve_id=${encodeURIComponent(cve_id)}&format=json`;
 	Swal.fire({
 		title: 'Fetching CVE Details...'
 	});
@@ -2308,7 +2312,7 @@ function get_and_render_cve_details(cve_id){
 			$('#xl-modal-title').empty();
 			$('#xl-modal-content').empty();
 			$('#xl-modal-footer').empty();
-			$('#xl-modal_title').html(`CVE Details of ${cve_id}`);
+			$('#xl-modal_title').html(`CVE Details of ${htmlEncode(cve_id)}`);
 
 			var cvss_score_badge = 'danger';
 
@@ -2333,12 +2337,12 @@ function get_and_render_cve_details(cve_id){
 
 				content += `
 				<div class="tab-pane fade active show" id="v-pills-cve-details" role="tabpanel" aria-labelledby="v-pills-cve-details-tab" data-simplebar style="max-height: 600px; min-height: 600px;">
-					<h4 class="header-title">${cve_id}</h4>
+					<h4 class="header-title">${htmlEncode(cve_id)}</h4>
 					<div class="alert alert-warning" role="alert">
-						${response.result.summary}
+						${htmlEncode(response.result.summary)}
 					</div>
-					<span class="badge badge-soft-primary">Assigner: ${response.result.assigner}</span>
-					<span class="badge badge-outline-primary">CVSS Vector: ${response.result['cvss-vector']}</span>
+					<span class="badge badge-soft-primary">Assigner: ${htmlEncode(response.result.assigner)}</span>
+					<span class="badge badge-outline-primary">CVSS Vector: ${htmlEncode(response.result['cvss-vector'])}</span>
 					<table class="domain_details_table table table-hover table-borderless">
 						<tr style="display: none">
 							<th>&nbsp;</th>
@@ -2346,31 +2350,31 @@ function get_and_render_cve_details(cve_id){
 						</tr>
 						<tr>
 							<td>CVSS Score</td>
-							<td><span class="badge badge-soft-${cvss_score_badge}">${response.result.cvss ? response.result.cvss: "-"}</span></td>
+							<td><span class="badge badge-soft-${cvss_score_badge}">${htmlEncode(response.result.cvss ? response.result.cvss: "-")}</span></td>
 						</tr>
 						<tr>
 							<td>Confidentiality Impact</td>
-							<td>${response.result.impact.confidentiality ? response.result.impact.confidentiality: "N/A"}</td>
+							<td>${htmlEncode(response.result.impact.confidentiality ? response.result.impact.confidentiality: "N/A")}</td>
 						</tr>
 						<tr>
 							<td>Integrity Impact</td>
-							<td>${response.result.impact.integrity ? response.result.impact.integrity: "N/A"}</td>
+							<td>${htmlEncode(response.result.impact.integrity ? response.result.impact.integrity: "N/A")}</td>
 						</tr>
 						<tr>
 							<td>Availability Impact</td>
-							<td>${response.result.impact.availability ? response.result.impact.availability: "N/A"}</td>
+							<td>${htmlEncode(response.result.impact.availability ? response.result.impact.availability: "N/A")}</td>
 						</tr>
 						<tr>
 							<td>Access Complexity</td>
-							<td>${response.result.access.complexity ? response.result.access.complexity: "N/A"}</td>
+							<td>${htmlEncode(response.result.access.complexity ? response.result.access.complexity: "N/A")}</td>
 						</tr>
 						<tr>
 							<td>Authentication</td>
-							<td>${response.result.access.authentication ? response.result.access.authentication: "N/A"}</td>
+							<td>${htmlEncode(response.result.access.authentication ? response.result.access.authentication: "N/A")}</td>
 						</tr>
 						<tr>
 							<td>CWE ID</td>
-							<td><span class="badge badge-outline-danger">${response.result.cwe ? response.result.cwe: "N/A"}</span></td>
+							<td><span class="badge badge-outline-danger">${htmlEncode(response.result.cwe ? response.result.cwe: "N/A")}</span></td>
 						</tr>
 					</table>
 				</div>
@@ -2380,7 +2384,7 @@ function get_and_render_cve_details(cve_id){
 				<ul>`;
 
 				for (var reference in response.result.references) {
-					content += `<li><a href="${response.result.references[reference]}" target="_blank">${response.result.references[reference]}</a></li>`;
+					content += `<li><a href="${safeHref(response.result.references[reference])}" target="_blank">${htmlEncode(response.result.references[reference])}</a></li>`;
 				}
 
 				content += `</ul></div>`;
@@ -2390,7 +2394,7 @@ function get_and_render_cve_details(cve_id){
 				<ul>`;
 
 				for (var prod in response.result.vulnerable_product) {
-					content += `<li>${response.result.vulnerable_product[prod]}</li>`;
+					content += `<li>${htmlEncode(response.result.vulnerable_product[prod])}</li>`;
 				}
 
 				content += `</ul></div>`;
@@ -2399,7 +2403,7 @@ function get_and_render_cve_details(cve_id){
 				<ul>`;
 
 				for (var conf in response.result.vulnerable_configuration) {
-					content += `<li>${response.result.vulnerable_configuration[conf]['id']}</li>`;
+					content += `<li>${htmlEncode(response.result.vulnerable_configuration[conf]['id'])}</li>`;
 				}
 
 				content += `</ul></div>`;
@@ -2466,17 +2470,17 @@ function get_most_vulnerable_target(slug=null, scan_id=null, target_id=null, ign
 
 			for (var res in response.result) {
 				var targ_obj = response.result[res];
-				var tr = `<tr onclick="window.location='/scan/${slug}/detail/vuln?domain=${targ_obj.name}';" style="cursor: pointer;">`;
+				var tr = `<tr onclick="window.location='/scan/${slug}/detail/vuln?domain=${jsEscape(encodeURIComponent(targ_obj.name))}';" style="cursor: pointer;">`;
 				if (scan_id || target_id) {
-					tr = `<tr onclick="window.location='/scan/${slug}/detail/vuln?subdomain=${targ_obj.name}';" style="cursor: pointer;">`;
+					tr = `<tr onclick="window.location='/scan/${slug}/detail/vuln?subdomain=${jsEscape(encodeURIComponent(targ_obj.name))}';" style="cursor: pointer;">`;
 				}
 				$('#most_vulnerable_target_tbody').append(`
 					${tr}
 						<td>
-							<h5 class="m-0 fw-normal">${targ_obj.name}</h5>
+							<h5 class="m-0 fw-normal">${htmlEncode(targ_obj.name)}</h5>
 						</td>
 						<td>
-							<span class="badge badge-outline-danger">${targ_obj.vuln_count} Vulnerabilities</span>
+							<span class="badge badge-outline-danger">${htmlEncode(targ_obj.vuln_count)} Vulnerabilities</span>
 						</td>
 					</tr>
 				`);
@@ -2563,12 +2567,12 @@ function get_most_common_vulnerability(slug=null, scan_id=null, target_id=null, 
 						vuln_badge = get_severity_badge('Unknown');
 				}
 				$('#most_common_vuln_tbody').append(`
-					<tr onclick="window.location='/scan/${slug}/detail/vuln?vulnerability_name=${vuln_obj.name}';" style="cursor: pointer;">
+					<tr onclick="window.location='/scan/${slug}/detail/vuln?vulnerability_name=${jsEscape(encodeURIComponent(vuln_obj.name))}';" style="cursor: pointer;">
 						<td>
-							<h5 class="m-0 fw-normal">${vuln_obj.name}</h5>
+							<h5 class="m-0 fw-normal">${htmlEncode(vuln_obj.name)}</h5>
 						</td>
 						<td>
-							<span class="badge badge-outline-danger">${vuln_obj.count}</span>
+							<span class="badge badge-outline-danger">${htmlEncode(vuln_obj.count)}</span>
 						</td>
 						<td>
 							${vuln_badge}
@@ -2710,18 +2714,18 @@ function render_vuln_offcanvas(vuln){
 	var title_content = '';
 	var body = '';
 	title_content += `<i class="mdi mdi-bug-outline me-1 text-${default_color}"></i>`;
-	title_content += `<span class="badge badge-${default_badge_color} text-${default_color}">${vuln.severity}</span>`;
+	title_content += `<span class="badge badge-${default_badge_color} text-${default_color}">${htmlEncode(vuln.severity)}</span>`;
 	title_content += `<span class="text-${default_color} ms-1">${htmlEncode(vuln.name)}</span>`;
 
-	body += `<p><b>ID: </b>${vuln.id}</p>`;
-	body += `<p><b>Discovered on: </b>${vuln.discovered_date}</p>`;
+	body += `<p><b>ID: </b>${htmlEncode(vuln.id)}</p>`;
+	body += `<p><b>Discovered on: </b>${htmlEncode(vuln.discovered_date)}</p>`;
 	body += `<p><b>URL: </b>
-		<a href="${htmlEncode(vuln.http_url)}" 
+		<a href="${safeHref(vuln.http_url)}" 
 			target="_blank" 
 			rel="noopener noreferrer">
 			${split_into_lines(htmlEncode(vuln.http_url), 150)}
 		</a></p>`;
-	body += `<p><b>Severity: </b>${vuln.severity}<br><b>Type: </b>${vuln.type.toUpperCase()}<br><b>Source: </b> ${vuln.source.toUpperCase()}</p>`;
+	body += `<p><b>Severity: </b>${htmlEncode(vuln.severity)}<br><b>Type: </b>${htmlEncode(vuln.type.toUpperCase())}<br><b>Source: </b> ${htmlEncode(vuln.source.toUpperCase())}</p>`;
 
 	if (vuln.description) {
 		description = vuln.description.replace(new RegExp('\r?\n','g'), '<br />');
@@ -2794,7 +2798,7 @@ function render_vuln_offcanvas(vuln){
 		<td>`;
 
 		vuln.cve_ids.forEach(cve => {
-			body += `<a href="#" onclick="get_and_render_cve_details('${cve.name.toUpperCase()}')" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${cve.name.toUpperCase()}</a>`;
+			body += `<a href="#" onclick="get_and_render_cve_details('${jsEscape(cve.name.toUpperCase())}')" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${htmlEncode(cve.name.toUpperCase())}</a>`;
 		});
 
 	body += `</td>
@@ -2809,7 +2813,7 @@ function render_vuln_offcanvas(vuln){
 		<td>`
 
 		vuln.cwe_ids.forEach(cwe => {
-			body += `<a href="https://google.com/search?q=${cwe.name.toUpperCase()}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${cwe.name.toUpperCase()}</a>`;
+			body += `<a href="https://google.com/search?q=${encodeURIComponent(cwe.name.toUpperCase())}" target="_blank" class="badge badge-outline-primary me-1 mt-1" data-toggle="tooltip" data-placement="top" title="CWE ID">${htmlEncode(cwe.name.toUpperCase())}</a>`;
 		});
 
 	body += `</td>
@@ -2830,7 +2834,7 @@ function render_vuln_offcanvas(vuln){
 		<b>CVSS Score</b>
 		</td>
 		<td>
-		<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${vuln.cvss_score}</span>
+		<span class="badge badge-outline-${badge}" data-toggle="tooltip" data-placement="top" title="CVSS Score">${htmlEncode(vuln.cvss_score)}</span>
 		</td>
 		</tr>`
 	}
@@ -2841,7 +2845,7 @@ function render_vuln_offcanvas(vuln){
 		<b>CVSS Metrics</b>
 		</td>
 		<td>
-		${vuln.cvss_metrics}
+		${htmlEncode(vuln.cvss_metrics)}
 		</td>
 		</tr>`
 	}
@@ -2868,7 +2872,7 @@ function render_vuln_offcanvas(vuln){
 		</tr>
 		<tr>
 		<td style="width:20%"><b>Template URL</b></td>
-		<td><a target="_blank" href="${htmlEncode(vuln.template_url)}">${htmlEncode(vuln.template_url)}</a></td>
+		<td><a target="_blank" href="${safeHref(vuln.template_url)}">${htmlEncode(vuln.template_url)}</a></td>
 		</tr>
 		<tr>
 		<td style="width:20%"><b>Template ID</b></td>
@@ -2974,7 +2978,7 @@ function render_vuln_offcanvas(vuln){
 		<ul>`;
 
 		vuln.references.forEach(reference => {
-			body += `<li><a href="${htmlEncode(reference.url)}" target="_blank">${htmlEncode(reference.url)}</a></li>`;
+			body += `<li><a href="${safeHref(reference.url)}" target="_blank">${htmlEncode(reference.url)}</a></li>`;
 		});
 
 		body += `
@@ -3064,21 +3068,21 @@ function render_gpt_vuln_modal(data, title){
 	$('#modal-title').empty();
 	$('#modal-content').empty();
 	$('#modal-footer').empty();
-	$('#modal_title').html(`Vulnerability detail for ${title}`);
+	$('#modal_title').html(`Vulnerability detail for ${htmlEncode(title)}`);
 
 	var modal_content = `
 		<h4>Description</h4>
-		<p>${data.description}</p>
+		<p>${htmlEncode(data.description)}</p>
 		<h4>Impact</h4>
-		<p>${data.impact}</p>
+		<p>${htmlEncode(data.impact)}</p>
 		<h4>Remediation</h4>
-		<p>${data.remediation}</p>
+		<p>${htmlEncode(data.remediation)}</p>
 		<h4>References</h4>
 		<p><ul>
 	`;
 
 	data.references.forEach(reference => {
-		modal_content += `<li><a href="${reference}" target="_blank">${reference}</a></li>`;
+		modal_content += `<li><a href="${safeHref(reference)}" target="_blank">${htmlEncode(reference)}</a></li>`;
 	});
 
 	modal_content += '</ul></p>';
