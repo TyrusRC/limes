@@ -131,16 +131,22 @@ class CheckTest(Base):
         self.asset('cidr', '93.184.216.0/24')
         h = self.asset('hostname', 'a.x.com', parent=root)
         answers = {('a.x.com', 'A'): [PUBLIC, '8.8.8.8'], ('a.x.com', 'AAAA'): [], ('a.x.com', 'CNAME'): dns.resolver.NoAnswer}
-        get = Get({PUBLIC: {'ports': [3389], 'hostnames': ['www.x.com', 'cdn.other.net']}})
-        self.check(h, answers, get=get)
-        new = list(ChangeEvent.objects.filter(kind='asset_new').values_list('title', flat=True))
-        self.assertEqual(sorted(new), [f'New hostname www.x.com', f'New ip {PUBLIC} exposes rdp'])
+        get = Get({PUBLIC: {'ports': [3389], 'hostnames': ['www.x.com', 'cdn.other.net']},
+                   '93.184.216.35': {'ports': [3389], 'hostnames': ['api.x.com']}})
+        self.check(h, answers, get=get)  # first check: the baseline, silent like a range's first sweep
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new').count(), 0)
+        self.assertEqual(Asset.objects.get(value=PUBLIC).scope_tier, 'owned_host')
+        self.assertEqual(Asset.objects.get(value='www.x.com').scope_tier, 'owned_host')
         self.assertEqual(Asset.objects.get(value='8.8.8.8').scope_tier, 'dependency')
         self.assertEqual(Asset.objects.get(value='other.net').scope_tier, 'candidate')
         self.assertEqual([p for p, _ in get.calls], ['internetdb'])  # the dependency IP is never looked up
-        self.check(h, answers, get=get, now=self.now + 2 * DAY)
-        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new').count(), 2)  # nothing new the second time
         self.assertTrue(self.reload(h).enrichment['monitor']['active'])  # open port: active
+        self.check(h, answers, get=get, now=self.now + 2 * DAY)
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new').count(), 0)  # nothing new
+        answers[('a.x.com', 'A')] = [PUBLIC, '93.184.216.35', '8.8.8.8']
+        self.check(h, answers, get=get, now=self.now + 4 * DAY)
+        new = list(ChangeEvent.objects.filter(kind='asset_new').values_list('title', flat=True))
+        self.assertEqual(sorted(new), ['New hostname api.x.com', 'New ip 93.184.216.35 exposes rdp'])
 
     def test_root_without_scan_target_is_monitored(self):
         from targetApp.models import Domain
@@ -170,6 +176,26 @@ class CheckTest(Base):
                'tls': lambda host: {'cert': None, 'legacy': {}}}
         self.check(quiet, public('quiet.other.com'), obs=obs)
         self.assertFalse(self.reload(quiet).enrichment['monitor']['active'])
+
+    def test_refused_or_unresolved_root_still_gets_dns_only_checks(self):
+        mail = {(n, rdtype): v for n in ('priv.com', 'mailonly.com')
+                for rdtype, v in (('MX', ['10 mx.' + n + '.']), ('TXT', ['v=spf1 -all']))}
+        priv = self.asset('root_domain', 'priv.com')
+        self.check(priv, {('priv.com', 'A'): ['10.0.0.1'], ('priv.com', 'AAAA'): [], **mail})
+        mailonly = self.asset('root_domain', 'mailonly.com')
+        self.check(mailonly, {('mailonly.com', 'A'): [], ('mailonly.com', 'AAAA'): [], **mail})
+        self.assertEqual(self.calls, [])  # web/tls never contacted
+        for root, status in ((priv, 'refused'), (mailonly, 'unresolved')):
+            ids = set(root.risk_checks.values_list('check_id', flat=True))
+            self.assertIn('email.spf_missing', ids)
+            self.assertIn('dns.caa_missing', ids)
+            self.assertFalse({i for i in ids if i.startswith(('web.', 'tls.'))}, ids)
+            m = self.reload(root).enrichment['monitor']
+            self.assertEqual((m['status'], m['dns_only']), (status, True))
+            self.assertTrue(m['active'])  # MX
+        h = self.asset('hostname', 'gone.other.com')
+        self.check(h, {})
+        self.assertEqual((h.risk_checks.count(), self.reload(h).enrichment['monitor']['dns_only']), (0, False))
 
     def test_stopped_or_rejected_untouched(self):
         h = self.asset('hostname', 'a.other.com')
@@ -225,6 +251,19 @@ class DueTest(Base):
         ScanHistory.objects.create(domain=domain, scan_type=EngineType.objects.create(engine_name='e', yaml_configuration='{}'),
                                    scan_status=RUNNING_TASK, start_scan_date=self.now)
         self.assertEqual(monitor.due_assets(self.now), [outside])  # b.x.com waits for the scan in progress
+
+    def test_range_swept_ips_are_left_to_the_sweep(self):
+        from limes.tasks import inventory
+        cidr = self.asset('cidr', '93.184.216.0/24')
+        swept = self.asset('ip', PUBLIC, parent=cidr)
+        tagged = self.asset('ip', '93.184.216.35')
+        inventory._append_source(tagged, 'cidr', '93.184.216.0/24')
+        tagged.save()
+        manual = self.asset('ip', '93.184.216.36')
+        inventory._append_source(manual, 'manual', 'added by u')
+        manual.save()
+        self.assertEqual(monitor.due_assets(self.now), [manual])
+        self.assertEqual(set(monitor.monitored(self.p)), {manual})
 
     def test_limit(self):
         for i in range(3):
