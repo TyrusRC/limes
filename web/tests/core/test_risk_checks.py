@@ -747,4 +747,4 @@ class ScoreV2Test(TestCase):
         self.check(self.host, 'web.csp_missing', status='pass', sev=1)
         self.check(self.root, 'web.csp_missing', status='error', sev=1)
         self.assertEqual(scoring.project_score(self.p)['check_coverage'], 0.5)
-        self.assertEqual(scoring.VERSION, 'limes-score-v2')
+        self.assertEqual(scoring.VERSION, 'limes-score-v3')

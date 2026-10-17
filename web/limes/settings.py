@@ -226,7 +226,7 @@ CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest')
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
@@ -234,6 +234,7 @@ CELERY_BEAT_SCHEDULE = {
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
+    'expire-waivers': {'task': 'expire_waivers', 'schedule': 86400.0},
 }
 CELERY_TASK_ROUTES = celery_routing.task_routes()
 CELERY_TASK_ANNOTATIONS = celery_routing.task_annotations()
