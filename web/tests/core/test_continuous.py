@@ -125,8 +125,11 @@ class DispatchTest(Base):
             self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'skipped': 0, 'reason': 'locked'})
             self.apply_async.assert_not_called()
         finally:
+            # unlock explicitly: Postgres frees a closed session's locks asynchronously, so a bare close races
+            with other.cursor() as c:
+                c.execute('SELECT pg_advisory_unlock(%s)', [continuous.DISPATCH_LOCK])
             other.close()
-        self.assertEqual(continuous.dispatch_due_scans()['dispatched'], 1)  # lock released with that session
+        self.assertEqual(continuous.dispatch_due_scans()['dispatched'], 1)
 
     def test_next_tick_never_redispatches_the_same_root(self):
         self.root('a.com')
