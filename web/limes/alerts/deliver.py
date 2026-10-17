@@ -87,19 +87,19 @@ def deliver_immediate(project, now=None, chat=None, post=None):
             _in_app(event)
         except SoftTimeLimitExceeded:
             raise
-        except Exception:
-            logger.exception('In-app alert failed for change event %s', event.id)
+        except Exception as exc:  # never log exc text: it can carry a webhook URL
+            logger.warning('In-app alert failed for change event %s: %s', event.id, type(exc).__name__)
         try:
             chat(event.title, title=event.title)
         except SoftTimeLimitExceeded:
             raise
-        except Exception:
-            logger.exception('Chat alert failed for change event %s', event.id)
+        except Exception as exc:  # never log exc text: it can carry a webhook URL
+            logger.warning('Chat alert failed for change event %s: %s', event.id, type(exc).__name__)
         if webhook_up:
             try:
                 webhook_up = _webhook(event, post)
             except SoftTimeLimitExceeded:
                 raise
-            except Exception:
-                logger.exception('Webhook alert failed for change event %s', event.id)
+            except Exception as exc:
+                logger.warning('Webhook alert failed for change event %s: %s', event.id, type(exc).__name__)
     return sent
