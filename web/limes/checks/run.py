@@ -31,10 +31,12 @@ def _defaults():
     return {'mail_dns': collect.observe_mail_dns, 'ports': collect.ports_for_ip}
 
 
-def _pinned(ip):
-    """http/tls observers that connect only to the vetted ip, with the injectable observers' signatures."""
-    return {'http': lambda host, ident: collect.observe_http(host, ident, get=safe_fetch.pinned_get(host, ip)),
-            'tls': lambda host: collect.observe_tls(host, connect=safe_fetch.pinned_tls_connect(ip))}
+def _pinned(ip, deadline):
+    """http/tls observers that connect only to the vetted ip, all within one host-check deadline, with the
+    injectable observers' signatures."""
+    return {'http': lambda host, ident: collect.observe_http(host, ident,
+                                                             get=safe_fetch.pinned_get(host, ip, deadline=deadline)),
+            'tls': lambda host: collect.observe_tls(host, connect=safe_fetch.pinned_tls_connect(ip, deadline=deadline))}
 
 
 def _host_checks(asset, holder, now, observers, resolve, done):
@@ -45,13 +47,15 @@ def _host_checks(asset, holder, now, observers, resolve, done):
         done['refused'] = reason
         log.info('risk checks skipped for %s: %s', asset.value, reason)
         return None
-    obs = {**_pinned(ip), **(observers or {})}
+    deadline = safe_fetch.Deadline()
+    obs = {**_pinned(ip, deadline), **(observers or {})}
     http = obs['http'](asset.value, ScanIdentity.for_domain(holder))
     tls_obs = obs['tls'](asset.value)
     # live = something answered: HTTP on either port, or a TLS handshake on 443 (a bad certificate still proves an
     # open port, though requests reports it only as an error)
     done['http_live'] = (any(isinstance(http.get(k), dict) for k in ('https', 'http'))
                          or isinstance(tls_obs.get('cert'), dict))
+    done['timeout'] = deadline.expired()  # results stand (a timeout is 'error', never a pass); the caller is told
     return web.evaluate(http) + tls.evaluate(tls_obs, now)
 
 
@@ -135,7 +139,7 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
     now = now or timezone.now()
     obs = {'mail_dns': lambda root: collect.observe_mail_dns(root, resolve=resolve), 'ports': collect.ports_for_ip,
            **(observers or {})}
-    done = {'checked': 0, 'failed': 0, 'http_live': False, 'refused': None}
+    done = {'checked': 0, 'failed': 0, 'http_live': False, 'refused': None, 'timeout': False}
     step = _stepper(now, done)
     if asset.kind in ('hostname', 'root_domain'):
         holder = asset if asset.request_headers else None

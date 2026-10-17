@@ -96,6 +96,9 @@ class _Ctx:
     def getpeercert(self):
         return self.cert
 
+    def settimeout(self, t):
+        pass
+
 
 class ResolveVettedTest(SimpleTestCase):
     def vet(self, host, answers):
@@ -106,11 +109,19 @@ class ResolveVettedTest(SimpleTestCase):
         h = 'a.example.com'
         ip, reason = self.vet(h, {(h, 'A'): ['10.0.0.1'], (h, 'AAAA'): []})
         self.assertIsNone(ip)
-        self.assertIn('10.0.0.1', reason)
+        self.assertIn('private address', reason)
+        self.assertNotIn('10.0.0.1', reason)  # the class is named, the internal address is not repeated
         ip, reason = self.vet(h, {(h, 'A'): [PUBLIC, '10.0.0.1'], (h, 'AAAA'): []})
-        self.assertEqual((ip, '10.0.0.1' in reason), (None, True))
+        self.assertEqual((ip, 'private address' in reason, '10.0.0.1' in reason), (None, True, False))
+        self.assertIn('loopback', self.vet(h, {(h, 'A'): ['127.0.0.1'], (h, 'AAAA'): []})[1])
+        self.assertIn('link-local', self.vet(h, {(h, 'A'): ['169.254.169.254'], (h, 'AAAA'): []})[1])
+        self.assertIn('multicast', self.vet(h, {(h, 'A'): ['224.0.0.1'], (h, 'AAAA'): []})[1])
         ip, reason = self.vet(h, {(h, 'A'): [PUBLIC], (h, 'AAAA'): ['fd00::1']})
-        self.assertEqual((ip, 'fd00::1' in reason), (None, True))
+        self.assertEqual((ip, 'private address' in reason, 'fd00::1' in reason), (None, True, False))
+        self.assertIsNone(self.vet(h, {(h, 'A'): [PUBLIC], (h, 'AAAA'): ['fec0::1']})[0])  # site-local
+        self.assertIsNone(self.vet(h, {(h, 'A'): [], (h, 'AAAA'): ['::1.2.3.4']})[0])  # IPv4-compatible
+        # dual stack: the IPv4 answer is pinned whatever order the answers come in (IPv6 often has no route)
+        self.assertEqual(self.vet(h, {(h, 'A'): [PUBLIC], (h, 'AAAA'): ['2606:2800:220:1::1']}), (PUBLIC, None))
         self.assertEqual(self.vet(h, {(h, 'A'): [PUBLIC], (h, 'AAAA'): []}), (PUBLIC, None))
         self.assertEqual(self.vet(h, {(h, 'A'): [], (h, 'AAAA'): ['2606:2800:220:1::1']}),
                          ('2606:2800:220:1::1', None))
@@ -149,8 +160,9 @@ class PinnedGetTest(SimpleTestCase):
                     'ftp://h.example.com/', 'https://h.example.com.evil.example/'):
             with self.assertRaises(requests.exceptions.InvalidURL, msg=url):
                 get(url)
-        with self.assertRaises(ValueError):
-            get('https://h.example.com/', verify=False)
+        for off in (False, 0, '', None):
+            with self.assertRaises(ValueError, msg=repr(off)):
+                get('https://h.example.com/', verify=off)
         self.assertEqual(FakeSession.made[0].requests, [])
 
         def away(url):
@@ -224,6 +236,17 @@ class RebindingTest(TestCase):
         self.assertEqual(out['status'], 'ok')
         self.assertTrue(RiskCheck.objects.filter(asset=self.host, check_id__startswith='tls.').exists())
         self.assertEqual(list(self.host.ip_addresses.values_list('address', flat=True)), [PUBLIC])  # recorded = vetted
+
+    def test_dual_stack_host_is_observed_on_ipv4(self):
+        from limes import monitor
+        h = 'a.example.com'
+        resolve = stub({(h, 'AAAA'): ['2606:2800:220:1::1'], (h, 'A'): [PUBLIC], (h, 'CNAME'): dns.resolver.NoAnswer})
+        out = monitor.check_asset(self.host, resolve=resolve, get=lambda url, provider: (404, None))
+        self.assertEqual(out['status'], 'ok')
+        self.assertEqual(set(self.tls.dialled), {(PUBLIC, 443)})  # never the IPv6 address, which has no route here
+        self.assertEqual({u.split('/')[2] for s in FakeSession.made for u, _ in s.requests}, {PUBLIC})
+        self.assertTrue(out['active'])  # a real observation, not 'nothing listening'
+        self.assertEqual(RiskCheck.objects.get(asset=self.host, check_id='tls.cert_expired').status, 'pass')
 
     def test_scan_path_resolves_once_and_pins(self):
         from limes.checks import run
@@ -390,3 +413,95 @@ class PinnedTlsRealTest(SimpleTestCase):
             self.assertEqual(r.headers.get('Set-Cookie'), 's=1; Path=/')
             r.close()
         self.assertEqual((len(plain.hosts), plain.cookies), (2, []))
+
+
+class Clock:
+    def __init__(self, t=0.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class Drip:
+    """A socket that answers one byte per recv and costs 4 s of the injected clock each time: never a full line."""
+    def __init__(self, clock):
+        self.clock, self.timeouts, self.sent, self.calls = clock, [], b'', 0
+
+    def settimeout(self, t):
+        self.timeouts.append(t)
+
+    def sendall(self, data):
+        self.sent += bytes(data)
+
+    def send(self, data):
+        self.sent += bytes(data)
+        return len(data)
+
+    def recv_into(self, buf, nbytes=0):
+        self.calls += 1
+        if self.calls > 1000:
+            raise AssertionError('the deadline never fired')
+        self.clock.t += 4
+        buf[0:1] = b'x'
+        return 1
+
+    def close(self):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+    def setsockopt(self, *a):
+        pass
+
+
+class DeadlineTest(SimpleTestCase):
+    """A host dripping one byte every 4 s must not keep a check alive: the deadline is total, never reset."""
+    def test_drip_does_not_reset_the_deadline(self):
+        from limes import safe_fetch
+        clock = Clock()
+        drip = Drip(clock)
+        f = safe_fetch._DeadlineSocket(drip, safe_fetch.Deadline(30, clock)).makefile('rb')
+        with self.assertRaises(TimeoutError):
+            f.readline()
+        self.assertEqual((drip.calls, clock.t), (8, 32))  # 8 x 4 s; the last recv was armed with the 2 s left
+        self.assertEqual(drip.timeouts, [5, 5, 5, 5, 5, 5, 5, 2])
+
+    def test_pinned_get_through_requests_stops_at_the_deadline(self):
+        from limes import safe_fetch
+        from limes.checks import collect
+        from limes.identity import ScanIdentity
+        clock = Clock()
+        dialled = []
+
+        def connect(addr, timeout=None, *a, **kw):
+            dialled.append((addr, timeout))
+            if addr[1] != 80:
+                raise ConnectionRefusedError()
+            return Drip(clock)
+        with mock.patch('urllib3.util.connection.create_connection', connect):
+            obs = collect.observe_http('h.example.com', ScanIdentity(headers=[]), get=safe_fetch.pinned_get(
+                'h.example.com', PUBLIC, deadline=safe_fetch.Deadline(30, clock)))
+        self.assertEqual(obs['https'], None)  # refused on 443
+        self.assertEqual(obs['http'], 'error')  # the drip timed out: unknown, never a pass
+        self.assertEqual(clock.t, 32)
+        self.assertEqual([a for a, _ in dialled], [(PUBLIC, 443), (PUBLIC, 80)])
+        self.assertTrue(all(t <= 5 for _, t in dialled))
+
+    def test_pinned_tls_connect_honours_the_deadline(self):
+        from limes import safe_fetch
+        clock, seen = Clock(), []
+
+        def connect(addr, timeout=None):
+            seen.append(timeout)
+            raise ConnectionRefusedError()
+        tls = safe_fetch.pinned_tls_connect(PUBLIC, create_connection=connect, deadline=safe_fetch.Deadline(30, clock))
+        clock.t = 27
+        with self.assertRaises(ConnectionRefusedError):
+            tls('h.example.com')
+        self.assertEqual(seen, [3])  # min(5 s, time left)
+        clock.t = 31
+        with self.assertRaises(TimeoutError):
+            tls('h.example.com')
+        self.assertEqual(seen, [3])  # past the deadline: never dialled

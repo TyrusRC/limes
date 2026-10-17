@@ -35,9 +35,13 @@ INACTIVE_INTERVAL = timedelta(days=30)
 # NOTE: at most MAX_PER_TICK assets per 60 s tick (about 28,800 a day), oldest due first. Upgrade path: a larger
 # per-tick share or more ticks once inventories outgrow it.
 MAX_PER_TICK = 20
-# NOTE: the budget is checked between assets, so one slow host can overrun it: its worst case is a few 5 s timeouts
-# (plain http, up to 4 https hops, 3 TLS handshakes). The advisory lock keeps ticks from overlapping meanwhile, and
-# the beat entry expires at 55 s. Upgrade path: a per-host deadline passed down to the collectors.
+# NOTE: the budget is checked between assets, so a tick ends at most one asset past it. One asset's worst case:
+# host contact capped by safe_fetch.HOST_DEADLINE (30 s, plus at most one 5 s step begun just before it), up to 8
+# DNS queries at 5 s each (A, AAAA, CNAME, MX; a root's TXT, _dmarc TXT, DS, CAA), a PTR for an ip, and up to ~93 s
+# per owned IP whose InternetDB record is stale (intel.http: 30 s x 3 attempts + 3 s back-off). The outer ceiling
+# is the IO queue's 15-minute hard limit (13-minute soft); the attempt is stamped before any contact, so a killed
+# check rotates to the back as 'timeout'. The advisory lock keeps ticks from overlapping and the beat entry
+# expires at 55 s. Upgrade path: one deadline for the whole asset check, DNS and InternetDB included.
 TICK_BUDGET = timedelta(seconds=50)
 MONITOR_LOCK = 0x4C494D47  # Postgres advisory lock key: one monitor_assets tick at a time
 OWNED = ('owned_root', 'owned_host')
@@ -101,6 +105,19 @@ def _ours(asset):
     return a
 
 
+def _mark_attempt(a, now):
+    """Stamp the attempt before any contact, committed on its own: a check that is killed mid-way (soft time limit,
+    worker loss) still rotates to the back and reads 'timeout', instead of coming first again every tick."""
+    with transaction.atomic():
+        row = Asset.objects.select_for_update().get(pk=a.pk)
+        prev = (row.enrichment or {}).get('monitor') or {}
+        row.enrichment = {**(row.enrichment or {}),
+                          'monitor': {**prev, 'status': 'timeout', 'attempted_at': now.isoformat()}}
+        row.last_resolved_at = now
+        row.save(update_fields=['enrichment', 'last_resolved_at'])
+    a.enrichment, a.last_resolved_at = row.enrichment, now
+
+
 def _once(resolve):
     """resolve with each (name, rdtype) asked once per check: what is recorded is exactly what is vetted."""
     seen = {}
@@ -119,7 +136,7 @@ def _once(resolve):
     return lookup
 
 
-def _names(a, resolve):
+def _names(a, resolve, now):
     """Resolve a hostname or root; record the answer. (status, reason, new owned ip assets)."""
     name = a.value.rstrip('.').lower()
     v4, v6 = collect._lookup(resolve, name, 'A'), collect._lookup(resolve, name, 'AAAA')
@@ -132,6 +149,7 @@ def _names(a, resolve):
     addrs = list(v4) + list(v6)
     before = set(Asset.objects.filter(project_id=a.project_id, kind='ip', value__in=addrs).values_list('value', flat=True))
     inventory.record_resolution(a, {'a': v4, 'aaaa': v6, 'cname': [c.rstrip('.') for c in cname] if cname != 'error' else []})
+    Asset.objects.filter(pk=a.pk).update(last_resolved_at=now)  # record_resolution stamps the wall clock
     a.mark_missing_or_seen(True)
     new = list(Asset.objects.filter(project_id=a.project_id, kind='ip', value__in=set(addrs) - before, scope_tier__in=OWNED))
     return 'ok', None, new
@@ -164,9 +182,10 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
         return {'status': 'skipped'}
     resolve = _once(resolve)
     baseline = a.last_resolved_at is None  # the first check records silently, like a range's first sweep
+    _mark_attempt(a, now)
     status, reason, new = 'ok', None, []
     if a.kind != 'ip':
-        status, reason, new = _names(a, resolve)
+        status, reason, new = _names(a, resolve, now)
     ips = [a] if a.kind == 'ip' else list(Asset.objects.filter(
         project_id=a.project_id, kind='ip', scope_tier__in=OWNED,
         value__in=list(a.ip_addresses.values_list('address', flat=True))))
@@ -190,18 +209,20 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     if a.kind != 'ip':
         hosts = collect._mx_hosts(collect._lookup(resolve, a.value.rstrip('.').lower(), 'MX'))
         mx = hosts != 'error' and bool(hosts)
-    result = {'http_live': False, 'checked': 0}
+    result = {'http_live': False, 'checked': 0, 'timeout': False}
     if status == 'ok' or a.kind == 'root_domain':  # an unresolved root still gets its DNS-only email/dns checks
         result = run.run_asset_checks(a, now=now, observers=observers, resolve=resolve)
         if result['refused'] and status == 'ok':
             status, reason = 'refused', result['refused']
+        if result['timeout']:
+            status, reason = 'timeout', 'the host did not finish answering within the check deadline'
     if not baseline:
         for ip in new:
             events.record_asset_new(a.project, ip, ports=open_ports.get(ip.value, ()))
         for host in found_hosts:
             events.record_asset_new(a.project, host)
     monitor = {'checked_at': now.isoformat(), 'active': bool(ports) or result['http_live'] or mx,
-               'status': status, 'reason': reason,
+               'status': status, 'reason': reason, 'attempted_at': now.isoformat(),
                'dns_only': a.kind == 'root_domain' and status != 'ok' and result['checked'] > 0}
     with transaction.atomic():  # locked like SetAssetCadence, so a cadence_explicit set meanwhile is kept
         row = Asset.objects.select_for_update().get(pk=a.pk)  # _store may also have written this very row (an ip)

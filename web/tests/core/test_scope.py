@@ -12,7 +12,8 @@ from startScan.models import Asset, IpAddress
 class ReservedTest(SimpleTestCase):
     def test_reserved_and_public(self):
         for bad in ('10.0.0.1', '127.0.0.1', '169.254.1.1', '100.64.0.1', '224.0.0.1', '0.0.0.0',
-                    '::1', 'fe80::1', '64:ff9b::a00:1', '2002:a00:1::', '::ffff:10.0.0.1', 'nonsense', ''):
+                    '::1', 'fe80::1', '64:ff9b::a00:1', '2002:a00:1::', '::ffff:10.0.0.1', 'nonsense', '',
+                    'fec0::1', '::1.2.3.4', '::a00:1'):
             self.assertTrue(scope.is_reserved_ip(bad), bad)
         for ok in ('8.8.8.8', '2606:4700:4700::1111', '::ffff:8.8.8.8'):
             self.assertFalse(scope.is_reserved_ip(ok), ok)
