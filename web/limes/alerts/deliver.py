@@ -67,8 +67,9 @@ def _webhook(event, post):
 def deliver_immediate(project, now=None, chat=None, post=None):
     """Send undelivered, undigested immediate events from the last ALERT_WINDOW (oldest first) up to the hourly cap;
     returns how many."""
-    if chat is None:
-        from limes.tasks.notifications import send_notif as chat
+    if chat is None:  # queued, so a slow chat endpoint never holds up report() or the webhook
+        from limes.tasks.notifications import send_notif
+        chat = send_notif.delay
     post = post or requests.post
     now = now or timezone.now()
     room = ALERT_HOURLY_CAP - ChangeEvent.objects.filter(

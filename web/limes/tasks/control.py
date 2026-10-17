@@ -398,6 +398,8 @@ def report(ctx={}, description=None):
 			try:
 				step(alert_project)
 			except SoftTimeLimitExceeded:
-				raise
+				# the scan's own work is done; re-raising would re-run report() through link_error
+				logger.warning('Change alert step %s hit the time limit for project %s', name, alert_project.pk)
+				break
 			except Exception:
 				logger.exception('Change alert step %s failed for project %s', name, alert_project.pk)
