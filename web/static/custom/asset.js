@@ -119,6 +119,21 @@ function asset_risk_html(risk) {
 		rows + '</tbody></table>' : '<p class="text-muted">No open findings in the latest vulnerability scan.</p>');
 }
 
+// Risk checks table of the asset modal. Evidence carries target header/cookie text: escape every field.
+function asset_checks_html(checks) {
+	if (!checks || !checks.length) return '';
+	var rows = checks.map(function(c) {
+		var ev = Object.keys(c.evidence || {}).map(function(k) {
+			var v = c.evidence[k];
+			return asset_esc(k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v)));
+		}).join('<br>');
+		return '<tr><td>' + asset_esc(c.title) + '</td><td>' + asset_esc(c.status) + '</td><td>' + asset_esc(c.severity) +
+			'</td><td>' + asset_esc(c.fix) + '</td><td>' + ev + '</td><td>' + asset_esc(c.last_checked) + '</td></tr>';
+	}).join('');
+	return '<h5>Risk checks</h5><table class="table table-sm"><thead><tr><th>Check</th><th>Status</th><th>Severity</th>' +
+		'<th>Fix</th><th>Evidence</th><th>Checked</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
 // Project score card above the Assets table.
 function load_asset_score() {
 	var box = document.getElementById('asset_score');
@@ -133,10 +148,12 @@ function load_asset_score() {
 			var pending = Number(s.unassessed) > 0 ? ' &middot; ' + Number(s.unassessed) + ' assets not yet scanned (not scored)' : '';
 			var cov = s.coverage === null ? 'n/a' : Math.round(Number(s.coverage) * 100) + '%';
 			var rows = asset_penalty_rows(s.top_penalties, true);
+			var chk = s.check_coverage === null || s.check_coverage === undefined ? '' : '<p class="text-muted mb-1"><small>' +
+				asset_esc(Math.round(Number(s.check_coverage) * 100) + '% of owned assets checked in 30 days') + '</small></p>';
 			box.innerHTML = '<div class="d-flex align-items-baseline mb-1"><span class="h2 mb-0 me-2">' + asset_esc(s.score) +
 				'</span><span class="badge bg-soft-primary text-primary me-3">' + asset_esc(s.grade) + '</span>' +
 				'<small class="text-muted">' + asset_esc(cov) + ' of owned roots scanned for vulnerabilities in 30 days &middot; ' +
-				asset_esc(s.version) + pending + '</small></div>' + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
+				asset_esc(s.version) + pending + '</small></div>' + chk + (rows ? '<table class="table table-sm mb-0"><thead><tr><th>Asset</th>' +
 				'<th>Issue</th><th>Severity</th><th>Points</th></tr></thead><tbody>' + rows + '</tbody></table>' : '');
 		}).catch(function() {
 			box.innerHTML = '<p class="text-muted mb-0">Score unavailable.</p>';
@@ -214,7 +231,7 @@ function get_asset_modal(id) {
 			' &middot; <b>State</b> ' + asset_esc(a.state) + ' &middot; <b>Vulnerabilities</b> ' + asset_esc(a.vuln_count) + '</p>' +
 			(a.decision_reason ? '<p><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
 			asset_cadence_html(a) +
-			asset_risk_html(a.risk) + '<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
+			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + '<h5>Why is this mine</h5><p>' + path + '</p>' + asset_confidence_html(a) +
 			'<h5>Sources</h5><table class="table table-sm"><thead><tr><th>Source</th><th>Evidence</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>' +
 			sources + '</tbody></table>' + asset_intel_html(a.enrichment)
 		);

@@ -26,8 +26,8 @@ def _risk(project):
     from limes import scoring
     from startScan.models import ScoreSnapshot
     risk = scoring.project_score(project)
-    snaps = ScoreSnapshot.objects.filter(project=project).order_by('-date').values('date', 'score')[:30]
-    risk['trend'] = [{'date': s['date'].isoformat(), 'score': s['score']} for s in reversed(list(snaps))]
+    snaps = ScoreSnapshot.objects.filter(project=project).order_by('-date').values('date', 'score', 'version')[:30]
+    risk['trend'] = [{'date': s['date'].isoformat(), 'score': s['score'], 'version': s['version']} for s in reversed(list(snaps))]
     return risk
 
 

@@ -462,3 +462,16 @@ class AssetScoreApiTest(TestCase):
         self.assertIsNone(self.c.get(f'/api/listDatatableAsset/{self.cand.id}/', {'project': 'p1'}).json()['risk'])
         rows = self.c.get('/api/listDatatableAsset/', {'project': 'p1', 'no_page': '1'}).json()
         self.assertTrue(all('risk' not in r for r in rows))
+
+
+class RiskChecksRetrieveTest(AssetScoreApiTest):
+    def test_retrieve_lists_risk_checks_failed_first(self):
+        from startScan.models import RiskCheck
+        RiskCheck.objects.create(asset=self.host, check_id='web.csp_missing', status='pass', severity=1)
+        RiskCheck.objects.create(asset=self.host, check_id='web.hsts_missing', status='fail', severity=2, evidence={'k': 'v'})
+        RiskCheck.objects.create(asset=self.host, check_id='web.https_missing', status='fail', severity=3)
+        rows = self.c.get(f'/api/listDatatableAsset/{self.host.id}/', {'project': 'p1'}).json()['risk_checks']
+        self.assertEqual([r['check'] for r in rows], ['web.https_missing', 'web.hsts_missing', 'web.csp_missing'])
+        self.assertEqual(rows[0]['severity'], 3)
+        self.assertTrue(rows[0]['title'] and rows[0]['fix'])
+        self.assertEqual(rows[1]['evidence'], {'k': 'v'})

@@ -155,3 +155,12 @@ class EmptyAndCacheTest(Base):
             invalidate(self.p.id)
             project_stats(self.p)
             self.assertEqual(compute.call_count, 2)
+
+
+class TrendVersionTest(Base):
+    def test_trend_carries_version(self):
+        for i, v in ((1, 'v1'), (0, 'v2')):
+            ScoreSnapshot.objects.create(project=self.p, date=(self.now - timedelta(days=i)).date(), version=v,
+                                         score=800, grade='B')
+        trend = asm_stats(self.p)['risk']['trend']
+        self.assertEqual([t['version'] for t in trend], ['v1', 'v2'])

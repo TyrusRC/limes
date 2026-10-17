@@ -2720,6 +2720,15 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		data = self.get_serializer(asset).data
 		scored = scoring.scored_assets(asset.project).filter(pk=asset.pk).exists()
 		data['risk'] = scoring.asset_breakdown(asset) if scored else None
+		from limes.checks.catalogue import CHECKS
+		checks = []
+		for rc in asset.risk_checks.all():
+			c = CHECKS.get(rc.check_id)
+			checks.append({'check': rc.check_id, 'title': c.title if c else rc.check_id, 'fix': c.fix if c else '',
+						   'status': rc.status, 'severity': rc.severity, 'evidence': rc.evidence,
+						   'last_checked': rc.last_checked})
+		checks.sort(key=lambda r: (r['status'] != 'fail', -r['severity'], r['check']))
+		data['risk_checks'] = checks
 		return Response(data)
 
 	def paginate_queryset(self, queryset, view=None):
