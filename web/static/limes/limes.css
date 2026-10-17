@@ -24,6 +24,8 @@
   --brand-accent: #B5E04A;
   --brand-tint: #F3FBE3;
   --on-brand: #FFFFFF;
+  --brand-solid: #26773A;        /* filled controls with text: white on it 5.5:1 (white on --brand is 4.3:1) */
+  --brand-solid-hover: #1E6329;
 
   /* neutrals */
   --bg: #F3F5F3;
@@ -71,6 +73,8 @@
   --brand-ink: #8FD89A;
   --brand-tint: #1A2B1D;
   --on-brand: #0C1A10;
+  --brand-solid: #3FA650;
+  --brand-solid-hover: #4DB55E;
 
   --bg: #0E1611;
   --surface: #151F18;
@@ -285,6 +289,7 @@ mark, .mark { background: var(--sev-medium-bg); color: var(--sev-medium-ink); pa
 .page-title-box { display: flex; align-items: center; justify-content: space-between; flex-direction: row-reverse; flex-wrap: wrap; gap: var(--space-2) var(--space-4); padding: var(--space-6) 0 var(--space-5); }
 .page-title-box .page-title { margin: 0; font-size: var(--text-xl); line-height: 1.2; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
 .page-title-box .page-title:empty { display: none; }
+@media (max-width: 767.98px) { .page-title-box { flex-direction: column-reverse; align-items: flex-start; } }
 .page-title-box .breadcrumb { margin: 0; padding: 0; background: transparent; font-size: var(--text-xs); }
 
 /* scan-activity panel (right bar, toggled by app.min.js) */
@@ -303,6 +308,7 @@ mark, .mark { background: var(--sev-medium-bg); color: var(--sev-medium-ink); pa
 .l-auth-card { width: 100%; max-width: 380px; margin: 0; }
 .l-auth-card .card-body { padding: var(--space-6); }
 .l-auth-title { font-size: var(--text-lg); margin-bottom: var(--space-1); }
+.l-onboard { width: 100%; max-width: 640px; display: grid; gap: var(--space-4); }
 .l-pw-toggle { border-color: var(--border-strong); color: var(--ink-3); font-size: 18px; padding: 0 var(--space-3); }
 .l-auth-foot { font-size: var(--text-xs); color: var(--ink-3); margin: 0; }
 /* old-theme helpers still used by page markup (target/add.html, detail_scan.html) */
@@ -364,6 +370,8 @@ mark, .mark { background: var(--sev-medium-bg); color: var(--sev-medium-ink); pa
   overflow-wrap: anywhere;
 }
 .table td { overflow-wrap: anywhere; }
+/* DataTables headers may wrap: with the sidebar, wide scan tables (10+ columns) must still fit at 1440px */
+table.dataTable > thead > tr > th { white-space: normal; }
 .table > tbody > tr { border-bottom: 0; transition: none; }
 .table > tbody > tr:last-child > td { border-bottom: 0; }
 .table-hover > tbody > tr:hover > *, .table-hover:not(.table-dark) tbody tr:hover { background-color: var(--surface-hover) !important; }
@@ -445,10 +453,10 @@ div.dataTables_wrapper div.dataTables_paginate ul.pagination { margin: 0; gap: 4
 .btn-close { box-shadow: none !important; }
 :root[data-theme="dark"] .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
 
-.btn-primary, .btn-success { color: var(--on-brand); background: var(--brand); border-color: var(--brand); }
+.btn-primary, .btn-success { color: var(--on-brand); background: var(--brand-solid); border-color: var(--brand-solid); }
 .btn-primary:hover, .btn-primary:focus, .btn-primary:active, .btn-primary.active, .show > .btn-primary.dropdown-toggle,
-.btn-success:hover, .btn-success:focus, .btn-success:active, .btn-success.active { color: var(--on-brand); background: var(--brand-hover); border-color: var(--brand-hover); }
-.btn-primary:disabled, .btn-primary.disabled, .btn-success:disabled, .btn-success.disabled { color: var(--on-brand); background: var(--brand); border-color: var(--brand); }
+.btn-success:hover, .btn-success:focus, .btn-success:active, .btn-success.active { color: var(--on-brand); background: var(--brand-solid-hover); border-color: var(--brand-solid-hover); }
+.btn-primary:disabled, .btn-primary.disabled, .btn-success:disabled, .btn-success.disabled { color: var(--on-brand); background: var(--brand-solid); border-color: var(--brand-solid); }
 .btn-danger { color: var(--sev-critical-ink); background: var(--surface); border-color: var(--sev-critical); }
 .btn-danger:hover, .btn-danger:focus, .btn-danger:active, .btn-danger.active, .btn-danger:disabled { color: var(--sev-critical-ink); background: var(--sev-critical-bg); border-color: var(--sev-critical); }
 .btn-warning { color: var(--sev-medium-ink); background: var(--surface); border-color: var(--sev-medium); }
@@ -599,24 +607,24 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 .valid-feedback { color: var(--ok-ink); }
 .was-validated .form-control:valid, .form-control.is-valid { border-color: var(--brand); }
 /* select2 */
-.select2-container--default .select2-selection--single,
-.select2-container--default .select2-selection--multiple { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); min-height: 36px; }
-.select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--ink); }
-.select2-container--default.select2-container--focus .select2-selection--multiple,
-.select2-container--default.select2-container--open .select2-selection--single { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
-.select2-dropdown { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
-.select2-container--default .select2-results__option--highlighted[aria-selected],
-.select2-container--default .select2-results__option--highlighted.select2-results__option--selectable { background: var(--brand-tint); color: var(--brand-ink); }
-.select2-container--default .select2-results__option[aria-selected=true] { background: var(--surface-2); color: var(--ink); }
-.select2-container--default .select2-search--dropdown .select2-search__field { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
-.select2-container .select2-selection--multiple .select2-selection__choice {
+:root .select2-container--default .select2-selection--single,
+:root .select2-container--default .select2-selection--multiple { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); min-height: 36px; }
+:root .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--ink); }
+:root .select2-container--default.select2-container--focus .select2-selection--multiple,
+:root .select2-container--default.select2-container--open .select2-selection--single { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
+:root .select2-dropdown { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+:root .select2-container--default .select2-results__option--highlighted[aria-selected],
+:root .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable { background: var(--brand-tint); color: var(--brand-ink); }
+:root .select2-container--default .select2-results__option[aria-selected=true] { background: var(--surface-2); color: var(--ink); }
+:root .select2-container--default .select2-search--dropdown .select2-search__field { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+:root .select2-container .select2-selection--multiple .select2-selection__choice {
   color: var(--brand-ink) !important; background: var(--brand-tint) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-sm) !important;
 }
-.select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: var(--brand-ink) !important; }
+:root .select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: var(--brand-ink) !important; }
 
 /* ---------- Modals + offcanvas ---------- */
-.modal-backdrop { background-color: var(--backdrop); }
-.modal-backdrop.show { opacity: 1; }
+:root .modal-backdrop { background-color: var(--backdrop); }
+:root .modal-backdrop.show { opacity: 1; }
 .modal-content { background: var(--surface); color: var(--ink); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: none; }
 .modal-header { padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--border); }
 .modal-header .modal-title, .modal-title { font-size: var(--text-lg); font-weight: 600; color: var(--ink); line-height: 1.3; }
@@ -709,8 +717,8 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 :root .swal2-input:focus, :root .swal2-textarea:focus, :root .swal2-select:focus { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; box-shadow: none; }
 :root .swal2-validation-message { background: var(--sev-critical-bg); color: var(--sev-critical-ink); }
 :root .swal2-styled { border-radius: var(--radius) !important; font-size: var(--text-sm) !important; font-weight: 600 !important; padding: 8px var(--space-4) !important; box-shadow: none !important; }
-:root .swal2-styled.swal2-confirm { background: var(--brand) !important; color: var(--on-brand) !important; border: 1px solid var(--brand) !important; }
-:root .swal2-styled.swal2-confirm:hover { background: var(--brand-hover) !important; background-image: none !important; }
+:root .swal2-styled.swal2-confirm { background: var(--brand-solid) !important; color: var(--on-brand) !important; border: 1px solid var(--brand-solid) !important; }
+:root .swal2-styled.swal2-confirm:hover { background: var(--brand-solid-hover) !important; background-image: none !important; }
 :root .swal2-styled.swal2-cancel, :root .swal2-styled.swal2-deny { background: var(--surface) !important; color: var(--ink) !important; border: 1px solid var(--border-strong) !important; }
 :root .swal2-styled.swal2-cancel:hover, :root .swal2-styled.swal2-deny:hover { background: var(--surface-hover) !important; background-image: none !important; }
 :root .swal2-styled:focus-visible { outline: 2px solid var(--focus) !important; outline-offset: 2px; }
@@ -772,7 +780,7 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 
 /* page search box with autocomplete (subdomains, endpoints, vulnerabilities) */
 .wrapper .search-input { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: none; }
-.search-input input { height: 44px; color: var(--ink); background: transparent; border: 0; box-shadow: none; font-size: var(--text-base); padding: 0 120px 0 var(--space-4); }
+.search-input input { height: 44px; color: var(--ink); background: transparent; border: 0; box-shadow: none; font-size: var(--text-base); padding: 0 var(--space-4); }
 .search-input input:focus { outline: 0; }
 .wrapper .search-input:focus-within { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
 .search-input button { height: 44px; font-size: var(--text-sm); border-radius: 0 var(--radius-lg) var(--radius-lg) 0 !important; }
@@ -801,6 +809,62 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 .apexcharts-legend-text { color: var(--ink-2) !important; }
 .tippy-box { background: var(--ink); color: var(--surface); font-size: var(--text-xs); border-radius: var(--radius-sm); }
 .tippy-box > .tippy-arrow { color: var(--ink); }
+
+/* Page-level plugin stylesheets load after this file (custom_js_css_link block): hence the :root prefix */
+/* jquery.steps wizard (start / schedule scan) */
+:root .wizard > .steps a, :root .pill.wizard > .steps a { border-radius: var(--radius-pill); font-size: var(--text-sm); font-weight: 600; }
+:root .wizard > .steps .current a, :root .wizard > .steps .current a:hover, :root .wizard > .steps .last.current.done a,
+:root .pill.wizard > .steps .last.current.done a { background: var(--brand-solid); color: var(--on-brand); border: 1px solid var(--brand-solid); }
+:root .pill.wizard > .steps .disabled a, :root .pill.wizard > .steps .disabled a:hover, :root .pill.wizard > .steps .done a, :root .pill.wizard > .steps .done a:hover {
+  background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border-strong);
+}
+:root .pill.wizard > .steps li.disabled { opacity: 1; }
+:root .pill.wizard > .steps .done a .number, :root .wizard > .steps .number { border-color: transparent; }
+:root .pill.wizard > .steps ul li.done:not(.last)::after, :root .pill.wizard > .steps ul li.done:not(.last)::before { background-color: var(--brand); }
+:root .wizard > .content { background: transparent; }
+:root .wizard > .actions a, :root .wizard > .actions a:hover { background: var(--brand-solid); color: var(--on-brand); border-radius: var(--radius); font-size: var(--text-sm); font-weight: 600; }
+:root .wizard > .actions .disabled a, :root .wizard > .actions .disabled a:hover { background: var(--surface-2); color: var(--ink-3); }
+:root .wizard > .content > .body input:not([type="checkbox"]):not([type="radio"]) { border-color: var(--border-strong); }
+/* custom-accordions.css (wizard pages) restyles every .card and the engine accordions */
+:root .card { border-color: var(--border); }
+:root .card-header { color: var(--ink); }
+:root .card-header section > div.collapsed { color: var(--ink-2); }
+:root .card-header section > div:not(.collapsed) { color: var(--brand-ink); border-bottom-color: var(--border); }
+:root .wizard .card .card-body p { color: var(--ink-2); }
+:root .wizard .card .card-body ul li a { color: var(--ink); }
+/* select2 inline search (pages load their own select2 copy after this file; the main select2 rules carry :root too) */
+:root .select2-container--default .select2-search--inline .select2-search__field { color: var(--ink); }
+/* recon notes (todolist plugin) */
+:root .mail-box-container { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
+:root .tab-title { border-right-color: var(--border); }
+:root .tab-title #addTask { background: var(--brand-solid); color: var(--on-brand); border-radius: var(--radius); font-weight: 600; }
+:root .tab-title .nav-pills a.nav-link, :root .tab-title .nav-pills a.nav-link svg { color: var(--ink-3); fill: none; }
+:root .tab-title .nav-pills .nav-link.active, :root .tab-title .nav-pills a.nav-link:hover { background: var(--brand-tint); color: var(--brand-ink); }
+:root .tab-title .nav-pills .nav-link.active svg, :root .tab-title .nav-pills a.nav-link:hover svg { color: var(--brand-ink); fill: none; }
+:root .tab-title .nav-pills .nav-link .badge { border-color: var(--border); }
+:root .tab-title .nav-pills .nav-link.active .badge { color: var(--brand-ink) !important; }
+:root .compose-box { background: transparent; }
+:root .compose-box .compose-content h5 { color: var(--ink); }
+:root #addTaskModal .modal-footer .btn.add-tsk, :root #addTaskModal .modal-footer .btn.edit-tsk { background: var(--brand-solid); color: var(--on-brand); border-color: var(--brand-solid); border-radius: var(--radius); }
+:root .todo-inbox .todo-item { border-bottom-color: var(--border); }
+:root .todo-inbox .todo-item .todo-item-inner .todo-heading { color: var(--ink); }
+:root .todo-inbox .todo-item .todo-item-inner p.todo-text { color: var(--ink-2); }
+:root .todo-inbox .search { border-bottom-color: var(--border); }
+:root .todo-inbox .search input { background: transparent; color: var(--ink); }
+/* markdown editor on Report Settings (EasyMDE, paper theme) */
+:root .EasyMDEContainer .CodeMirror, :root .CodeMirror.cm-s-paper { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+:root .CodeMirror.cm-s-paper .CodeMirror-cursor { border-left-color: var(--ink); }
+:root .editor-toolbar { border-color: var(--border-strong); }
+:root .editor-toolbar button, :root .editor-toolbar a { color: var(--ink-2) !important; }
+:root .editor-toolbar button:hover, :root .editor-toolbar button.active { background: var(--surface-hover); border-color: var(--border); }
+:root .editor-preview, :root .editor-preview-side { background: var(--surface-2); color: var(--ink); }
+/* file inputs (wordlist upload) */
+.form-control::file-selector-button { background: var(--surface-2); color: var(--ink); border-color: var(--border-strong); }
+.form-control:hover:not(:disabled):not([readonly])::file-selector-button { background: var(--surface-hover); }
+/* ApexCharts radial gauge (Limes Settings disk use) */
+.apexcharts-radialbar-track path { stroke: var(--track); }
+.apexcharts-radialbar-area { stroke: var(--brand); }
+.apexcharts-canvas text.apexcharts-datalabel-value { fill: var(--ink); }
 
 /* ---------- Overview page (dashboard/index.html), values from the approved mockup ---------- */
 .ov-sub, .l-page-sub { display: flex; flex-wrap: wrap; gap: 2px var(--space-2); margin: calc(-1 * var(--space-4)) 0 var(--space-5); color: var(--ink-3); font-size: var(--text-sm); }
@@ -973,7 +1037,7 @@ a.ov-meta:hover { color: var(--brand-ink); }
 .l-banner { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); margin-bottom: var(--space-5);
   background: var(--brand-tint); border: 1px solid var(--brand); border-radius: var(--radius-lg); }
 .l-banner[hidden] { display: none; }
-.l-banner-icon { width: 36px; height: 36px; border-radius: var(--radius); background: var(--brand); color: var(--on-brand); display: grid; place-items: center; flex: none; font-size: 18px; }
+.l-banner-icon { width: 36px; height: 36px; border-radius: var(--radius); background: var(--brand-solid); color: var(--on-brand); display: grid; place-items: center; flex: none; font-size: 18px; }
 .l-banner-text { font-size: var(--text-sm); color: var(--ink-2); min-width: 0; }
 .l-banner-text strong { color: var(--ink); font-size: var(--text-md); font-weight: 600; }
 .l-banner-gain { color: var(--brand-ink); font-weight: 700; }

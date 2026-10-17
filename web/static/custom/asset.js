@@ -267,7 +267,7 @@ function get_asset_modal(id) {
 // The shared modal goes wide for the asset detail and back to its default size when it closes.
 function asset_modal_wide(on) {
 	$('#modal_dialog .modal-dialog').toggleClass('modal-xl', on);
-	if (on) $('#modal_dialog').one('hidden.bs.modal', function() { asset_modal_wide(false); });
+	if (on) $('#modal_dialog').off('hidden.bs.modal.assetwide').one('hidden.bs.modal.assetwide', function() { asset_modal_wide(false); });
 }
 
 function show_add_asset_modal() {

@@ -92,6 +92,7 @@ $(document).ready(function() {
 					if (data) {
 						return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
+					return '';
 				},
 				"targets": 1,
 			},
@@ -100,6 +101,7 @@ $(document).ready(function() {
 					if (data) {
 						return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
+					return '';
 				},
 				"targets": 2,
 			},
@@ -110,27 +112,21 @@ $(document).ready(function() {
 					var cve_cwe_badge = '';
 					switch (row['severity']) {
 						case 'Info':
-						color = 'primary';
 						badge_color = 'soft-primary';
 						break;
 						case 'Low':
-						color = 'low';
-						badge_color = 'soft-warning';
+						badge_color = 'low';
 						break;
 						case 'Medium':
-						color = 'warning';
 						badge_color = 'soft-warning';
 						break;
 						case 'High':
-						color = 'danger';
-						badge_color = 'soft-danger';
+						badge_color = 'high';
 						break;
 						case 'Critical':
-						color = 'critical';
 						badge_color = 'critical';
 						break;
 						case 'Unknown':
-						color = 'info';
 						badge_color = 'soft-info';
 						break;
 						default:
@@ -161,7 +157,7 @@ $(document).ready(function() {
 					// if (cve_cwe_badge != "") {
 					// 	cve_cwe_badge += "";
 					// }
-					return `<b class="text-${color}">` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
+					return `<b>` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
 				},
 				"targets": 3,
 			},
@@ -201,7 +197,7 @@ $(document).ready(function() {
 							return `<a href="${encodedURLData}" 
 									target="_blank" 
 									rel="noopener noreferrer" 
-									class="text-danger">
+									>
 									${split_into_lines(data, 150)}
 								</a>`;
 						}

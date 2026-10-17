@@ -233,7 +233,7 @@ Target Summary
 								<h4 class="mt-0 font-16">Vulnerabilities Discovered</h4>
 								<h2 class="text-danger my-3 text-center"><span data-plugin="counterup">{{vulnerability_count|intcomma}}</span></h2>
 								<p class="text-muted mb-0">
-									<span class="w-title text-danger">{{critical_count}} Critical, {{high_count}} High, {{medium_count}} Medium</span>
+									<span class="w-title text-muted">{{critical_count}} Critical, {{high_count}} High, {{medium_count}} Medium</span>
 									<br>
 									<span class="w-title text-primary">{{low_count}} Low, {{info_count}} Info Vulnerabilities</span>
 								</p>
@@ -999,7 +999,7 @@ $(document).ready(function(){
 							info_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-info bs-tooltip badge-link' title="Informational Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=0, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['info_count']} Info</span>`;
 							low_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-low bs-tooltip badge-link' title=" Low Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=1, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['low_count']} Low</span>`;
 							medium_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-warning bs-tooltip badge-link' title="Medium Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=2, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['medium_count']} Med</span>`;
-							high_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-soft-danger bs-tooltip badge-link' title="High Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=3, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['high_count']} High</span>`;
+							high_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-high bs-tooltip badge-link' title="High Severity Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=3, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['high_count']} High</span>`;
 							critical_badge = `<span class='pl-2 pr-2 me-1 mt-1 badge badge-critical bs-tooltip badge-link' title="Critical Vulnerabilities" onclick="get_vulnerability_modal(scan_id=null, severity=4, subdomain_id=${row['id']}, subdomain_name='${jsEscape(row['name'])}')">${row['critical_count']} Critical</span>`;
 							vuln_count_badge = `<div class="">` + (row['info_count'] > 0? info_badge : '') + (row['low_count'] > 0? low_badge : '') + (row['medium_count'] > 0? medium_badge : '') + (row['high_count'] > 0? high_badge : '') + (row['critical_count'] > 0? critical_badge : '') + `</div>`;
 
@@ -1137,10 +1137,10 @@ $(document).ready(function(){
 						"render": function ( data, type, row ) {
 							return `
 							<div class="btn-group mt-2">
-							<button type="button" data-toggle="tooltip" data-placement="top" title="Show Attack Surface" class="btn btn-primary me-1 bs-tooltip" onclick="show_attack_surface_modal(${row['id']})"><i class="fe-eye"></i></button>
-							<button type="button" data-toggle="tooltip" data-placement="top" title="Further Scan Subdomain" class="btn btn-primary btn-scan-subdomain me-1" id="${row['id']}"><i class="fe-zap"></i></button>
-							<button type="button" data-toggle="tooltip" data-placement="top" title="Add Recon Todo/Note" class="btn btn-primary me-1" id="${row['id']}" onclick="add_note_for_subdomain(${row['id']}, '${jsEscape(row['name'])}')"><i class="fe-file-plus"></i></button>
-							<button class="btn btn-primary me-1 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="mdi mdi-dots-horizontal"></i></button>
+							<button type="button" data-toggle="tooltip" data-placement="top" title="Show Attack Surface" class="btn btn-sm btn-soft-primary me-1 bs-tooltip" onclick="show_attack_surface_modal(${row['id']})"><i class="fe-eye"></i></button>
+							<button type="button" data-toggle="tooltip" data-placement="top" title="Further Scan Subdomain" class="btn btn-sm btn-soft-primary btn-scan-subdomain me-1" id="${row['id']}"><i class="fe-zap"></i></button>
+							<button type="button" data-toggle="tooltip" data-placement="top" title="Add Recon Todo/Note" class="btn btn-sm btn-soft-primary me-1" id="${row['id']}" onclick="add_note_for_subdomain(${row['id']}, '${jsEscape(row['name'])}')"><i class="fe-file-plus"></i></button>
+							<button class="btn btn-sm btn-soft-primary me-1 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="mdi mdi-dots-horizontal"></i></button>
 							<div class="dropdown-menu dropdown-menu-end">
 							<a class="dropdown-item" href="#" onclick="mark_important_subdomain(this, ${row['id']})" id="${row['id']}"><i class="mdi mdi-alert-rhombus-outline me-2 text-muted font-18 vertical-middle"></i>Mark Important Subdomain</a>
 							<a class="text-danger dropdown-item btn-delete-subdomain" href="#" id="${row['id']}"><i class="text-danger mdi mdi-delete-forever-outline me-2 font-18 vertical-middle"></i>Delete Subdomain</a>
@@ -1396,6 +1396,7 @@ $(document).ready(function(){
 					if (data) {
 						return `<span class="badge badge-outline-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
+					return '';
 				},
 				"targets": 1,
 			},
@@ -1404,6 +1405,7 @@ $(document).ready(function(){
 					if (data) {
 						return `<span class="badge badge-soft-primary">&nbsp;&nbsp;${htmlEncode(data.toUpperCase())}&nbsp;&nbsp;</span>`;
 					}
+					return '';
 				},
 				"targets": 2,
 			},
@@ -1414,27 +1416,21 @@ $(document).ready(function(){
 					var cve_cwe_badge = '';
 					switch (row['severity']) {
 						case 'Info':
-							color = 'primary';
 							badge_color = 'soft-primary';
 							break;
 						case 'Low':
-							color = 'low';
-							badge_color = 'soft-warning';
+							badge_color = 'low';
 							break;
 						case 'Medium':
-							color = 'warning';
 							badge_color = 'soft-warning';
 							break;
 						case 'High':
-							color = 'danger';
-							badge_color = 'soft-danger';
+							badge_color = 'high';
 							break;
 						case 'Critical':
-							color = 'critical';
 							badge_color = 'critical';
 							break;
 						case 'Unknown':
-							color = 'info';
 							badge_color = 'soft-info';
 							break;
 						default:
@@ -1465,7 +1461,7 @@ $(document).ready(function(){
 					// if (cve_cwe_badge != "") {
 					// 	cve_cwe_badge
 					// }
-					return `<b class="text-${color}">` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
+					return `<b>` + htmlEncode(data) + `</b>` + cvss_metrics_badge + cve_cwe_badge + tags;
 				},
 				"targets": 3,
 			},
@@ -1502,7 +1498,7 @@ $(document).ready(function(){
 							return `<a href="${encodedURLData}" 
 									target="_blank" 
 									rel="noopener noreferrer" 
-									class="text-danger">
+									>
 									${split_into_lines(data, 150)}
 								</a>`;
 						}

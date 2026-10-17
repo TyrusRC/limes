@@ -94,6 +94,31 @@ class NavigationTest(TestCase):
         self.assertNotIn(self.href('report_settings'), side)
         self.assertIn(self.href('api_vault'), side)
 
+    def test_quick_add_items_gated_one_by_one(self):
+        # a user holding exactly one of the three Quick add permissions sees the menu with only that item
+        items = {'modify_targets': 'show_quick_add_target_modal()', 'modify_scan_configurations': self.href('add_engine'),
+                 'modify_wordlists': self.href('add_wordlist')}
+        for keep in items:
+            user = User.objects.create_user('qa-' + keep, password='p')
+            assign_role(user, 'sys_admin')
+            for perm in items:
+                if perm != keep:
+                    revoke_permission(user, perm)
+            _, top = self.shell(user)
+            menu = re.search(r'aria-label="Quick add".*?</div>', top, re.S)
+            self.assertIsNotNone(menu, keep)
+            for perm, marker in items.items():
+                self.assertEqual(marker in menu.group(0), perm == keep, (keep, perm))
+            self.assertEqual(self.href('add_organization') in menu.group(0), keep == 'modify_targets', keep)
+
+    def test_not_found_pages_render_without_a_project(self):
+        # no slug in these URLs, so no current project: the page must not need one (it used to raise NoReverseMatch -> 500)
+        self.client.force_login(self.auditor)
+        self.assertEqual(self.client.get('/no/such/page').status_code, 404)
+        r = self.client.get(reverse('four_oh_four'))  # where permission checks send a user who may not open a page
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Page not found')
+
     def test_project_and_user_names_are_escaped(self):
         Project.objects.filter(slug=SLUG).update(name='<img src=x onerror=alert(1)>')
         evil = User.objects.create_superuser('"><svg onload=alert(2)>', password='p')

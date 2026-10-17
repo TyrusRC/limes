@@ -1,6 +1,6 @@
 const subdomain_datatable_columns = [
   {'data': 'id'},
-  {'data': 'name'},
+  {'data': 'name', 'className': 'l-col-wide'},
   {'data': 'endpoint_count'},
   {'data': 'endpoint_count'},
   {'data': 'http_status'},

@@ -1178,7 +1178,7 @@ function render_vulnerability_in_xl_modal(vuln_count, subdomain_name, result) {
 			});
 		}
 		cve_cwe_badge += '</div>';
-		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + safeHref(vuln_obj['http_url']) + "' target='_blank' class='text-danger'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : htmlEncode(vuln_obj['http_url']);
+		var http_url = vuln_obj['http_url'].includes('http') ? "<a href='" + safeHref(vuln_obj['http_url']) + "' target='_blank'>" + htmlEncode(vuln_obj['http_url']) + "</a>" : htmlEncode(vuln_obj['http_url']);
 		$('#vuln_tbody').append(`
 			<tr>
 			<td>${vuln_type}</td>
