@@ -699,6 +699,8 @@ class AddAssets(APIView):
 		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
 		added, existing, skipped, warnings = 0, 0, 0, []
 		cap = settings.RANGE_ADDRESS_CAP
+		# NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
+		# Upgrade: select_for_update on the project row around this read and the writes.
 		used = range_addresses(project)
 		with transaction.atomic():
 			for entry in raw:
@@ -712,8 +714,17 @@ class AddAssets(APIView):
 					warnings.append(c['error'])
 					continue
 				# The project cap is all-or-nothing per entry, against a running total across the request.
-				new_cidrs = [v for v in c['values'] if c['kind'] == 'cidr' and tier != 'co_brand' and not
-					Asset.objects.filter(project=project, kind='cidr', value=v, scope_tier__in=('owned_root', 'owned_host')).exists()]
+				# Only a missing row or a promoted candidate/dependency adds addresses: an owned row is already
+				# in `used`, a rejected or co_brand one is skipped or left alone below.
+				# NOTE: one query per CIDR (about 24 per range, 5000 entries per request at most). Upgrade:
+				# read the project's cidr tiers once before the loop.
+				new_cidrs = []
+				if c['kind'] == 'cidr' and tier != 'co_brand':
+					for v in c['values']:
+						row_tier = Asset.objects.filter(project=project, kind='cidr', value=v).values_list(
+							'scope_tier', flat=True).first()
+						if row_tier in (None, 'candidate', 'dependency'):
+							new_cidrs.append(v)
 				need = sum(addresses(v) for v in new_cidrs)
 				if need and used + need > cap:
 					skipped += len(c['values'])

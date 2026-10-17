@@ -156,6 +156,7 @@ class AddAssetsApiTest(TestCase):
         msg = self._post(self.admin, project='p1', text=text, tier='owned_root').json()['message']
         self.assertEqual((msg['added'], msg['skipped'], msg['existing']), (6, 1, 1))
         self.assertEqual(msg['added'] + msg['existing'] + msg['skipped'], 8)
+        self.assertGreaterEqual(len(msg['warnings']), msg['skipped'])
         self.assertTrue(any('AS12345' in w for w in msg['warnings']))
         self.assertEqual(Asset.objects.filter(project=self.p, kind='cidr').count(), 4)
         self.assertTrue(Asset.objects.filter(project=self.p, kind='asn', value='AS12345').exists())
@@ -168,10 +169,24 @@ class AddAssetsApiTest(TestCase):
             msg = self._post(self.admin, project='p1', entries=['9.9.0.0/20'], tier='owned_root').json()['message']
             self.assertEqual((msg['added'], msg['skipped']), (0, 1))
             self.assertIn('4096', msg['warnings'][0])
+            self.assertIn('cap of 4096', msg['warnings'][0])
+            self.assertIn('LIMES_RANGE_ADDRESS_CAP', msg['warnings'][0])
             self.assertIn('2048', msg['warnings'][0])
             msg = self._post(self.admin, project='p1', entries=['9.9.0.0/22', '9.9.4.0/22', '9.9.8.0/22'],
                              tier='owned_root').json()['message']
             self.assertEqual((msg['added'], msg['skipped']), (2, 1))  # 2048 in use + two /22 fill the cap; the third is refused
+
+    def test_readding_a_rejected_range_is_not_a_cap_warning(self):
+        from django.test import override_settings
+        Asset.objects.create(project=self.p, kind='cidr', value='8.8.0.0/21', scope_tier='owned_root')
+        Asset.objects.create(project=self.p, kind='cidr', value='9.9.0.0/20', scope_tier='rejected')
+        with override_settings(RANGE_ADDRESS_CAP=4096):
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/20', '9.9.16.0/22'],
+                             tier='owned_root').json()['message']
+        self.assertEqual((msg['added'], msg['skipped']), (1, 1))
+        self.assertTrue(any('was rejected' in w for w in msg['warnings']))
+        self.assertFalse(any('cap' in w for w in msg['warnings']))
+        self.assertEqual(Asset.objects.get(project=self.p, value='9.9.0.0/20').scope_tier, 'rejected')
 
     def test_range_addresses_counts_owned_live_cidrs(self):
         from limes.owned_ranges import addresses, range_addresses

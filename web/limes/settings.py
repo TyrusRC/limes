@@ -40,8 +40,8 @@ CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
 # NOTE: its terms are only partly published and 1 req/s is Limes's own throttle. Upgrade path: a paid key or Limes's own scanner.
 RANGE_ENUMERATION = env.bool('LIMES_RANGE_ENUMERATION', default=False)
-# NOTE: per-project owned address cap (hard max 65536); raising it raises lookup volume.
-RANGE_ADDRESS_CAP = min(env.int('LIMES_RANGE_ADDRESS_CAP', default=4096), 65536)
+# NOTE: per-project owned address cap, clamped to 1..65536 (0 or negative would silently refuse every range); raising it raises lookup volume.
+RANGE_ADDRESS_CAP = max(1, min(env.int('LIMES_RANGE_ADDRESS_CAP', default=4096), 65536))
 INTERNETDB_DAILY_BUDGET = env.int('LIMES_INTERNETDB_DAILY_BUDGET', default=5000)
 PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
 

@@ -89,6 +89,9 @@ class ClassifyEntryTest(SimpleTestCase):
             r = classify_asset_entry(ok)
             self.assertEqual((r['kind'], r['value'], r['values']), ('asn', 'AS12345', ['AS12345']), ok)
         self.assertIn('AS12345', classify_asset_entry('12345')['error'])
+        for bad in ('AS\u0661\u0662\u0663', '\u0661\u0662\u0663'):  # Arabic-Indic digits are not an ASN
+            self.assertIsNotNone(classify_asset_entry(bad)['error'], bad)
+            self.assertNotEqual(classify_asset_entry(bad)['kind'], 'asn')
         for bad in ('AS0', 'AS23456', 'AS64512', 'AS4200000000', 'AS4294967296', 'AS4294967295'):
             self.assertIsNotNone(classify_asset_entry(bad)['error'], bad)
 
@@ -116,3 +119,14 @@ class ClassifyEntryTest(SimpleTestCase):
     @override_settings(RANGE_ENUMERATION=True)
     def test_enumeration_on_no_warning(self):
         self.assertIsNone(classify_asset_entry('8.8.8.0/24')['warning'])
+
+
+class RangeCapSettingTest(SimpleTestCase):
+    def test_cap_is_clamped_to_at_least_one(self):
+        import importlib, os
+        from unittest import mock
+        import limes.settings as st
+        self.addCleanup(importlib.reload, st)
+        for raw, want in (('0', 1), ('-5', 1), ('100000', 65536), ('500', 500)):
+            with mock.patch.dict(os.environ, {'LIMES_RANGE_ADDRESS_CAP': raw}):
+                self.assertEqual(importlib.reload(st).RANGE_ADDRESS_CAP, want, raw)
