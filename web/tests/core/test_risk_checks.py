@@ -245,6 +245,44 @@ class CollectTest(SimpleTestCase):
         obs = collect.observe_http('h', self.ident(), get=away)
         self.assertEqual(obs['https']['status'], 301)
 
+    def test_redirect_host_rule_is_strict(self):
+        from limes.checks import collect
+        for loc in ('https://evil.example\\@h/', 'https://evil.example@h/', 'https://h:8443/',
+                    'https://other.example/', 'http://h/a', 'https://h\\x/'):
+            seen = []
+
+            def get(url, loc=loc, **kw):
+                seen.append(url)
+                return _Resp(302, {'Location': loc}) if url == 'https://h/' else _Resp(200)
+            obs = collect.observe_http('h', self.ident(), get=get)
+            self.assertEqual(obs['https']['status'], 302, loc)
+            self.assertEqual([u for u in seen if u.startswith('https')], ['https://h/'], loc)
+        seen = []
+
+        def rel(url, **kw):
+            seen.append(url)
+            return _Resp(301, {'Location': '/login'}) if url == 'https://H/' else _Resp(200)
+        obs = collect.observe_http('H', self.ident(), get=rel)
+        self.assertEqual(obs['https']['status'], 200)
+        self.assertEqual(seen[:2], ['https://H/', 'https://H/login'])
+        seen = []
+        obs = collect.observe_http('h', self.ident(), get=lambda url, **kw: (
+            seen.append(url), _Resp(301, {'Location': 'https://H:443/x'}) if url == 'https://h/' else _Resp(200))[1])
+        self.assertEqual(obs['https']['status'], 200)
+
+    def test_plain_http_probe_sends_only_user_agent(self):
+        from limes.checks import collect
+        from limes.identity import Header
+        sent = {}
+
+        def get(url, headers=None, **kw):
+            sent[url] = headers
+            return _Resp(200)
+        ident = self.ident(Header('X-Key', 's3cr3t', True), Header('X-Team', 'blue', False))
+        collect.observe_http('h', ident, get=get)
+        self.assertEqual(sent['http://h/'], {'User-Agent': ident.ua})
+        self.assertEqual(sent['https://h/']['X-Key'], 's3cr3t')
+
     def test_tls_verify_codes_are_classified(self):
         import ssl
         from limes.checks import collect

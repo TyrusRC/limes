@@ -3,12 +3,14 @@ injectable callables, so the evaluators stay pure. TLS verification is never dis
 import socket
 import ssl
 from datetime import datetime, timedelta, timezone as dt_timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlsplit
 
 import dns.exception
 import dns.resolver
 import requests
 from django.utils import timezone
+
+from limes import scope
 
 
 TIMEOUT = 5
@@ -37,6 +39,20 @@ def _https_obs(resp, url):
             'headers': {k.lower(): v for k, v in resp.headers.items()}, 'cookies': _cookies(resp)}
 
 
+def same_host_https(url, host):
+    """True only for https://<host>[:443]/... with no userinfo and no backslash. Parsers
+    disagree on such authorities (urlsplit vs urllib3/WHATWG), so anything odd is refused."""
+    if not url or '\\' in url:
+        return False
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    return (parts.scheme.lower() == 'https' and '@' not in parts.netloc and port in (None, 443)
+            and scope.target_host(url) == (host or '').rstrip('.').lower())
+
+
 def _fetch_https(host, headers, get):
     """GET https://host/ following at most MAX_REDIRECTS same-host redirects."""
     url = f'https://{host}/'
@@ -47,9 +63,11 @@ def _fetch_https(host, headers, get):
         finally:
             resp.close()
         loc = obs['headers'].get('location')
-        nxt = urljoin(url, loc) if loc and 300 <= obs['status'] < 400 else None
-        if not nxt or (urlparse(nxt).hostname or '').lower() != host.lower() or not nxt.lower().startswith('https://'):
+        if not loc or not 300 <= obs['status'] < 400 or '\\' in loc:
             return obs
+        nxt = urljoin(url, loc)
+        if not same_host_https(nxt, host):
+            return obs  # evaluate the 3xx we have
         url = nxt
     return obs
 
@@ -72,7 +90,8 @@ def observe_http(host, ident, get=requests.get):
     headers = {'User-Agent': ident.ua, **{h.name: h.value for h in ident.headers}}
 
     def plain():
-        resp = get(f'http://{host}/', headers=headers, timeout=TIMEOUT, allow_redirects=False, stream=True)
+        # cleartext: never send the project's custom or secret headers
+        resp = get(f'http://{host}/', headers={'User-Agent': ident.ua}, timeout=TIMEOUT, allow_redirects=False, stream=True)
         try:
             return {'status': resp.status_code, 'location': resp.headers.get('Location', '')}
         finally:
