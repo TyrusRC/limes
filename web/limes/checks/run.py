@@ -47,8 +47,12 @@ def _host_checks(asset, holder, now, observers, resolve, done):
         return None
     obs = {**_pinned(ip), **(observers or {})}
     http = obs['http'](asset.value, ScanIdentity.for_domain(holder))
-    done['http_live'] = any(isinstance(http.get(k), dict) for k in ('https', 'http'))
-    return web.evaluate(http) + tls.evaluate(obs['tls'](asset.value), now)
+    tls_obs = obs['tls'](asset.value)
+    # live = something answered: HTTP on either port, or a TLS handshake on 443 (a bad certificate still proves an
+    # open port, though requests reports it only as an error)
+    done['http_live'] = (any(isinstance(http.get(k), dict) for k in ('https', 'http'))
+                         or isinstance(tls_obs.get('cert'), dict))
+    return web.evaluate(http) + tls.evaluate(tls_obs, now)
 
 
 def _stepper(now, done):
