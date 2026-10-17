@@ -3,6 +3,7 @@ from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
 from limes.definitions import NOTHING_ASSESSED
+from limes.checks import run as checks_run
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
@@ -266,6 +267,32 @@ def passive_intel(self, ctx={}, description=None):
 		self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
 	except Exception:
 		logger.exception('Passive intel: notify failed')
+	return counts
+
+
+@app.task(name='risk_checks', base=LimesTask, bind=True)
+def risk_checks(self, ctx={}, description=None):
+	"""Configuration risk checks for the scan's owned root. Contacts only in-scope hosts (the scope
+	guard runs inside run_checks), and stays inside its own time budget."""
+	try:
+		project, root = resolution.root_for_domain(self.domain) if self.domain else (None, None)
+	except Exception:
+		logger.exception('Risk checks: root lookup failed, skipping')
+		return {}
+	if not project or not root or root.scope_tier != 'owned_root':
+		logger.warning('Risk checks: no owned root for this scan, skipping')
+		return {}
+	try:
+		counts = checks_run.run_checks(project, root)
+	except SoftTimeLimitExceeded:
+		raise
+	except Exception:
+		logger.exception('Risk checks failed')
+		return {}
+	try:
+		self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
+	except Exception:
+		logger.exception('Risk checks: notify failed')
 	return counts
 
 
