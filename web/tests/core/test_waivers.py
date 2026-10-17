@@ -1,12 +1,15 @@
 from datetime import timedelta
+from unittest import mock
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.conf import settings
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from dashboard.models import Project
-from limes import scoring, waivers
-from startScan.models import Asset, ScoreSnapshot, TrackedIssue, Vulnerability
+from limes import celery_routing, scoring, waivers
+from limes.alerts import events, issues, waiver_tasks
+from startScan.models import Asset, ChangeEvent, IssueWaiver, ScoreSnapshot, TrackedIssue, Vulnerability
 from tests.core.test_scoring import Base as ScoringBase
 
 
@@ -134,3 +137,80 @@ class ScoreV3Test(ScoringBase):
         scoring.snapshot_scores()
         snap = ScoreSnapshot.objects.get(project=self.p)
         self.assertEqual((snap.score, snap.raw_score), (950, 799))
+
+
+class WaiverAlertsTest(TestCase):
+    def setUp(self):
+        self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+        self.a = Asset.objects.create(project=self.p, kind='hostname', value='a.x.com', scope_tier='owned_host')
+        self.u = User.objects.create(username='u')
+        self.now = timezone.now()
+
+    def sync(self, issues_):
+        with mock.patch('limes.scoring.current_issues', return_value=(issues_, {self.a.id})):
+            return issues.sync_issues(self.p)
+
+    def issue(self, sev=3, status='open'):
+        return TrackedIssue.objects.create(project=self.p, asset=self.a, key='k', source='finding', severity=sev, status=status)
+
+    def expired(self, issue, **kw):
+        w = waivers.create_waiver(issue, 'accepted_risk', 'r', self.u, now=self.now - timedelta(days=10),
+                                  expires_at=self.now - timedelta(days=10) + timedelta(days=5))
+        if kw:
+            IssueWaiver.objects.filter(pk=w.pk).update(**kw)
+        return w
+
+    def test_rules(self):
+        self.assertTrue(events.is_immediate('waiver_expired', 'k', 3))
+        self.assertFalse(events.is_immediate('waiver_expired', 'k', 2))
+
+    def test_waived_issue_does_not_alert(self):
+        self.sync({self.a.id: {'k': 3}})
+        issue = TrackedIssue.objects.get(key='k')
+        waivers.create_waiver(issue, 'accepted_risk', 'ok', self.u)
+        self.assertEqual(self.sync({self.a.id: {'k': 4}}), [])
+        self.assertEqual([e.kind for e in self.sync({})], ['issue_fixed'])
+        self.assertEqual(self.sync({self.a.id: {'k': 4}}), [])
+        issue.refresh_from_db()
+        self.assertEqual((issue.status, issue.reopened), ('open', 1))
+
+    def test_expired_waiver_alerts_again(self):
+        self.sync({self.a.id: {'k': 3}})
+        self.expired(TrackedIssue.objects.get(key='k'))
+        self.assertEqual([e.kind for e in self.sync({self.a.id: {'k': 4}})], ['issue_new'])
+
+    def test_expire_waivers_announces_once(self):
+        issue = self.issue()
+        self.expired(issue)
+        self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 1})
+        e = ChangeEvent.objects.get(kind='waiver_expired')
+        self.assertTrue(e.immediate)
+        self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 0})
+        self.assertEqual(ChangeEvent.objects.filter(kind='waiver_expired').count(), 1)
+
+    def test_expire_waivers_skips_revoked_and_unexpired(self):
+        self.expired(self.issue(), revoked_at=self.now)
+        other = TrackedIssue.objects.create(project=self.p, asset=self.a, key='k2', source='finding', severity=3)
+        waivers.create_waiver(other, 'accepted_risk', 'r', self.u, now=self.now)
+        self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 0})
+        self.assertFalse(ChangeEvent.objects.exists())
+
+    def test_low_severity_expiry_is_digest_only(self):
+        self.expired(self.issue(sev=2))
+        waiver_tasks.expire_waivers(now=self.now)
+        self.assertFalse(ChangeEvent.objects.get(kind='waiver_expired').immediate)
+
+    def test_new_waiver_keeps_expired_one_announceable(self):
+        issue = self.issue()
+        old = self.expired(issue)
+        waivers.create_waiver(issue, 'accepted_risk', 'again', self.u, now=self.now)
+        old.refresh_from_db()
+        self.assertIsNone(old.revoked_at)
+        self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 1})
+        self.assertEqual(waiver_tasks.expire_waivers(now=self.now), {'expired': 0})
+
+    def test_beat_and_routing(self):
+        self.assertEqual(settings.CELERY_BEAT_SCHEDULE['expire-waivers']['task'], 'expire_waivers')
+        self.assertEqual(settings.CELERY_BEAT_SCHEDULE['expire-waivers']['schedule'], 86400.0)
+        self.assertEqual(celery_routing.TASK_PLAN['expire_waivers'], (celery_routing.ORCHESTRATE, 15 * celery_routing.MIN))
+        self.assertIn('limes.alerts.waiver_tasks', settings.CELERY_IMPORTS)

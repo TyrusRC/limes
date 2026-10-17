@@ -1,11 +1,12 @@
 """Diff the current issues against TrackedIssue rows and record an event per change."""
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from limes import scoring
 from limes.alerts import events
 from limes.checks.catalogue import CHECKS
-from startScan.models import Asset, IssueSyncState, TrackedIssue
+from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
 IP_BUCKET = '#ips'
@@ -46,6 +47,8 @@ def sync_issues(project, now=None):
         buckets = {a.id: _bucket(a, roots) for a in assets.values()}
         synced = set(state.roots)
         passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
+        waived = set(IssueWaiver.objects.filter(issue__project=project, revoked_at__isnull=True)
+                     .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values_list('issue_id', flat=True))
         out = []
         for asset_id, keys in issues.items():
             asset = assets.get(asset_id)
@@ -67,7 +70,7 @@ def sync_issues(project, now=None):
                     kind = 'issue_new'
                 row.severity, row.last_seen = sev, now
                 row.save()
-                if kind:
+                if kind and row.id not in waived:  # state still moves; only the announcement is silenced
                     out.append(_event(project, kind, row, asset))
         for (asset_id, key), row in rows.items():
             gone = (asset_id, key) in passed if row.source == 'check' else asset_id in assessed
