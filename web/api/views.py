@@ -914,6 +914,8 @@ class WaiveIssue(APIView):
 			w = waivers.create_waiver(issue, data['kind'], data['reason'], request.user, expires_at)
 		except waivers.WaiverError as e:
 			return Response({'status': False, 'message': str(e)})
+		from dashboard.stats import invalidate
+		invalidate(issue.project_id)
 		return Response({'status': True, 'message': 'waived', 'waiver': _waiver_json(w)})
 
 
@@ -928,6 +930,8 @@ class RevokeIssueWaiver(APIView):
 			return Response({'status': False, 'message': 'issue not found'})
 		if not waivers.revoke_waiver(issue, request.user):
 			return Response({'status': False, 'message': 'no active waiver'})
+		from dashboard.stats import invalidate
+		invalidate(issue.project_id)
 		return Response({'status': True, 'message': 'revoked'})
 
 
