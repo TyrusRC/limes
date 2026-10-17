@@ -658,7 +658,8 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 .dropdown-divider { border-top-color: var(--border); margin: var(--space-1) 0; }
 .dropdown-toggle::after { vertical-align: middle; }
 /* the theme's bootstrap.min.css pins .dropdown-menu-end with right:0 !important, which doubles Popper's
-   transform and throws end-aligned menus off to the left; give Popper back its own inset */
+   transform and throws end-aligned menus off to the left; give Popper back its own inset.
+   Verified on the top bar's menus only; page-level .dropdown-menu-end menus are a Task 5 sweep check. */
 .dropdown-menu-end[data-popper-placement] { left: 0 !important; right: auto !important; }
 
 /* ---------- Alerts ---------- */

@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from rolepermissions.checkers import has_permission
+from rolepermissions.permissions import revoke_permission
 from rolepermissions.roles import assign_role
 
 from dashboard.models import Project
@@ -70,6 +71,28 @@ class NavigationTest(TestCase):
         # the auditor role really is gated: some Configure links must be hidden
         self.assertNotIn(self.href('api_vault'), side)
         self.assertIn(self.href('report_settings'), side)
+
+    def test_user_without_role_sees_no_gated_links(self):
+        nobody = User.objects.create_user('nobody', password='p')
+        side, top = self.shell(nobody)
+        for name, perm in NAV.items():
+            self.assertEqual(self.href(name) in side, perm is None, name)
+        self.assertNotIn('Configure', side)
+        self.assertNotIn('aria-label="Quick add"', top)
+
+    def test_each_configure_gate_checked_on_its_own(self):
+        # sys_admin minus the two permissions the auditor holds: the Configure section still
+        # renders, so each inner gate (not just the section gate) has to hide its link
+        user = User.objects.create_user('partial', password='p')
+        assign_role(user, 'sys_admin')
+        for perm in ('modify_interesting_lookup', 'modify_scan_report'):
+            revoke_permission(user, perm)
+        side, _ = self.shell(user)
+        for name, perm in NAV.items():
+            self.assertEqual(self.href(name) in side, perm is None or has_permission(user, perm), name)
+        self.assertNotIn(self.href('interesting_lookup'), side)
+        self.assertNotIn(self.href('report_settings'), side)
+        self.assertIn(self.href('api_vault'), side)
 
     def test_project_and_user_names_are_escaped(self):
         Project.objects.filter(slug=SLUG).update(name='<img src=x onerror=alert(1)>')

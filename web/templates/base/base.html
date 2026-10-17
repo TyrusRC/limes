@@ -89,6 +89,21 @@
           content: 'Scan Activity',
         });
         handleHashInUrl();
+
+        // Closing the offcanvas sidebar on a narrow screen leaves aria-hidden on it; once the
+        // viewport is wide enough for the static sidebar, close it and drop the dialog attributes.
+        var nav = document.getElementById('l-sidebar');
+        var unDialog = function () { ['aria-hidden', 'aria-modal', 'role'].forEach(function (a) { nav.removeAttribute(a); }); };
+        window.matchMedia('(min-width: 992px)').addEventListener('change', function (e) {
+          if (!e.matches) return;
+          var oc = bootstrap.Offcanvas.getInstance(nav);
+          if (oc && nav.classList.contains('show')) {
+            nav.addEventListener('hidden.bs.offcanvas', unDialog, {once: true});
+            oc.hide();
+          } else {
+            unDialog();
+          }
+        });
       });
 
       function render_search_history(slug){
