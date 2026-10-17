@@ -68,15 +68,17 @@ function issue_load_score() {
 		}).catch(function() { box.innerHTML = ''; });
 }
 
+var issue_forecast_seq = 0;
 function issue_forecast() {
-	var box = document.getElementById('issue_forecast'), ids = issue_selected();
+	var seq = ++issue_forecast_seq, box = document.getElementById('issue_forecast'), ids = issue_selected();
 	if (!ids.length) { box.style.display = 'none'; return; }
 	issue_post('/api/score_forecast/', {project: issue_project(), issues: ids}).then(function(d) {
+		if (seq !== issue_forecast_seq) return;  // a newer request superseded this one
 		if (!d.status || d.score === null || d.score === undefined) { box.style.display = 'none'; return; }
 		var delta = Number(d.delta);
 		box.textContent = 'Forecast if fixed: ' + d.score + ' (' + d.grade + '), ' + (delta >= 0 ? '+' : '') + delta;
 		box.style.display = '';
-	}).catch(function() { box.style.display = 'none'; });
+	}).catch(function() { if (seq === issue_forecast_seq) box.style.display = 'none'; });
 }
 
 function issue_notes_html(notes) {
@@ -99,9 +101,12 @@ function issue_load_notes(id) {
 	});
 }
 
+function issue_date_in(days) {
+	return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
 function issue_default_expiry() {
-	var d = new Date(Date.now() + 90 * 86400000);
-	return d.toISOString().slice(0, 10);
+	return issue_date_in(90);
 }
 
 // accepted_risk needs an expiry (default +90 days); a false positive stays open-ended unless a date is chosen.
@@ -150,6 +155,10 @@ function issue_modal(id) {
 	issue_load_notes(id);
 	var fail = function() { issue_toast('Request failed.'); };
 	if (!issue_can_write()) return;
+	// the date posts as UTC midnight, so today is already past: allow tomorrow..+365 days only
+	var exp_input = document.getElementById('issue_expiry');
+	exp_input.min = issue_date_in(1);
+	exp_input.max = issue_date_in(365);
 	issue_sync_expiry();
 	document.getElementById('issue_kind').addEventListener('change', issue_sync_expiry);
 	document.getElementById('issue_waive').addEventListener('click', function() {

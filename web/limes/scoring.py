@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from limes.celery import app
@@ -46,8 +46,7 @@ def issue_key(key):
 def waived_keys(project, now=None):
     """{(asset_id, normalized key)} of issues with an active waiver; expires_at is honoured at read time."""
     now = now or timezone.now()
-    active = IssueWaiver.objects.filter(issue=OuterRef('pk'), revoked_at__isnull=True).filter(
-        Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    active = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
     return set(TrackedIssue.objects.filter(project=project).filter(Exists(active)).values_list('asset_id', 'key'))
 
 

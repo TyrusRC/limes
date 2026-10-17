@@ -1,11 +1,13 @@
+import logging
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from dashboard.stats import invalidate
 from startScan.models import IssueNote, IssueWaiver, TrackedIssue
+
+logger = logging.getLogger(__name__)
 
 KINDS = ('accepted_risk', 'false_positive')
 DEFAULT_DAYS = 90
@@ -19,8 +21,7 @@ class WaiverError(ValueError):
 
 def active_waiver(issue, now=None):
     now = now or timezone.now()
-    return (issue.waivers.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
-            .order_by('-created_at', '-id').first())
+    return issue.waivers.filter(IssueWaiver.active_q(now)).order_by('-created_at', '-id').first()
 
 
 def _text(value, what):
@@ -32,7 +33,16 @@ def _text(value, what):
     return value
 
 
+def _invalidate(project_id):
+    # the write is committed; a cache outage must not turn it into an error (the 60 s TTL bounds the staleness)
+    try:
+        invalidate(project_id)
+    except Exception:
+        logger.exception('Could not invalidate the dashboard cache for project %s', project_id)
+
+
 def create_waiver(issue, kind, reason, user, expires_at=None, now=None):
+    given_now = now
     now = now or timezone.now()
     if kind not in KINDS:
         raise WaiverError('kind must be one of: ' + ', '.join(KINDS))
@@ -42,24 +52,29 @@ def create_waiver(issue, kind, reason, user, expires_at=None, now=None):
     if expires_at is not None and not now < expires_at <= now + timedelta(days=MAX_DAYS):
         raise WaiverError(f'expiry must be in the future and within {MAX_DAYS} days')
     with transaction.atomic():
+        # NOTE: this row lock is the only guard for one active waiver per issue; a writer bypassing create_waiver
+        # can leave two, and revoke_waiver revokes only the newest. Upgrade path: a partial unique index on
+        # (issue) WHERE revoked_at IS NULL, which needs an expiry-aware design.
         TrackedIssue.objects.select_for_update().get(pk=issue.pk)
-        issue.waivers.filter(revoked_at__isnull=True).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).update(revoked_at=now, revoked_by=user)
+        if given_now is None:  # stamp after the lock so a waiting writer's timestamps follow the one it waited for
+            now = timezone.now()
+        issue.waivers.filter(IssueWaiver.active_q(now)).update(revoked_at=now, revoked_by=user)
         w = IssueWaiver.objects.create(issue=issue, kind=kind, reason=reason, created_by=user,
                                        created_at=now, expires_at=expires_at)
-    invalidate(issue.project_id)
+    _invalidate(issue.project_id)
     return w
 
 
 def revoke_waiver(issue, user, now=None):
-    now = now or timezone.now()
     with transaction.atomic():
         TrackedIssue.objects.select_for_update().get(pk=issue.pk)
+        now = now or timezone.now()
         w = active_waiver(issue, now)
         if not w:
             return False
         w.revoked_at, w.revoked_by = now, user
         w.save(update_fields=['revoked_at', 'revoked_by'])
-    invalidate(issue.project_id)
+    _invalidate(issue.project_id)
     return True
 
 

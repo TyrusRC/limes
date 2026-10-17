@@ -203,6 +203,11 @@ class IssueWaiver(models.Model):
     revoked_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     expiry_notified = models.BooleanField(default=False)
 
+    @staticmethod
+    def active_q(now):
+        """The one definition of active: not revoked and (open-ended or expires_at > now)."""
+        return models.Q(revoked_at__isnull=True) & (models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+
 
 class IssueNote(models.Model):
     issue = models.ForeignKey(TrackedIssue, on_delete=models.CASCADE, related_name='notes')
