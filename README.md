@@ -39,8 +39,11 @@ sudo ./install.sh          # -n for non-interactive
 to the host. Review it before continuing, and set `PGBOUNCER_TAG` to a tested
 `edoburu/pgbouncer` tag. Compose refuses to start while it is empty.
 
-Limes is then served at `https://<host>` (nginx on 443). Create the first admin user with
-`make username`.
+Limes is then served over plain HTTP at `http://localhost:8082`, on this machine only
+(`LIMES_BIND=0.0.0.0` in `.env` serves other hosts, and `LIMES_HTTP_PORT` changes the port). TLS is
+optional: `make certs`, then `make up HTTPS=1`, and Limes is also at `https://<host>` (443,
+`LIMES_HTTPS_PORT`). Every container runs under the compose project `limes`
+(`docker compose ps`). Create the first admin user with `make username`.
 
 ## Configuration
 

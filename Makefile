@@ -24,6 +24,12 @@ SERVICES += ct-watch
 COMPOSE_ALL_FILES += --profile realtime
 endif
 
+# TLS is optional: `make certs` once, then `make up HTTPS=1`.
+ifeq ($(HTTPS), 1)
+SERVICES += proxy-tls
+COMPOSE_ALL_FILES += --profile https
+endif
+
 # Check if 'docker compose' command is available, otherwise use 'docker-compose'
 DOCKER_COMPOSE := $(shell if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
 $(info Using: $(shell echo "$(DOCKER_COMPOSE)"))
@@ -38,7 +44,7 @@ certs:		    ## Generate certificates.
 setup:			## Generate certificates.
 	@make certs
 
-up:				## Build and start all services (REALTIME=1 adds the certificate watch, LLM=1 the local LLM).
+up:				## Build and start all services (HTTPS=1 adds TLS on 443, REALTIME=1 adds the certificate watch, LLM=1 the local LLM).
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} up -d --build ${SERVICES}
 
 build:			## Build all services.

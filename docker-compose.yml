@@ -1,3 +1,5 @@
+name: limes
+
 x-app: &app
   image: limes:local
   pull_policy: never  # built once, by the migrate service below
@@ -166,8 +168,24 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - 8082:8082/tcp
-      - 443:443/tcp
+      # Plain HTTP, on this machine only by default. LIMES_BIND=0.0.0.0 serves other hosts (then put TLS in front).
+      - ${LIMES_BIND:-127.0.0.1}:${LIMES_HTTP_PORT:-8082}:8082/tcp
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./config/nginx:/etc/nginx/limes:ro
+      - ./config/nginx/limes.conf:/etc/nginx/conf.d/limes.conf:ro
+      - static_volume:/usr/src/app/staticfiles/
+      - scan_results:/usr/src/scan_results
+    networks: [limes_network]
+
+  proxy-tls:
+    image: nginx:1.27-alpine
+    profiles: [https]  # optional TLS: `make certs`, then `make up HTTPS=1`
+    restart: unless-stopped
+    ports:
+      - ${LIMES_BIND:-127.0.0.1}:${LIMES_HTTPS_PORT:-443}:443/tcp
     depends_on:
       web:
         condition: service_healthy
@@ -179,7 +197,8 @@ services:
       - source: proxy.key
         target: /etc/nginx/certs/limes_rsa.key
     volumes:
-      - ./config/nginx/limes.conf:/etc/nginx/conf.d/limes.conf:ro
+      - ./config/nginx:/etc/nginx/limes:ro
+      - ./config/nginx/limes-tls.conf:/etc/nginx/conf.d/limes.conf:ro
       - static_volume:/usr/src/app/staticfiles/
       - scan_results:/usr/src/scan_results
     networks: [limes_network]

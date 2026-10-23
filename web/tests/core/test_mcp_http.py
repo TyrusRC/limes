@@ -333,7 +333,7 @@ class McpHttpTests(TransactionTestCase):
 
     def test_deploy_config(self):
         root = WEB.parent
-        nginx = (root / 'config/nginx/limes.conf').read_text()
+        nginx = ''.join(f.read_text() for f in sorted((root / 'config/nginx').iterdir()))
         self.assertIn('error_page                                  502 = @mcp_off', nginx)
         self.assertNotIn('502 504', nginx)
         self.assertRegex(nginx, r'log_format\s+mcp\s+[^;]*\$uri')
@@ -369,7 +369,7 @@ class McpHttpTests(TransactionTestCase):
     def test_auth_has_its_own_limiter_and_nginx_limits_requests(self):
         from limes.mcp import asgi, server
         self.assertIsNot(asgi.AUTH_LIMITER, server.LIMITER)
-        nginx = (WEB.parent / 'config/nginx/limes.conf').read_text()
+        nginx = ''.join(f.read_text() for f in sorted((WEB.parent / 'config/nginx').iterdir()))
         self.assertRegex(nginx, r'limit_req_zone\s+\$binary_remote_addr\s+zone=mcp:\d+m\s+rate=\d+r/s')
         self.assertRegex(nginx, r'limit_req\s+zone=mcp\s+burst=\d+')
 
