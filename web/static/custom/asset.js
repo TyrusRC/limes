@@ -328,6 +328,8 @@ function get_asset_modal(id) {
 			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
 			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
 			asset_cadence_html(a) +
+			'<p class="mb-0"><b>Tags</b> ' + (tag_chips_html(a.tags) || '<span class="l-muted">none</span>') +
+			(tag_can_write() ? ' <button type="button" class="btn btn-xs btn-soft-secondary" onclick="edit_asset_tags(' + Number(a.id) + ')">Edit tags</button>' : '') + '</p>' +
 			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
 			asset_intel_html(a.enrichment, a.breaches) + '</div>'

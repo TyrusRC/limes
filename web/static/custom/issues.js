@@ -64,7 +64,7 @@ function issue_post(url, body) {
 
 function issue_url() {
 	var u = '/api/issues/?project=' + encodeURIComponent(issue_project());
-	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev', 'tag'].forEach(function(k) {
 		var v = document.getElementById('f_' + k).value;
 		if (v) u += '&' + k + '=' + encodeURIComponent(v);
 	});
@@ -320,12 +320,12 @@ function issues_init() {
 	$.fn.dataTable.ext.errMode = 'none';
 	// display renders HTML; sort and search use the plain value
 	var plain = function(fn) { return function(d, t, row) { return t === 'display' ? fn(d, row) : d; }; };
-	// ?category=, ?severity=, ?source= and ?waived= preselect a filter, but only to a value the select already offers
+	// ?category=, ?severity=, ?source=, ?waived= and ?tag= preselect a filter; a select takes only a value it offers, the tag box the text
 	var query = new URLSearchParams(location.search);
-	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev', 'tag'].forEach(function(k) {
 		var sel = document.getElementById('f_' + k), v = query.get(k);
 		if (!sel) return;
-		if (v && Array.prototype.some.call(sel.options, function(o) { return o.value === v; })) sel.value = v;
+		if (v && (sel.tagName !== 'SELECT' || Array.prototype.some.call(sel.options, function(o) { return o.value === v; }))) sel.value = v;
 	});
 	var table = $('#issue_results').DataTable({
 		processing: true,
@@ -372,7 +372,7 @@ function issues_init() {
 	});
 	$('#issue_results_filter input').attr('aria-label', 'Filter this list');
 	$('#issue_results').on('error.dt', function() { issue_toast('Could not load issues.'); });
-	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev', 'tag'].forEach(function(k) {
 		document.getElementById('f_' + k).addEventListener('change', function() { table.ajax.url(issue_url()).load(); });
 	});
 	table.on('draw', issue_forecast);

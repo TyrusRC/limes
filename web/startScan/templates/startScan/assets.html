@@ -1,5 +1,6 @@
 {% extends 'base/base.html' %}
 {% load static %}
+{% load permission_tags %}
 {% block title %}
 Assets
 {% endblock title %}
@@ -7,6 +8,7 @@ Assets
 {% block page_title %}Assets{% endblock page_title %}
 
 {% block main_content %}
+{% with can_write=user|can:'modify_targets' %}
 <div class="l-page-bar">
   <p class="l-page-sub" id="asset_score" aria-live="polite"></p>
   <button type="button" class="btn btn-primary" onclick="show_add_asset_modal()"><i class="fe-plus" aria-hidden="true"></i>Add assets</button>
@@ -55,7 +57,8 @@ Assets
     </div>
     <div class="l-field">
       <label for="f_tag">Tag</label>
-      <input type="text" id="f_tag" class="form-control" placeholder="Any tag">
+      <input type="text" id="f_tag" class="form-control" placeholder="Any tag" list="tag_options" autocomplete="off">
+      <datalist id="tag_options"></datalist>
     </div>
     <div class="l-field">
       <label for="f_technology">Technology</label>
@@ -70,21 +73,33 @@ Assets
   </div>
 </section>
 
+{% if can_write %}
+<div class="l-banner" id="tag_bulk" role="status" aria-live="polite" hidden>
+  <div class="l-banner-text"><strong id="tag_bulk_count"></strong></div>
+  <div class="l-banner-actions">
+    <button type="button" class="btn btn-ghost" id="tag_bulk_add">Tag selected</button>
+    <button type="button" class="btn btn-ghost" id="tag_bulk_remove">Untag selected</button>
+  </div>
+</div>
+{% endif %}
+
 <section class="card l-table-card" aria-label="Asset list">
-  <table id="asset_results" class="table table-hover w-100" data-project="{{ current_project.slug }}">
+  <table id="asset_results" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}">
     <thead>
       <tr>
-        <th>Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
+        <th>{% if can_write %}<input type="checkbox" class="form-check-input me-1" id="asset_pick_all" aria-label="Select all assets on this page">{% endif %}Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
         <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th>Monitored</th><th>Last checked</th><th>Found by</th><th><span class="visually-hidden">Actions</span></th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 </section>
+{% endwith %}
 {% endblock main_content %}
 
 {% block page_level_script %}
 <script src="{% static 'custom/asset.js' %}"></script>
+<script src="{% static 'custom/asset_tags.js' %}"></script>
 <script type="text/javascript">
 $(document).ready(function() {
   load_asset_score();
@@ -121,7 +136,8 @@ $(document).ready(function() {
     columns: [
       {data: 'value', className: 'l-col-wide', render: function(d, t, row) {
         var mono = ['ip', 'cidr', 'asn'].indexOf(row.kind) !== -1 ? ' mono' : '';
-        return '<button type="button" class="l-link-btn asset_open' + mono + '" data-id="' + Number(row.id) + '">' + esc(d) + '</button>';
+        var pick = tag_can_write() ? '<input type="checkbox" class="form-check-input asset_pick me-1" value="' + Number(row.id) + '" aria-label="Select this asset">' : '';
+        return pick + '<button type="button" class="l-link-btn asset_open' + mono + '" data-id="' + Number(row.id) + '">' + esc(d) + '</button>';
       }},
       {data: 'kind', className: 'text-nowrap', render: esc}, {data: 'scope_tier', className: 'text-nowrap', render: esc}, {data: 'state', render: esc},
       {data: 'http_status', defaultContent: ''},
@@ -129,7 +145,7 @@ $(document).ready(function() {
       {data: 'technologies', orderable: false, render: join},
       {data: 'ip_addresses', orderable: false, render: join},
       {data: 'last_seen', className: 'text-nowrap', render: function(d) { return esc(String(d || '').slice(0, 16).replace('T', ' ')); }},
-      {data: 'tags', orderable: false, render: join},
+      {data: 'tags', orderable: false, render: function(d, t, row) { return t === 'display' ? tag_cell_html(row) : esc((d || []).join(', ')); }},
       {data: 'confidence', render: function(d) { return d === null || d === undefined ? '' : esc(Number(d).toFixed(2)); }},
       {data: 'monitor', orderable: false, className: 'l-col-monitor', render: function(d, t, row) { return asset_monitor_html(row); }},
       {data: 'last_resolved_at', className: 'text-nowrap', render: function(d) { return asset_esc(asset_when(d)); }},
@@ -147,6 +163,7 @@ $(document).ready(function() {
     document.getElementById('asset_entries').value = addValue.slice(0, 253);
   }
   $('#asset_results_filter input').attr('aria-label', 'Filter this list');
+  tag_init();
   $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });
   filterKeys.forEach(function(k) {
