@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 30
 RETRIES = 2
-MIN_INTERVAL = {'crtsh': 5.0, 'internetdb': 1.0, 'ripestat': 0.25, 'hibp': 7.0}
+MIN_INTERVAL = {'crtsh': 5.0, 'internetdb': 1.0, 'ripestat': 0.25, 'hibp': 7.0, 'rdap': 2.0}
 HEADERS = {'User-Agent': 'Limes-ASM'}
 
 
@@ -25,7 +25,7 @@ def get_json(url, *, provider, session=requests, clock=time.time, sleep=time.sle
     headers = {**HEADERS, **(headers or {})}
     for attempt in range(RETRIES + 1):
         retry_after = None
-        wait = ratelimit.reserve(provider, MIN_INTERVAL.get(provider, 1.0), clock())
+        wait = ratelimit.reserve(provider, MIN_INTERVAL.get(provider.split(':', 1)[0], 1.0), clock())
         if wait is None:  # provider saturated: same outcome as exhausted retries, without a long sleep
             logger.warning(f'{provider}: rate-limit slots exhausted, skipping')
             return None, None

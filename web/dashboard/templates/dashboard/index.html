@@ -359,6 +359,8 @@ Overview
         {% elif c.kind == 'asset_auto_confirmed' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-globe"></i></span>
         {% elif c.kind == 'asset_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-plus-circle"></i></span>
         {% elif c.kind == 'breach_new' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-shield-off"></i></span>
+        {% elif c.kind == 'lookalike_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-copy"></i></span>
+        {% elif c.kind == 'lookalike_active' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-alert-octagon"></i></span>
         {% else %}<span class="ov-fi" aria-hidden="true"><i class="fe-activity"></i></span>{% endif %}
         <div class="ov-feed-text">
           <div class="ov-feed-title">{{ c.title }}</div>
