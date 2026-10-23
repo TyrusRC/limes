@@ -1,0 +1,90 @@
+{% extends 'base/base.html' %}
+{% block title %}
+API tokens
+{% endblock title %}
+
+{% block page_title %}API tokens{% endblock page_title %}
+
+{% block main_content %}
+<p class="l-page-sub">Personal tokens let an AI agent use the Limes MCP server as you. See <code>docs/mcp.md</code>.</p>
+
+{% if new_token %}
+<section class="card" aria-label="New token" role="status">
+  <div class="card-body">
+    <h2 class="l-section-title">Your new token</h2>
+    <p class="l-hint mt-2">Copy it now. You will not see this again.</p>
+    <div class="l-field mt-2">
+      <code id="new_token" class="user-select-all" style="overflow-wrap:anywhere">{{ new_token }}</code>
+    </div>
+    <div class="l-form-actions mt-3">
+      <button type="button" class="btn btn-primary" id="copy_token"
+        onclick="navigator.clipboard.writeText(document.getElementById('new_token').textContent).then(function(){document.getElementById('copy_state').textContent='Copied'},function(e){document.getElementById('copy_state').textContent='Copy failed: select the token and copy it by hand'})">Copy token</button>
+      <span id="copy_state" class="l-hint align-self-center" role="status"></span>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section class="card" aria-label="Create a token">
+  <div class="card-body">
+    <h2 class="l-section-title">Create a token</h2>
+    {% if error %}<p class="l-form-error text-danger mt-2" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" class="l-filter-bar mt-2">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="l-field">
+        <label for="t_name">Name</label>
+        <input id="t_name" name="name" class="form-control" maxlength="100" required value="{{ form.name }}" placeholder="e.g. laptop">
+      </div>
+      <div class="l-field">
+        <label for="t_days">Expires after</label>
+        <select id="t_days" name="days" class="form-select">
+          {% for d in expiry_days %}<option value="{{ d }}"{% if d == default_days %} selected{% endif %}>{{ d }} days</option>{% endfor %}
+        </select>
+      </div>
+      <div class="l-field">
+        <label for="t_scope">Scope</label>
+        <select id="t_scope" name="scope" class="form-select">
+          <option value="read">read</option>
+          {% if writes_enabled %}<option value="read_write">read_write</option>{% endif %}
+        </select>
+        {% if writes_enabled %}<span class="l-hint">Writes also need your role's permission.</span>{% endif %}
+      </div>
+      <div class="l-field"><button type="submit" class="btn btn-primary">Create token</button></div>
+    </form>
+  </div>
+</section>
+
+<section class="card l-table-card" aria-label="Your tokens">
+  <div class="table-responsive">
+    <table class="table w-100">
+      <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.t.name }}</td>
+          <td><code>lmk_{{ r.t.token_id }}_…</code></td>
+          <td>{{ r.t.scope }}</td>
+          <td>{{ r.t.created_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ r.t.expires_at|date:"Y-m-d" }}</td>
+          <td>{% if r.t.last_used_at %}{{ r.t.last_used_at|date:"Y-m-d H:i" }}{% else %}never{% endif %}</td>
+          <td>{{ r.status }}</td>
+          <td>
+            {% if r.status == 'active' %}
+            <form method="post" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="revoke">
+              <input type="hidden" name="token_id" value="{{ r.t.token_id }}">
+              <button type="submit" class="btn btn-ghost" aria-label="Revoke token {{ r.t.name }}">Revoke</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="l-muted">No tokens yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock main_content %}

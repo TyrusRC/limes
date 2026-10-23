@@ -16,5 +16,6 @@ def projects(request):
 
 def version_context(request):
     return {
-        'LIMES_CURRENT_VERSION': settings.LIMES_CURRENT_VERSION
+        'LIMES_CURRENT_VERSION': settings.LIMES_CURRENT_VERSION,
+        'MCP_ENABLED': settings.MCP_ENABLED,
     }
