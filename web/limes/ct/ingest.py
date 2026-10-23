@@ -257,7 +257,7 @@ def _shown(name, wildcard):
     return f'*.{name}' if wildcard else name
 
 
-def _project(project_id, pm, record, source, index, now, silent):
+def _project(project_id, pm, record, source, index, now, silent, api_ok=False):
     """One project's share of a certificate. True when a sighting was created."""
     project = Project.objects.filter(pk=project_id).first()
     if project is None:
@@ -278,7 +278,8 @@ def _project(project_id, pm, record, source, index, now, silent):
                       'wildcard': any(w for _, w, _ in ours), 'issuer': _text(record['issuer_dn'], 500),
                       'not_before': record['not_before'], 'not_after': record['not_after'],
                       'log_uri': _text(record['log_uri'], 500), 'entry_index': record['entry_index'], 'source': source,
-                      'first_seen_at': now, 'watch_seen_at': now if source == 'certspotter' else None})
+                      'first_seen_at': now, 'watch_seen_at': now if source == 'certspotter' else None,
+                      'api_while_watch_ok': bool(api_ok) and source == 'certspotter_api'})
         if not created:
             if source == 'certspotter' and sighting.watch_seen_at is None:
                 CertSighting.objects.filter(pk=sighting.pk).update(watch_seen_at=now)
@@ -351,13 +352,13 @@ def _announce(project, asset, has_root, names, org, now):
         logger.exception('Could not record certificate event')
 
 
-def ingest(record, source, index, now, seen_at=None, silent=False):
+def ingest(record, source, index, now, seen_at=None, silent=False, api_ok=False):
     """Apply one checked record (parse_record) to every project it matches. Returns the ids of the projects where a
     sighting was created; a certificate already seen is a no-op (it only stamps `watch_seen_at`)."""
     matches, _dropped = match.classify(record['dns_names'], index)
     touched = set()
     for pid, pm in matches.items():
-        if _project(pid, pm, record, source, index, now, silent):
+        if _project(pid, pm, record, source, index, now, silent, api_ok):
             touched.add(pid)
         for dom in pm.lookalikes:
             if _once(f'limes:ct:look:{pid}:{dom}:{record["tbs_sha256"]}', 86400):

@@ -42,6 +42,9 @@ CT_WATCH_RESTART_MIN = env.int('LIMES_CT_WATCH_RESTART_MIN', default=300)  # sec
 CT_WATCHLIST_MAX = env.int('LIMES_CT_WATCHLIST_MAX', default=5000)
 CT_INGEST_PER_MIN = env.int('LIMES_CT_INGEST_PER_MIN', default=600)  # spool files ingested per minute
 CT_STATE_DIR = env('LIMES_CT_STATE_DIR', default='/var/lib/ct-watch')
+# Cert Spotter API fallback (limes.ct.api): opt-in, key from the environment only. The free tier allows 10 requests/hour.
+CERTSPOTTER_API_KEY = env('LIMES_CERTSPOTTER_API_KEY', default='')
+CERTSPOTTER_HOURLY_BUDGET = max(1, min(env.int('LIMES_CERTSPOTTER_HOURLY_BUDGET', default=7), 10))
 CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before a silent watcher fails its healthcheck
 # Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
 # share of each monitor tick's budget the queue may take
@@ -253,7 +256,7 @@ CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor')
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor', 'limes.ct.api')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
@@ -262,6 +265,7 @@ CELERY_BEAT_SCHEDULE = {
     'monitor-assets': {'task': 'monitor_assets', 'schedule': 60.0, 'options': {'expires': 55}},
     'drain-events': {'task': 'monitor_assets', 'schedule': 15.0, 'kwargs': {'events_only': True},
                      'options': {'expires': 14}},
+    'poll-ct-api': {'task': 'poll_ct_api', 'schedule': 60.0, 'options': {'expires': 55}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},

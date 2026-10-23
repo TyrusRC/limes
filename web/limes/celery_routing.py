@@ -22,6 +22,7 @@ TASK_PLAN = {
     'send_file_to_discord': (IO, 15 * MIN),
     'parse_nmap_results': (IO, 15 * MIN), 'geo_localize': (IO, 15 * MIN), 'query_whois': (IO, 15 * MIN),
     'enumerate_ranges': (IO, 15 * MIN),  # network-bound; a 60 s beat tick that holds its own Redis tick lock
+    'poll_ct_api': (IO, 15 * MIN),  # one Cert Spotter request per slot, under its own tick lock
     'monitor_assets': (IO, 15 * MIN),  # likewise: contacts targets only through limes.safe_fetch
     'remove_duplicate_endpoints': (IO, 15 * MIN),
     'llm_vulnerability_description': (IO, 15 * MIN),
