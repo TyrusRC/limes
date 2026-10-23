@@ -28,7 +28,6 @@ TASK_PLAN = {
     'generate_lookalikes': (IO, 15 * MIN), 'lookalike_tick': (IO, 15 * MIN),  # DNS, RDAP, crt.sh only; own tick locks
     'hibp_sync': (IO, 15 * MIN),  # Have I Been Pwned only (limes.hibp); holds its own Redis tick lock
     'remove_duplicate_endpoints': (IO, 15 * MIN),
-    'llm_vulnerability_description': (IO, 15 * MIN),
     # orchestration 15 min
     'initiate_scan': (ORCHESTRATE, 15 * MIN), 'initiate_subscan': (ORCHESTRATE, 15 * MIN),
     'report': (ORCHESTRATE, 15 * MIN), 'reap_stuck_scans': (ORCHESTRATE, 15 * MIN),

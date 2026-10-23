@@ -114,10 +114,6 @@ urlpatterns = [
         CVEDetails.as_view(),
         name='cve_details'),
     path(
-        'tools/gpt_vulnerability_report/',
-        LLMVulnerabilityReportGenerator.as_view(),
-        name='gpt_vulnerability_report_generator'),
-    path(
         'tools/gpt_get_possible_attacks/',
         GPTAttackSuggestion.as_view(),
         name='gpt_get_possible_attacks'),

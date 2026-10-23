@@ -898,32 +898,6 @@ def get_netlas_key():
 	return netlas_key[0] if netlas_key else None
 
 
-def parse_llm_vulnerability_report(report):
-	report = report.replace('**', '')
-	data = {}
-	sections = re.split(r'\n(?=(?:Description|Impact|Remediation|References):)', report.strip())
-	
-	try:
-		for section in sections:
-			if not section.strip():
-				continue
-			
-			section_title, content = re.split(r':\n', section.strip(), maxsplit=1)
-			
-			if section_title == 'Description':
-				data['description'] = content.strip()
-			elif section_title == 'Impact':
-				data['impact'] = content.strip()
-			elif section_title == 'Remediation':
-				data['remediation'] = content.strip()
-			elif section_title == 'References':
-				data['references'] = [ref.strip() for ref in content.split('\n') if ref.strip()]
-	except Exception as e:
-		return data
-	
-	return data
-
-
 def create_scan_object(host_id, engine_id, initiated_by_id=None):
 	'''
 	create task with pending status so that celery task will execute when

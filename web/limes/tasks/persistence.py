@@ -1,23 +1,5 @@
 from limes.tasks.base import *
 
-def add_gpt_description_db(title, path, description, impact, remediation, references):
-	logger.info(f'Adding GPT Report to DB for {title}, PATH: {path}')
-	if not path:
-		path = '/'
-	gpt_report = GPTVulnerabilityReport()
-	gpt_report.url_path = path
-	gpt_report.title = title
-	gpt_report.description = description
-	gpt_report.impact = impact
-	gpt_report.remediation = remediation
-	gpt_report.save()
-
-	for url in references:
-		ref, created = VulnerabilityReference.objects.get_or_create(url=url)
-		gpt_report.references.add(ref)
-		gpt_report.save()
-
-
 #-------------#
 # Utils tasks #
 #-------------#

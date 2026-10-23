@@ -1,5 +1,4 @@
 from limes.tasks.base import *
-from limes.tasks.persistence import add_gpt_description_db
 from limes.tasks.runner import run_command
 
 @app.task(name='geo_localize', bind=False)
@@ -100,72 +99,3 @@ def remove_duplicate_endpoints(
 					msg += f'\n\t {ep.http_url} [{ep.http_status}] [{field_name}={field_value}]'
 					ep.delete()
 				logger.warning(msg)
-
-
-@app.task(name='llm_vulnerability_description', bind=False)
-def llm_vulnerability_description(vulnerability_id):
-	"""Generate and store Vulnerability Description using GPT.
-
-	Args:
-		vulnerability_id (Vulnerability Model ID): Vulnerability ID to fetch Description.
-	"""
-	logger.info('Getting GPT Vulnerability Description')
-	try:
-		lookup_vulnerability = Vulnerability.objects.get(id=vulnerability_id)
-		lookup_url = urlparse(lookup_vulnerability.http_url)
-		path = lookup_url.path
-	except Exception as e:
-		return {
-			'status': False,
-			'error': str(e)
-		}
-
-	# check in db GPTVulnerabilityReport model if vulnerability description and path matches
-	if not path:
-		path = '/'
-	stored = GPTVulnerabilityReport.objects.filter(url_path=path).filter(title=lookup_vulnerability.name).first()
-	if stored and stored.description and stored.impact and stored.remediation:
-		logger.info('Found cached Vulnerability Description')
-		response = {
-			'status': True,
-			'description': stored.description,
-			'impact': stored.impact,
-			'remediation': stored.remediation,
-			'references': [url.url for url in stored.references.all()]
-		}
-	else:
-		logger.info('Fetching new Vulnerability Description')
-		vulnerability_description = get_gpt_vuln_input_description(
-			lookup_vulnerability.name,
-			path
-		)
-		# one can add more description here later
-
-		gpt_generator = LLMVulnerabilityReportGenerator(logger=logger)
-		response = gpt_generator.get_vulnerability_description(vulnerability_description)
-		logger.info(response)
-		add_gpt_description_db(
-			lookup_vulnerability.name,
-			path,
-			response.get('description'),
-			response.get('impact'),
-			response.get('remediation'),
-			response.get('references', [])
-		)
-
-	# for all vulnerabilities with the same vulnerability name this description has to be stored.
-	# also the condition is that the url must contain a part of this.
-
-	for vuln in Vulnerability.objects.filter(name=lookup_vulnerability.name, http_url__icontains=path):
-		vuln.description = response.get('description', vuln.description)
-		vuln.impact = response.get('impact')
-		vuln.remediation = response.get('remediation')
-		vuln.is_gpt_used = True
-		vuln.save()
-
-		for url in response.get('references', []):
-			ref, created = VulnerabilityReference.objects.get_or_create(url=url)
-			vuln.references.add(ref)
-			vuln.save()
-
-	return response

@@ -313,35 +313,6 @@ DEFAULT_GPT_MODELS = [
 ]
 
 
-# GPT Vulnerability Report Generator
-VULNERABILITY_DESCRIPTION_SYSTEM_MESSAGE = """
-You are an expert penetration tester who has just completed a comprehensive security assessment. Based on the provided vulnerability title, vulnerable URL, and vulnerability description, your task is to generate a detailed, technical penetration testing report in plain text format.
-Your task is to generate a detailed, technical penetration testing report. This report should offer an in-depth analysis of the discovered vulnerabilities, adhering to industry best practices and standards.
-
-The output should adhere to the following structure:
-
-Description:
-A comprehensive explanation of the vulnerability, including: Detailed technical analysis, Associated CVE IDs (if any), Related known vulnerabilities, Exploitation methods
-
-Impact:
-A thorough assessment of the vulnerability's potential impact on web applications, including: Data confidentiality breaches, System integrity compromises, Service availability disruptions, Potential for further exploitation
-
-Remediation:
-A prioritized list of specific, actionable steps to address the vulnerability, such as: Code modifications, Configuration changes, Security patch applications, Implementation of security controls
-
-References:
-Relevant, authoritative sources supporting your analysis, such as: Official CVE database entries, Vendor security advisories, Respected security research publications, Applicable industry standards or guidelines
-
-
-Ensure that:
-1. Each section (Description, Impact, Remediation, References) is separated by ONLY ONE blank line and no multiple new lines. The content must be immediately after the section title.
-2. Do not make title as bold, italic or underline. It must be Title ending with a colon. Example: Description:
-3. All URLs in the 'references' section begin with 'http://' or 'https://'.
-4. Remediation steps should be specific and actionable and should not contain any ambiguous or general recommendations.
-5. Refrain from including any personal opinions or subjective assessments in your report.
-"""
-
-
 ATTACK_SUGGESTION_GPT_SYSTEM_PROMPT = """
     You are a highly skilled penetration tester who has recently completed a reconnaissance on a target.
     As a penetration tester, you've conducted a thorough reconnaissance on a specific subdomain.
