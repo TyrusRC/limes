@@ -18,7 +18,7 @@ from tests.core.test_dashboard_stats import Base
 
 X = '<img src=x onerror=alert(1)>'
 ESCAPED = '&lt;img src=x onerror=alert(1)&gt;'
-NEW_IDS = ('dash_what_changed', 'dash_categories', 'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation',
+NEW_IDS = ('dash_what_changed', 'dash_categories', 'dash_brand', 'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation',
            'dash_discovery', 'dash_coverage', 'dash_top_risks')
 
 
@@ -55,7 +55,7 @@ class OverviewPageTest(Base):
 
     def test_page_order(self):
         html = self.page('p')
-        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_inventory', 'dash_findings',
+        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_brand', 'dash_inventory', 'dash_findings',
                  'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation', 'dash_discovery', 'dash_coverage',
                  'dash_top_risks', 'dash_risky', 'dash_changes', 'dash_monitoring']
         at = [html.index(f'id="{i}"') for i in order]
@@ -176,7 +176,7 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 86  # a rise must be justified in review
+OVERVIEW_QUERIES = 88  # a rise must be justified in review (86 + the Brand aggregate + the feed states)
 WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome; none from the cards
 
 

@@ -750,9 +750,11 @@ class VulnerabilitySerializer(serializers.ModelSerializer):
 			for vid, name in through.objects.filter(vulnerability_id__in=[v.pk for v in rows]).values_list('vulnerability_id', 'cveid__name'):
 				by_vuln.setdefault(vid, []).append(name)
 			marks = exploit.markers(n for names in by_vuln.values() for n in names)
-			memo = root._cve_intel = {vid: {c: {k: marks[c][k] for k in ('kev', 'epss', 'percentile')}
+			memo = {vid: {c: {k: marks[c][k] for k in ('kev', 'epss', 'percentile')}
 									for c in sorted({c for c in map(parse.norm_cve, names) if c} & marks.keys())}
 								for vid, names in by_vuln.items()}
+			if isinstance(instance, (list, tuple, QuerySet)):  # a single object is not the page: do not serve it to the next one
+				root._cve_intel = memo
 		return memo.get(vulnerability.pk, {})
 
 	def get_discovered_date(self, Vulnerability):

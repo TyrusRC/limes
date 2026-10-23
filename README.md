@@ -19,7 +19,11 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | **Findings** | assay (DAST, runs nuclei) and mantis (SAST on the JavaScript, source maps and exposed `.git` the crawl collects). |
 | **Change alerts** | New and returning issues, dropped scores, new assets and expired waivers go to in-app notifications, Slack, Discord, Telegram or Lark, and a signed webhook. High-signal changes alert immediately (at most 10 per project per hour); the rest arrive in one daily digest. |
 | **Waivers and notes** | Accept a risk until a date (default 90 days, at most 365) or mark a false positive, with a reason and an audit trail; discuss issues in notes; see the score if chosen issues were fixed. |
-| **Portal** | An Overview, an Issues page and an Assets page, in light and dark themes. |
+| **IP reputation** | Owned IPs, ranges and ASNs are checked against Spamhaus DROP and ASN-DROP and the abuse.ch Feodo list (opt-in: blocklist.de, CINS; optional Spamhaus DQS). Provisional until the feeds prove themselves: shown, alerted, never scored. |
+| **Exploitability** | Findings and InternetDB banner CVEs carry CISA KEV and EPSS markers; Top risks use them only to break ties, and the Issues page filters on "Known exploited". |
+| **Exposure and leaks** | Exposed AI services (Ollama, OpenAI-compatible APIs, Triton, Gradio, Jupyter, Ray) on owned IPs, Supabase secret keys in client JavaScript, and, with a key, Have I Been Pwned domain breaches (counts only). |
+| **Lookalikes** | Typo, homoglyph, TLD-swap and keyword variants of each owned root are checked through DNS, RDAP and certificate transparency. Registered ones land in a review queue (watch, ignore, this is ours, abuse-report text to copy); the Overview has a Brand card. Limes never sends the report. |
+| **Portal** | An Overview, an Issues page, an Assets page and a Lookalikes page, in light and dark themes. |
 
 The scan pipeline is fixed on purpose: amass + subfinder → dnsx → naabu → nmap → httpx → katana +
 gau → assay → mantis. There is no per-tool plug-and-play; see [Scope and safety](#scope-and-safety).
@@ -51,6 +55,14 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 | `LIMES_RANGE_ADDRESS_CAP` | `4096` | Owned addresses allowed per project across ranges and ASNs (1 to 65536). |
 | `LIMES_INTERNETDB_DAILY_BUDGET` / `LIMES_PTR_DAILY_BUDGET` | `5000` / `10000` | Daily lookup budgets for range enumeration, shared by all ranges. |
 
+| `LIMES_LOOKALIKE_ENABLED` | `true` | Generate and check lookalike domains of owned roots. |
+| `LIMES_LOOKALIKE_DNS_DAILY_BUDGET` / `LIMES_RDAP_DAILY_BUDGET` | `5000` / `500` | Daily DNS and RDAP lookups for lookalikes, shared by all projects. |
+| `LIMES_LOOKALIKE_HTTP` | `false` | One HTTPS GET per registered lookalike a week (title, login form, brand mention). It tells the lookalike's operator someone is watching. |
+| `LIMES_FEEDS_OPTIN` | empty | Comma list of opt-in feeds with unclear terms: `blocklist_de`, `cins`. |
+| `LIMES_ABUSECH_AUTH_KEY` | empty | abuse.ch key, sent when set (downloads work without one today). |
+| `LIMES_SPAMHAUS_DQS_KEY` | empty | Spamhaus DQS key for per-IP ZEN lookups; off when empty, never logged. |
+| `LIMES_HIBP_API_KEY` | empty | Have I Been Pwned key for domain breaches of owned roots; off when empty, sent only in a header. |
+
 Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under Notification Settings.
 
 ## Common tasks
@@ -65,13 +77,21 @@ Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under No
 
 ## Passive providers
 
-Scans query three free, keyless sources; none of them contacts your targets:
+Scans query free, keyless sources; none of them contacts your targets. Feeds are downloaded once per
+publisher cadence, never redistributed, and shown with their credit and date on the Overview:
 
 | Provider | Used for |
 |---|---|
 | crt.sh | Hostnames under owned roots; other domains sharing your certificates become review candidates |
 | Shodan InternetDB | Open ports, CPEs, vulnerability IDs and tags per IP; hostnames on owned IPs become candidates |
 | RIPEstat | ASN, prefix and holder per IP; the announced IPv4 prefixes of an ASN you add |
+| Spamhaus DROP / ASN-DROP | Listed ranges and ASNs. Contains data from The Spamhaus Project; free for any organisation, credit kept ([terms](https://www.spamhaus.org/blocklists/do-not-route-or-peer/)) |
+| abuse.ch Feodo Tracker | Botnet C2 addresses, CC0 ([terms](https://abuse.ch/terms-of-use/)) |
+| CISA KEV | Known-exploited CVE markers, CC0 |
+| EPSS | Exploit-probability markers by FIRST.org / Empirical Security; attribution requested ([terms](https://www.first.org/epss/faq)) |
+| IANA RDAP bootstrap + registry RDAP | Registrar, creation date and abuse contact of lookalike domains (IANA data is CC0) |
+| Have I Been Pwned (optional, key) | Domain breach counts, CC BY 4.0 |
+| Spamhaus DQS (optional, key) | Per-IP ZEN lookups |
 
 Shodan InternetDB is free for non-commercial use; commercial use needs a Shodan enterprise license,
 and its terms are only partly published. Limes throttles itself to one request per second, shares
@@ -93,6 +113,10 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
   (including exploitation tools such as sqlmap). To approve another tool, change
   `ASSAY_TOOL_ALLOWLIST` and the Dockerfile step together; read the notes in
   `web/limes/integrations/assay.py` first.
+- **Lookalikes: DNS, RDAP and CT only; HTTP only with `LIMES_LOOKALIKE_HTTP`, which tells the
+  lookalike's operator someone is watching.** A lookalike is never an asset: nothing scans, crawls or
+  monitors it, and "This is ours" only opens the add-asset form for you to confirm. Lookalike names
+  are shown as text, never links.
 - **Untrusted data.** Finding names, hostnames, banners and logs come from the hosts you scan and are
   escaped everywhere they are shown, including in PDF reports.
 
@@ -104,14 +128,19 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - `manage.py reclassify_roots` converts old hostname rows that are really registrable roots (for
   example `example.co.uk`). It is idempotent and logs every change. Run it once after upgrading.
 - Scheduled tasks `monitor_assets` and `enumerate_ranges` run on the `io` queue; the scheduler locks
-  live in Redis.
+  live in Redis. So do the new `refresh_feeds`, `generate_lookalikes`, `lookalike_tick` and `hibp_sync`.
+- The first run of each new feed and the first lookalike sweep of each root are silent baselines: they
+  record what exists and send no alerts. IP reputation and the leak checks are provisional: they
+  appear as issues but do not change any score.
 
 ## Status
 
 Built and merged: inventory and discovery, continuous tracking of added assets, the risk score and
 checks, change alerts, waivers, notes and the fix forecast, and the portal in light and dark themes.
 The Overview shows the score by category, exposure, certificates, technologies, remediation, discovery,
-coverage, top risks and what changed.
+coverage, top risks and what changed, plus IP reputation and data leakage cards (provisional) and a
+Brand card. Discovery and reputation are built too: feeds, KEV/EPSS markers, AI-service and leak
+checks, optional breach data, and the lookalike review queue.
 
 Designed, not built yet (spec in [`docs/superpowers/specs`](docs/superpowers/specs)):
 

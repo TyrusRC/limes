@@ -217,6 +217,10 @@ def issues(request, slug):
     return render(request, 'startScan/issues.html', {'issues_active': 'active'})
 
 
+def lookalikes(request, slug):
+    return render(request, 'startScan/lookalikes.html', {'lookalikes_active': 'active'})
+
+
 def all_subdomains(request, slug):
     subdomains = Subdomain.objects.filter(target_domain__project__slug=slug)
     scan_engines = EngineType.objects.order_by('engine_name').all()

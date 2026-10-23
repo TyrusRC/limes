@@ -154,6 +154,8 @@ def asm_stats(project):
         'exposure': posture.exposure(project, now),
         'certificates': posture.certificates(project, now),
         'technologies': posture.technologies(project),
+        'brand': posture.brand(project, now),
+        'data_sources': posture.data_sources(now),
         'remediation': activity.remediation(project, now),
         'top_risks': activity.top_risks(project, live, now),
         'what_changed': activity.what_changed(project, now, risk['score']),

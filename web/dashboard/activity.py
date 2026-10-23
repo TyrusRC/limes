@@ -77,6 +77,7 @@ def top_risks(project, live, now):
                          'points': scoring.points(key, sev), 'provisional': key in PROVISIONAL, 'detected_at': when,
                          'age_days': _age(now, when) if when else None,
                          'cves': found, **exploit.summary(found, marks)})
+            rows[-1]['epss_label'] = exploit.pct_label(rows[-1]['epss'])
     # KEV and EPSS only order equal-cost rows; they never change `points`
     rows.sort(key=lambda r: (-r['points'], not r['kev'], -(r['epss'] if r['epss'] is not None else -1), r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
     return rows[:TOP_RISKS]

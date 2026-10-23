@@ -11,6 +11,7 @@ Overview
 {% block main_content %}
 {% url 'assets' slug=project.slug as assets_url %}
 {% url 'issues' slug=project.slug as issues_url %}
+{% url 'lookalikes' slug=project.slug as lookalikes_url %}
 <p class="ov-sub">
   <span>{{ project.name }}</span>
   <span>{% if monitoring.last_scan %}Last scan {{ monitoring.last_scan|naturaltime }}{% else %}No scans yet{% endif %}</span>
@@ -126,6 +127,27 @@ Overview
       </a>
       {% endfor %}
     </div>
+    <div class="ov-card-foot ov-sources" id="dash_sources">
+      <span>Data sources:
+      {% regroup data_sources by credit as sources %}{% for g in sources %}<a href="{{ g.list.0.terms }}" target="_blank" rel="noopener noreferrer">{{ g.grouper }}</a> ({% for f in g.list %}{{ f.name }} {% if f.last_good_at %}{{ f.last_good_at|date:"Y-m-d" }}{% if f.stale %} <span class="ov-tag ov-stale">stale</span>{% endif %}{% else %}not fetched yet{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}){% if not forloop.last %} · {% endif %}{% endfor %}</span>
+    </div>
+  </section>
+
+  <section class="card ov-brand" id="dash_brand" aria-labelledby="h-brand">
+    <div class="ov-card-head"><h2 id="h-brand">Brand</h2><a class="ov-meta" href="{{ lookalikes_url }}">Lookalikes</a></div>
+    {% if not brand.enabled %}
+    <p class="ov-note ov-empty-note ov-pad">Lookalike monitoring is off. The operator can turn it on with LIMES_LOOKALIKE_ENABLED.</p>
+    {% elif not brand.tracked %}
+    <p class="ov-note ov-empty-note ov-pad">No lookalike domains tracked yet. They are generated daily for each owned root domain.</p>
+    {% else %}
+    <div class="ov-stats">
+      <a class="ov-stat" href="{{ lookalikes_url }}?registered=true"><div class="ov-stat-label"><i class="fe-copy" aria-hidden="true"></i>Registered</div><div class="ov-stat-value">{{ brand.registered|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?young=true"><div class="ov-stat-label"><i class="fe-clock" aria-hidden="true"></i>New in 30 days</div><div class="ov-stat-value">{{ brand.new_30|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?mx=true"><div class="ov-stat-label"><i class="fe-mail" aria-hidden="true"></i>Phishing-ready</div><div class="ov-stat-value">{{ brand.phishing_ready|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?status=registered"><div class="ov-stat-label"><i class="fe-eye" aria-hidden="true"></i>Awaiting review</div><div class="ov-stat-value">{{ brand.awaiting|intcomma }}</div></a>
+    </div>
+    <div class="ov-card-foot"><span>Phishing-ready means the domain has mail or a certificate · {{ brand.tracked|intcomma }} candidates tracked</span></div>
+    {% endif %}
   </section>
 
   <section class="card ov-surface" id="dash_inventory" aria-labelledby="h-surface">
@@ -299,7 +321,7 @@ Overview
         <tbody>
         {% for r in top_risks %}
           <tr>
-            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}{% widthratio r.epss 1 100 as pct %}EPSS {% if pct == "0" %}&lt;1{% else %}{{ pct }}{% endif %}%{% endif %}</span>{% endif %}</td>
+            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}EPSS {{ r.epss_label }}{% endif %}</span>{% endif %}</td>
             <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
             <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
             <td class="ov-num">{% if r.provisional %}<span class="ov-tag">Provisional</span>{% else %}−{{ r.points }}{% endif %}</td>

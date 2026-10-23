@@ -52,6 +52,20 @@ def defang(domain):
     return domain.replace('.', '[.]')
 
 
+CREATED_RE = r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?[+-]\d\d:\d\d$'
+
+
+def with_created(qs):
+    """Annotate `created`: the RDAP registration time as a timestamp, NULL when RDAP has none. Only the exact
+    shape rdap.parse writes (isoformat with an offset) is cast, so a stray value can never break the query."""
+    from django.db.models import Case, DateTimeField, When
+    from django.db.models.fields.json import KeyTextTransform
+    from django.db.models.functions import Cast
+    return qs.annotate(created=Case(
+        When(rdap__created__regex=CREATED_RE, then=Cast(KeyTextTransform('created', 'rdap'), DateTimeField())),
+        default=None, output_field=DateTimeField()))
+
+
 def due_rows(now, limit):
     return list(Lookalike.objects.filter(next_check__lte=now, root__kind='root_domain', root__scope_tier='owned_root')
                 .exclude(status='ours').exclude(root__state='retired').select_related('root', 'project')

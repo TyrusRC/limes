@@ -24,6 +24,7 @@ urlpatterns = [
         name='create_report'),
     path('<slug:slug>/assets', views.assets, name='assets'),
     path('<slug:slug>/issues', views.issues, name='issues'),
+    path('<slug:slug>/lookalikes', views.lookalikes, name='lookalikes'),
     path(
         '<slug:slug>/all/subdomains',
         views.all_subdomains,
