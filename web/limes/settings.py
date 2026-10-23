@@ -419,7 +419,9 @@ LOGGING = {
         # silences them, and a crash in the MCP app would leave no traceback.
         'uvicorn': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
         'uvicorn.error': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
-        'uvicorn.access': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
+        # The access line carries the query string, and a token sent in a URL must never reach a log: keep it off
+        # even though the entrypoint passes --no-access-log (this config would otherwise switch it back on).
+        'uvicorn.access': {'handlers': ['null'], 'level': 'CRITICAL', 'propagate': False},
         'django.server': {
             'handlers': ['console'],
             'propagate': False

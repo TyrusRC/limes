@@ -319,6 +319,18 @@ class McpHttpTests(TransactionTestCase):
         self.assertEqual(p.returncode, 0, p.stderr[-800:])
         self.assertIn(b'Traceback', p.stdout + p.stderr)
 
+    def test_uvicorn_access_line_with_a_url_token_is_never_emitted(self):
+        """The access line carries the query string; Django's logging config must not switch it back on."""
+        code = ("import logging, io, sys\nimport limes\nbuf = io.StringIO()\n"
+                "a = logging.getLogger('uvicorn.access')\na.addHandler(logging.StreamHandler(buf))\n"
+                "a.info('%s - \"%s %s HTTP/%s\" %d', '1.2.3.4:1', 'GET', '/mcp?token=lmk_aaaaaaaa_PLANTEDVALUE', '1.1', 404)\n"
+                "print('LEAK' if 'PLANTEDVALUE' in buf.getvalue() else 'CLEAN')\n")
+        p = subprocess.run([sys.executable, '-c', code], capture_output=True, timeout=60,
+                           env={**os.environ, 'PYTHONPATH': str(WEB), 'DJANGO_SETTINGS_MODULE': 'limes.settings'})
+        self.assertEqual(p.returncode, 0, p.stderr[-800:])
+        self.assertIn(b'CLEAN', p.stdout)
+        self.assertNotIn(b'PLANTEDVALUE', p.stdout + p.stderr)
+
     def test_deploy_config(self):
         root = WEB.parent
         nginx = (root / 'config/nginx/limes.conf').read_text()
