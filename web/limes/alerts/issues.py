@@ -3,7 +3,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from limes import scoring
+from limes import scope, scoring
 from limes.alerts import events
 from limes.checks.catalogue import CHECKS, PROVISIONAL
 from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
@@ -20,7 +20,8 @@ def _bucket(asset, roots):
         if asset.parent_id and asset.parent.kind == 'cidr':  # a range sweeps in its own unit
             return f'cidr:{asset.parent.value}'
         return IP_BUCKET
-    return scoring._root_of(asset.value, roots) or asset.value
+    value = scope.target_host(asset.value) if asset.kind == 'api' else asset.value  # an API sits with its host's root
+    return scoring._root_of(value or asset.value, roots) or asset.value
 
 
 def _event(project, kind, row, asset):

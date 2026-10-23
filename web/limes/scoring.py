@@ -113,8 +113,9 @@ def _root_of(value, roots):
 
 
 def issue_assets(project):
-    """Assets whose issues are tracked: scored_assets plus owned ranges and ASNs (reputation listings live there)."""
-    return _owned_assets(project, ('root_domain', 'hostname', 'ip', 'cidr', 'asn'))
+    """Assets whose issues are tracked: scored_assets plus owned ranges and ASNs (reputation listings live there) and
+    APIs (provisional api.* checks only: an API never joins scored_assets, so it cannot move any score)."""
+    return _owned_assets(project, ('root_domain', 'hostname', 'ip', 'cidr', 'asn', 'api'))
 
 
 def _fresh_checks(project, now=None, assets=None):

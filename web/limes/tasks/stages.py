@@ -3,6 +3,7 @@ from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
 from limes.definitions import NOTHING_ASSESSED
+from limes import api_discovery
 from limes.checks import leak, run as checks_run
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
@@ -284,6 +285,12 @@ def risk_checks(self, ctx={}, description=None):
 		return {}
 	# a crash propagates so LimesTask marks the stage FAILED; the chain still continues
 	counts = checks_run.run_checks(project, root)
+	try:  # APIs are a bonus on top of the checks: their failure never costs the stage
+		logger.info('API discovery: %s', api_discovery.discover(project, root))
+	except SoftTimeLimitExceeded:
+		raise
+	except Exception:
+		logger.exception('API discovery failed, continuing')
 	try:
 		self.notify(fields={k.replace('_', ' ').capitalize(): v for k, v in counts.items()})
 	except Exception:

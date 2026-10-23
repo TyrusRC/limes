@@ -177,6 +177,7 @@ Overview
       <div class="ov-stat"><div class="ov-stat-label"><i class="fe-globe" aria-hidden="true"></i>Root domains</div><div class="ov-stat-value">{{ inventory.owned_root|intcomma }}</div></div>
       <div class="ov-stat"><div class="ov-stat-label"><i class="fe-server" aria-hidden="true"></i>Hostnames</div><div class="ov-stat-value">{{ inventory.owned_host|intcomma }}</div></div>
       <div class="ov-stat"><div class="ov-stat-label"><i class="fe-share-2" aria-hidden="true"></i>IP addresses</div><div class="ov-stat-value">{{ inventory.ip|intcomma }}</div></div>
+      <a class="ov-stat" href="{{ assets_url }}?kind=api&amp;scope_tier=owned"><div class="ov-stat-label"><i class="fe-code" aria-hidden="true"></i>APIs</div><div class="ov-stat-value">{{ inventory.api|intcomma }}</div></a>
       <div class="ov-stat"><div class="ov-stat-label"><i class="fe-link" aria-hidden="true"></i>Dependencies</div><div class="ov-stat-value">{{ inventory.dependency|intcomma }}</div></div>
     </div>
     <div class="ov-card-foot">

@@ -94,7 +94,8 @@ def _inventory(project):
         owned_root=Count('id', filter=Q(scope_tier='owned_root')),
         owned_host=Count('id', filter=Q(scope_tier='owned_host', kind__in=('hostname', 'root_domain'))),
         ip=Count('id', filter=Q(scope_tier__in=OWNED, kind='ip')),
-        dependency=Count('id', filter=Q(scope_tier='dependency')))
+        dependency=Count('id', filter=Q(scope_tier='dependency')),
+        api=Count('id', filter=Q(scope_tier__in=OWNED, kind='api')))
     states = dict(assets.filter(scope_tier__in=OWNED).values_list('state').annotate(n=Count('id')))
     counts['states'] = {s: states.get(s, 0) for s in ('active', 'missing', 'stale', 'retired')}
     return counts

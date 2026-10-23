@@ -97,6 +97,12 @@ _PROVISIONAL = [
      'Never expose the Ray dashboard: bind it to localhost and reach it through a VPN or SSH tunnel.'),
     ('leak.supabase_secret_key', 'data_leakage', 4, 'A Supabase secret (service_role) key is served in the site JavaScript.',
      'Revoke and rotate the key in Supabase and keep it server-side only.'),
+    ('api.exposed_docs', 'web', 2, 'An API specification is publicly readable.',
+     'Serve API documentation only to authenticated users or internal networks.'),
+    ('api.no_auth_declared', 'web', 2, 'The API specification declares no authentication scheme.',
+     'Declare security schemes in the specification and require them on every operation.'),
+    ('api.unauthenticated_access', 'web', 3, 'A documented API path answers an unauthenticated request with data although the specification declares authentication.',
+     'Enforce authentication on every route, not only in the documentation or the gateway.'),
     ('leak.hibp_breach', 'data_leakage', 2, 'Addresses on the domain appear in a public data breach.',
      'Force password resets for the affected accounts and enable multi-factor authentication.'),
 ]
