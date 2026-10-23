@@ -30,7 +30,8 @@ The Overview shows one number, a trend, counts and a table of risky assets. A pe
 - **Remediation card.** Issues fixed in the last 7 and 30 days, issues opened in the same periods, and the oldest open critical or high issues with their age ("first detected"). Data: `TrackedIssue` (`first_seen`, `fixed_at`, `reopened`).
 - **Discovery card.** Owned assets by how they were found: manual, certificate transparency, scan, passive intel, ASN, IP range. Data: `Asset.sources`.
 - **Coverage card.** How much of the owned inventory is actually watched: assets checked within their cadence, overdue, never checked, stopped (cadence off), with the oldest unchecked asset. Data: the monitor state and last-checked fields the track-owned project adds.
-- **Top risks.** The ten open issues costing the most points, each with asset, severity, points and age, linking to the Issues page.
+- **Top risks.** The ten open issues costing the most points, each with asset, severity, points and "first detected" (date and age; reset when a fixed issue comes back, as `TrackedIssue.reopened` already records), linking to the Issues page.
+- **"What changed" panel** beside the score history, with a 30-day / 90-day toggle: new assets, removed (missing or retired) assets, issues introduced, issues resolved, and the score change. Data: `Asset.first_seen` and lifecycle state, `TrackedIssue`, `ChangeEvent`. This is UpGuard's "View Changes" panel; it explains *why* the line moved.
 - **No new data collection** and no change to the score. Every widget reads data the system already stores.
 
 ## Non-goals
@@ -55,6 +56,20 @@ The Overview shows one number, a trend, counts and a table of risky assets. A pe
 - **`dashboard/stats.py`** gains the card builders, one function each, all returning plain dicts (the page template only formats them), and the existing cache wraps the whole result.
 - **UI** follows the restyle's tokens and card layout (`limes.css`, `ov-*` classes); category cards use the existing grade colour classes. The page order: score, trend, category cards, attack surface counts, severity tiles, then Exposure, Certificates, Technologies, Remediation, Discovery, Coverage, Top risks, Recent changes. On 390px they stack.
 - **Issues page filter:** `category` is added to `/api/issues/` and a select on the page. Anything outside the six known values is ignored.
+
+## Backlog from UpGuard's public help documentation (not part of this project)
+
+Research notes: `docs/superpowers/specs/UPGUARD-HELP-DOCS-NOTES.md` (cited, public pages only; screenshots in the docs were unreadable, so layout detail is thin). Ranked by value and feasibility for Limes, after what this project covers:
+1. An "informational" tier that is shown but never scored, and "provisional" new checks that start with no score impact.
+2. Risk detail view: what was detected, why it matters, recommended action, expected versus actual value, first detected per asset.
+3. Waiver scope (all assets including future ones, or selected), expiry reminder, optional approver, internal-only choice.
+4. Remediation-request flow (pick issues, recipient, due date, message; Active/Completed/Archived tabs; live potential score impact).
+5. Domain list tabs Active / Inactive (active = open port or MX), bulk label edit, rescan button (the activity rule is already used by the monitor).
+6. Portfolios: asset groups with inheritance from the parent domain and a current-portfolio switcher that filters every page and export.
+7. Notification rules (event type, severity, time frame, label/portfolio conditions) to in-app, email, webhook, Slack, Jira, plus a Home feed with "All activity" and "My tasks".
+8. Executive summary and scheduled reports (weekly to annual, PDF or spreadsheet) with category breakdown.
+9. Vulnerabilities page with EPSS, a CISA known-exploited marker (both free datasets), a verified filter and an Ignored tab.
+10. New checks UpGuard markets that Limes lacks: exposed AI/LLM endpoints, exposed Supabase-style databases.
 
 ## Left to the builder
 
