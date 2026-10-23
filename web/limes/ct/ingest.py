@@ -243,14 +243,19 @@ def _cand_allow(root_id, now):
     return allow
 
 
-def _host_allow(project_id, now):
+# NOTE: a quiet (baseline) pass walks a root's history, so it gets a separate, larger hourly allowance and never spends
+# the live one. Ceiling: 10x CT_NEW_HOSTS_PER_HOUR names an hour while a baseline runs; upgrade path: its own setting.
+QUIET_HOST_FACTOR = 10
+
+
+def _host_allow(project_id, now, quiet=False):
     """One new owned hostname from certificates, within the project's hourly allowance (fails closed)."""
-    key = f'limes:ct:host:{project_id}:{now.astimezone(dt_tz.utc):%Y%m%d%H}'
+    key = f'limes:ct:host{"q" if quiet else ""}:{project_id}:{now.astimezone(dt_tz.utc):%Y%m%d%H}'
     try:
         pipe = get_redis_connection('default').pipeline()
         pipe.incr(key)
         pipe.expire(key, 3600)
-        return pipe.execute()[0] <= settings.CT_NEW_HOSTS_PER_HOUR
+        return pipe.execute()[0] <= settings.CT_NEW_HOSTS_PER_HOUR * (QUIET_HOST_FACTOR if quiet else 1)
     except RedisError:
         return False
 
@@ -294,17 +299,22 @@ def _project(project_id, pm, record, source, index, now, silent, api_ok=False):
         first = None
         for name, rid in names:
             a = have.get(name)
-            if a is None:
-                if not _host_allow(project.id, now):  # over the hourly allowance: suggest it, never own it
-                    inventory.upsert_candidate(project, 'hostname', name, label, f'cert:{tbs[:16]}')
+            capped = a is not None and a.scope_tier == 'candidate'  # demoted by an earlier cap (or a Redis outage)
+            if a is None or capped:
+                if not _host_allow(project.id, now, quiet=silent):  # over the allowance: suggest it, never own it
+                    if a is None:
+                        inventory.upsert_candidate(project, 'hostname', name, label, f'cert:{tbs[:16]}')
                     continue
+                if capped:
+                    Asset.objects.filter(pk=a.pk, scope_tier='candidate').update(scope_tier='owned_host')
                 a = inventory.upsert_hostname_asset(project, name, parent=roots[rid], source=label,
                                                     evidence=f'cert:{tbs[:16]}')
-                reason = 'ct_new'
+                reason = None if silent else 'ct_new'  # a baseline pass finds history, not discoveries: no event, no flag
             else:
                 reason = 'ct_cert'
             if a is not None:
-                queue.append((a, reason))
+                if reason:
+                    queue.append((a, reason))
                 first = first or a
         host_assets = {a.id: a for a in Asset.objects.filter(pk__in=[aid for _, aid in pm.hosts])}
         for _, aid in pm.hosts:

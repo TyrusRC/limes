@@ -195,6 +195,7 @@ class CtRecheckTest(Base):
     def test_precert_rechecks_twice_then_stops(self):
         h = self.host('n.x.com', last_resolved_at=None)
         t0 = self.now
+        monitor.mark_pending(h, 'ct_new')  # what enqueue does before the item is queued
         self.check(h, {}, now=t0, reason='ct_new')
         ev = ChangeEvent.objects.get(kind='asset_new')
         self.assertEqual((ev.immediate, ev.detail['ports']), (False, []))
@@ -239,8 +240,19 @@ class CtRecheckTest(Base):
         monitor.monitor_assets()
         self.assertEqual(self.reload(h).enrichment['monitor']['pending'], 'ct_new')
 
+    def test_cadence_pass_and_queued_item_record_one_asset_new(self):
+        hosts = [self.host(f'n{i}.x.com', last_resolved_at=None) for i in range(5)]
+        for h in hosts:
+            eq.enqueue(h, 'ct_new')
+        for h in hosts:
+            self.check(h, public(h.value), now=self.now)  # the cadence pass gets there first
+        for aid, why, _ in eq.claim_due(self.now + timedelta(seconds=5), 100):
+            self.check(Asset.objects.get(pk=aid), public(Asset.objects.get(pk=aid).value), now=self.now, reason=why)
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new').count(), 5)
+
     def test_resolving_recheck_queues_no_more(self):
         h = self.host('n.x.com', last_resolved_at=None)
+        monitor.mark_pending(h, 'ct_new')  # what enqueue does before the item is queued
         self.check(h, {}, now=self.now, reason='ct_new')
         t1 = self.now + timedelta(seconds=3601)
         self.claim_and_check(public('n.x.com'), t1)
@@ -249,6 +261,7 @@ class CtRecheckTest(Base):
     def test_ct_new_with_exposed_service_is_immediate(self):
         self.asset('ip', PUBLIC)
         h = self.host('n.x.com', last_resolved_at=None)
+        monitor.mark_pending(h, 'ct_new')  # what enqueue does before the item is queued
         self.check(h, public('n.x.com'), get=Get({PUBLIC: {'ports': [3389]}}), reason='ct_new')
         ev = ChangeEvent.objects.get(kind='asset_new', asset=h)
         self.assertTrue(ev.immediate)

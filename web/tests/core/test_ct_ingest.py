@@ -154,6 +154,29 @@ class IngestTest(Base):
         self.root.refresh_from_db()
         self.assertNotIn('ct_issuers', self.root.enrichment)
 
+    def test_silent_new_names_are_quiet(self):
+        self.run_ingest([f'n{i}.x.com' for i in range(5)], silent=True)
+        hosts = Asset.objects.filter(kind='hostname', scope_tier='owned_host').exclude(pk=self.www.pk)
+        self.assertEqual(hosts.count(), 5)  # still owned, per the normal rules
+        self.assertEqual(self.queued(), set())
+        for h in hosts:
+            self.assertNotIn('pending', (h.enrichment or {}).get('monitor') or {})
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    @override_settings(CT_NEW_HOSTS_PER_HOUR=2)
+    def test_silent_names_do_not_spend_the_loud_allowance(self):
+        self.run_ingest([f'n{i}.x.com' for i in range(5)], silent=True)
+        self.run_ingest(['live1.x.com', 'live2.x.com'], tbs='b' * 64)
+        self.assertEqual(Asset.objects.filter(kind='hostname', scope_tier='candidate').count(), 0)
+        self.assertEqual(Asset.objects.filter(kind='hostname', scope_tier='owned_host').count(), 8)
+
+    @override_settings(CT_NEW_HOSTS_PER_HOUR=1)
+    def test_silent_names_have_their_own_larger_cap(self):
+        self.run_ingest([f'n{i}.x.com' for i in range(ingest.QUIET_HOST_FACTOR + 5)], silent=True)
+        self.assertEqual(Asset.objects.filter(kind='hostname', scope_tier='owned_host').exclude(pk=self.www.pk).count(),
+                         ingest.QUIET_HOST_FACTOR)
+        self.assertEqual(Asset.objects.filter(kind='hostname', scope_tier='candidate').count(), 5)
+
     def test_hostile_dn_truncated_and_logged_safely(self):
         dn = 'O=' + 'A' * 600 + '\nFORGED log line %s'
         with self.assertLogs('limes.ct.ingest', level='INFO') as lg:
@@ -243,6 +266,24 @@ class HostAllowanceTest(Base):
         cands = Asset.objects.filter(kind='hostname', scope_tier='candidate')
         self.assertEqual((hosts.count(), cands.count()), (5, 7))
         self.assertEqual(len(self.queued()), 5)
+
+    @override_settings(CT_NEW_HOSTS_PER_HOUR=1)
+    def test_a_capped_candidate_is_promoted_by_a_later_sighting(self):
+        self.run_ingest(['a.x.com', 'b.x.com'])
+        b = Asset.objects.get(value='b.x.com')
+        self.assertEqual(b.scope_tier, 'candidate')
+        self.queued()
+        with self.settings(CT_NEW_HOSTS_PER_HOUR=50):
+            self.run_ingest(['b.x.com'], tbs='c' * 64)
+        b.refresh_from_db()
+        self.assertEqual((b.scope_tier, b.parent), ('owned_host', self.root))
+        self.assertIn((b.id, 'ct_new'), self.queued())
+
+    @override_settings(CT_NEW_HOSTS_PER_HOUR=1)
+    def test_a_rejected_name_is_never_promoted(self):
+        Asset.objects.create(project=self.p, kind='hostname', value='r.x.com', scope_tier='rejected')
+        self.run_ingest(['r.x.com'])
+        self.assertEqual(Asset.objects.get(value='r.x.com').scope_tier, 'rejected')
 
     def test_redis_down_fails_closed_to_candidates(self):
         from redis.exceptions import ConnectionError as RedisConnectionError

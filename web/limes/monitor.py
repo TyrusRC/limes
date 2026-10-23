@@ -318,7 +318,9 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
         status, reason = 'refused', result['refused']
     if result['timeout']:
         status, reason = 'timeout', 'the host did not finish answering within the check deadline'
-    discovered = trigger == 'ct_new' or pending == 'ct_new'  # whichever check runs first honours a CT discovery
+    # whichever check runs first honours a CT discovery; enqueue marks it pending first, so a queued ct_new item that
+    # arrives after the flag was cleared must not record it twice
+    discovered = pending == 'ct_new'
     if discovered:  # the new host's own event is never silent; its children keep the first-check rule
         events.record_asset_new(a.project, a, ports=ports, enqueue=False)
     if status == 'unresolved':
