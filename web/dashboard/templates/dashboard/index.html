@@ -134,6 +134,26 @@ Overview
     </div>
   </section>
 
+  <section class="card ov-cats" id="dash_tags" aria-labelledby="h-tags">
+    <div class="ov-card-head"><h2 id="h-tags">Tags</h2><span class="ov-meta">Your ten most used tags, scored like the headline over their assets only</span></div>
+    {% if tag_cards %}
+    <div class="ov-cat-grid">
+      {% for t in tag_cards %}
+      <a class="ov-cat" href="{{ issues_url }}?tag={{ t.name|urlencode:'' }}">
+        <span class="ov-cat-label">{{ t.name }}</span>
+        <span class="ov-cat-main">
+          {% if t.assessed %}<span class="ov-grade ov-grade-{{ t.grade|lower }}">{{ t.grade }}</span><span class="ov-cat-score">{{ t.score }}</span>{% if t.raw_score != t.score %}<span class="ov-muted ov-cat-raw">raw {{ t.raw_score }}</span>{% endif %}
+          {% else %}<span class="ov-cat-na">Not assessed</span>{% endif %}
+        </span>
+        <span class="ov-cat-foot"><span>{{ t.assets|intcomma }} asset{{ t.assets|pluralize }} · {{ t.open|intcomma }} open</span></span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No tags yet. Tag assets from the <a href="{{ assets_url }}">Assets page</a> to group and score them.</p>
+    {% endif %}
+  </section>
+
   <section class="card ov-brand" id="dash_brand" aria-labelledby="h-brand">
     <div class="ov-card-head"><h2 id="h-brand">Brand</h2><a class="ov-meta" href="{{ lookalikes_url }}">Lookalikes</a></div>
     {% if not brand.enabled %}

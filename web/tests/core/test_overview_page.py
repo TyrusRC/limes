@@ -55,7 +55,7 @@ class OverviewPageTest(Base):
 
     def test_page_order(self):
         html = self.page('p')
-        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_brand', 'dash_inventory', 'dash_findings',
+        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_tags', 'dash_brand', 'dash_inventory', 'dash_findings',
                  'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation', 'dash_discovery', 'dash_coverage',
                  'dash_top_risks', 'dash_risky', 'dash_changes', 'dash_monitoring']
         at = [html.index(f'id="{i}"') for i in order]
@@ -176,7 +176,7 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 88  # a rise must be justified in review; merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured; -3 when the sidebar lost its wordlist, API vault and report permission checks
+OVERVIEW_QUERIES = 89  # a rise must be justified in review; the Tags card reads the top tags in one query (+1); merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured; -3 when the sidebar lost its wordlist, API vault and report permission checks
 WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome, plus the Real-time card's three (it is never cached)
 
 
