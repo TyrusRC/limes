@@ -175,7 +175,7 @@ class AssetListApiTest(TestCase):
             self._get(project='p1')
         a = Asset.objects.create(project=self.p, kind='hostname', value='c.x.com',
                                  scope_tier='owned_host', parent=self.root)
-        a.tags.create(name='t1')
+        a.tags.create(name='t1', project=a.project)
         a.technologies.create(name='nginx')
         a.ip_addresses.create(address='1.2.3.4')
         # an IP swept from a range that came from an ASN: its monitor state reads parent and grandparent
