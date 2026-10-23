@@ -18,7 +18,7 @@ import dns.resolver
 import dns.reversename
 import validators
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from limes import scope
@@ -26,7 +26,7 @@ from limes.alerts import events
 from limes.alerts.deliver import deliver_immediate
 from limes.celery import app
 from limes.checks import collect
-from limes.continuous import CADENCE_INTERVALS
+from limes.continuous import CADENCE_INTERVALS, tick_lock
 from limes.intel import domains, http, internetdb, ratelimit, ripestat
 from limes.tasks import inventory
 from limes.tasks.intel import _store
@@ -37,7 +37,6 @@ from startScan.models import Asset, ChangeEvent
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_ADDRESSES = 4096  # per entry, applied to the total after a start-end range is summarised
-RANGE_LOCK = 0x4C494D46  # Postgres advisory lock key: one enumerate_ranges tick at a time
 TICK_BUDGET = 45  # seconds of work per tick; beat expires at 55 and the next tick is 60 s away
 OWNED = ('owned_root', 'owned_host')
 MAX_STEP_FAILURES = 3  # InternetDB failing on the same address this many ticks in a row: skip it this pass
@@ -322,17 +321,6 @@ def due_ranges(now):
     return [d[3] for d in due]
 
 
-def _lock():
-    with connection.cursor() as c:
-        c.execute('SELECT pg_try_advisory_lock(%s)', [RANGE_LOCK])
-        return c.fetchone()[0]
-
-
-def _unlock():
-    with connection.cursor() as c:
-        c.execute('SELECT pg_advisory_unlock(%s)', [RANGE_LOCK])
-
-
 @app.task(name='enumerate_ranges', bind=False)
 def enumerate_ranges():
     """Beat tick: at most one ASN refresh (RIPEstat only), then budgeted range enumeration if opted in.
@@ -343,12 +331,8 @@ def enumerate_ranges():
     path: back off per consecutive failure."""
     if not settings.CONTINUOUS_SCANS:
         return {'reason': 'disabled'}
-    if not _lock():
-        return {'reason': 'locked'}
-    try:
-        return _tick()
-    finally:
-        _unlock()
+    with tick_lock('enumerate_ranges') as got:
+        return _tick() if got else {'reason': 'locked'}
 
 
 def _tick():

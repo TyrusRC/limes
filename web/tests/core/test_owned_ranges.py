@@ -392,5 +392,8 @@ class TaskTest(Base):
             self.assertEqual(r.enumerate_ranges()['reason'], 'disabled')
 
     def test_concurrent_tick_is_locked(self):
-        with mock.patch('limes.owned_ranges._lock', return_value=False):
+        from limes import continuous
+        with continuous.tick_lock('enumerate_ranges') as got:  # another worker's tick holds it
+            self.assertTrue(got)
             self.assertEqual(r.enumerate_ranges(), {'reason': 'locked'})
+        self.assertNotEqual(r.enumerate_ranges().get('reason'), 'locked')  # free again after the holder ends

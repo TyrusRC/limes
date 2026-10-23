@@ -1,12 +1,15 @@
 """Continuous monitoring (A5b): cadence-driven rediscovery of owned roots and asset aging."""
 import logging
+from contextlib import contextmanager
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import connection
 from django.utils import timezone
+from django_redis import get_redis_connection
+from redis.exceptions import LockError, RedisError
 
 from limes.celery import app
+from limes.celery_routing import TASK_PLAN
 from limes.common_func import create_scan_object
 from limes.definitions import INITIATED_TASK, LIVE_SCAN, RUNNING_TASK
 from limes.tasks.control import initiate_scan
@@ -22,7 +25,6 @@ MAX_IN_FLIGHT = 2  # NOTE: global ceiling: automation waits while this many scan
 MAX_DISPATCH_PER_TICK = 1
 MAX_ATTEMPTS_PER_TICK = 5
 IN_PROGRESS = (INITIATED_TASK, RUNNING_TASK)
-DISPATCH_LOCK = 0x4C494D45  # Postgres advisory lock key: one dispatcher at a time
 
 
 def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
@@ -84,21 +86,41 @@ def due_roots(now, project=None):
     return [d[3] for d in due]
 
 
+@contextmanager
+def tick_lock(name):
+    """At most one running `name` tick across all workers. Redis (owner token + TTL), not a Postgres session
+    advisory lock: behind pgbouncer (POOL_MODE=transaction) lock and unlock can reach different server connections,
+    leaking the lock (later ticks starve) or re-entering it (two ticks run). Yields False when another tick holds it
+    or Redis is unreachable (fail closed). Release is redis-py's compare-and-delete on the owner token, so a holder
+    whose TTL ran out never removes the next holder's lock.
+    NOTE: TTL = the task's hard time limit, so a hard-killed worker pauses this tick for at most that long. Upgrade
+    path: a shorter TTL renewed with lock.extend() between units of work."""
+    lock, got = None, False
+    try:
+        lock = get_redis_connection('default').lock(f'limes:tick:{name}', timeout=TASK_PLAN[name][1], blocking=False)
+        got = bool(lock.acquire())
+    except RedisError as e:
+        logger.warning('tick lock %s unavailable (%s); skipping this tick', name, type(e).__name__)
+    try:
+        yield got
+    finally:
+        if got:
+            try:
+                lock.release()
+            except (LockError, RedisError):
+                logger.warning('tick lock %s expired or could not be released', name)
+
+
 @app.task(name='dispatch_due_scans', bind=False)
 def dispatch_due_scans():
     if not settings.CONTINUOUS_SCANS:
         return {'dispatched': 0, 'reason': 'disabled'}
-    # Ticks queued while workers were down can run in parallel: only one may pick and start roots.
-    # Session-level lock, so each started scan's ScanHistory is committed before the next check.
-    with connection.cursor() as c:
-        c.execute('SELECT pg_try_advisory_lock(%s)', [DISPATCH_LOCK])
-        if not c.fetchone()[0]:
+    # Ticks queued while workers were down can run in parallel: only one may pick and start roots. Each started
+    # scan's ScanHistory still commits on its own (autocommit) before the next check.
+    with tick_lock('dispatch_due_scans') as got:
+        if not got:
             return {'dispatched': 0, 'skipped': 0, 'reason': 'locked'}
-    try:
         return _dispatch()
-    finally:
-        with connection.cursor() as c:
-            c.execute('SELECT pg_advisory_unlock(%s)', [DISPATCH_LOCK])
 
 
 def _dispatch():

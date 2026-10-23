@@ -6,7 +6,6 @@ from unittest import mock
 import dns.resolver
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connections
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -304,18 +303,16 @@ class DueTest(Base):
 
 class TickTest(Base):
     def test_concurrent_tick_is_locked(self):
+        from limes import continuous
         self.asset('hostname', 'a.other.com')
-        other = connections['default'].copy()  # a second session, like a parallel worker
-        try:
-            with other.cursor() as c:
-                c.execute('SELECT pg_advisory_lock(%s)', [monitor.MONITOR_LOCK])
+        with continuous.tick_lock('monitor_assets') as got:  # another worker's tick holds it
+            self.assertTrue(got)
             with mock.patch.object(monitor, 'check_asset') as check:
                 self.assertEqual(monitor.monitor_assets(), {'checked': 0, 'reason': 'locked'})
             check.assert_not_called()
-        finally:
-            with other.cursor() as c:
-                c.execute('SELECT pg_advisory_unlock(%s)', [monitor.MONITOR_LOCK])
-            other.close()
+        with mock.patch.object(monitor, 'check_asset', return_value={'status': 'ok'}) as check, \
+                mock.patch('limes.monitor.deliver_immediate'):
+            self.assertEqual(monitor.monitor_assets(), {'checked': 1})  # released after the holder ends
         with override_settings(CONTINUOUS_SCANS=False), mock.patch.object(monitor, 'check_asset') as check:
             self.assertEqual(monitor.monitor_assets(), {'checked': 0, 'reason': 'disabled'})
         check.assert_not_called()
@@ -384,5 +381,4 @@ class BeatTest(SimpleTestCase):
         self.assertEqual((entry['task'], entry['schedule'], entry['options']), ('monitor_assets', 60.0, {'expires': 55}))
         self.assertEqual(celery_routing.TASK_PLAN['monitor_assets'], (celery_routing.IO, 15 * celery_routing.MIN))
         self.assertIn('limes.monitor', settings.CELERY_IMPORTS)
-        self.assertEqual((monitor.MAX_PER_TICK, monitor.TICK_BUDGET, monitor.MONITOR_LOCK),
-                         (20, timedelta(seconds=50), 0x4C494D47))
+        self.assertEqual((monitor.MAX_PER_TICK, monitor.TICK_BUDGET), (20, timedelta(seconds=50)))

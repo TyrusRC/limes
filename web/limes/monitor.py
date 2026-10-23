@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -20,7 +20,7 @@ from limes.alerts.deliver import deliver_immediate
 from limes.alerts.issues import sync_issues
 from limes.celery import app
 from limes.checks import collect, run
-from limes.continuous import CADENCE_INTERVALS, IN_PROGRESS
+from limes.continuous import CADENCE_INTERVALS, IN_PROGRESS, tick_lock
 from limes.intel import http, internetdb, ratelimit
 from limes.scan_target import has_scan_target
 from limes.scoring import _root_of
@@ -41,10 +41,9 @@ MAX_PER_TICK = 20
 # DNS queries at 5 s each (A, AAAA, CNAME, MX; a root's TXT, _dmarc TXT, DS, CAA), a PTR for an ip, and up to ~93 s
 # per owned IP whose InternetDB record is stale (intel.http: 30 s x 3 attempts + 3 s back-off). The outer ceiling
 # is the IO queue's 15-minute hard limit (13-minute soft); the attempt is stamped before any contact, so a killed
-# check rotates to the back as 'timeout'. The advisory lock keeps ticks from overlapping and the beat entry
+# check rotates to the back as 'timeout'. The tick lock (continuous.tick_lock) keeps ticks from overlapping and the beat entry
 # expires at 55 s. Upgrade path: one deadline for the whole asset check, DNS and InternetDB included.
 TICK_BUDGET = timedelta(seconds=50)
-MONITOR_LOCK = 0x4C494D47  # Postgres advisory lock key: one monitor_assets tick at a time
 OWNED = ('owned_root', 'owned_host')
 KINDS = ('hostname', 'ip', 'root_domain')
 
@@ -292,28 +291,13 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     return {**monitor, 'project_id': a.project_id}
 
 
-def _lock():
-    with connection.cursor() as c:
-        c.execute('SELECT pg_try_advisory_lock(%s)', [MONITOR_LOCK])
-        return c.fetchone()[0]
-
-
-def _unlock():
-    with connection.cursor() as c:
-        c.execute('SELECT pg_advisory_unlock(%s)', [MONITOR_LOCK])
-
-
 @app.task(name='monitor_assets', bind=False)
 def monitor_assets():
     """Beat tick: check the due assets within TICK_BUDGET, then sync issues and send alerts per touched project."""
     if not settings.CONTINUOUS_SCANS:
         return {'checked': 0, 'reason': 'disabled'}
-    if not _lock():
-        return {'checked': 0, 'reason': 'locked'}
-    try:
-        return _tick()
-    finally:
-        _unlock()
+    with tick_lock('monitor_assets') as got:
+        return _tick() if got else {'checked': 0, 'reason': 'locked'}
 
 
 def _tick():
