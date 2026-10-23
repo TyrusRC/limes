@@ -23,7 +23,12 @@ __all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', '
 
 
 class Tag(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    """A label on assets, private to one project (names repeat across projects). Rules: limes.tags."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='asset_tags')
+    name = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ('project', 'name')
 
     def __str__(self):
         return self.name
