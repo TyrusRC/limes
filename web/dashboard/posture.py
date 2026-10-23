@@ -39,6 +39,7 @@ def category_cards(project, now=None):
         old = before.get(key)
         cards.append({'key': key, 'label': scoring.CATEGORY_LABELS[key], 'score': s['score'], 'grade': s['grade'],
                       'raw_score': s['raw_score'], 'assessed': s['assessed'] > 0, 'open': c['open'], 'waived': c['waived'],
+                      'provisional': s['provisional'],
                       'delta_30': s['score'] - old if s['score'] is not None and isinstance(old, int) and not isinstance(old, bool) else None})
     return cards
 

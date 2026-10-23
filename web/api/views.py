@@ -910,7 +910,7 @@ class IssueList(APIView):
 	"""Open issues of a project, worst first, with their active waiver and note count."""
 
 	def get(self, request):
-		from limes.checks.catalogue import CHECKS
+		from limes.checks.catalogue import CHECKS, PROVISIONAL
 		q = request.query_params
 		issues = TrackedIssue.objects.filter(project__slug=q.get('project') or '', status='open').select_related('asset')
 		if q.get('severity') in ('1', '2', '3', '4'):
@@ -941,7 +941,7 @@ class IssueList(APIView):
 			expired = last if not w and last and not last.revoked_at and last.expires_at and last.expires_at <= now else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
-						'source': i.source, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
+						'source': i.source, 'provisional': i.source == 'check' and i.key in PROVISIONAL, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
 						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count,
 						'expired_waiver': _waiver_json(expired) if expired else None})
 		return Response(out)

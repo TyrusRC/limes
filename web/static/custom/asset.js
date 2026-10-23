@@ -157,7 +157,7 @@ function asset_penalty_rows(rows, withAsset) {
 	return (rows || []).map(function(r) {
 		return '<tr' + (r.waived ? ' class="l-row-waived"' : '') + '>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
 			'</td><td>' + asset_sev_html(r.severity) + '</td><td class="text-nowrap">' +
-			(r.waived ? '<span class="badge l-badge-waived"><i class="fe-shield" aria-hidden="true"></i>Waived</span>' : '-' + asset_esc(r.points)) + '</td></tr>';
+			(r.waived ? '<span class="badge l-badge-waived"><i class="fe-shield" aria-hidden="true"></i>Waived</span>' : r.provisional ? 'Provisional' : '-' + asset_esc(r.points)) + '</td></tr>';
 	}).join('');
 }
 

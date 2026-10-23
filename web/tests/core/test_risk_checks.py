@@ -15,6 +15,10 @@ SPEC = {
     'email.spf_missing': 2, 'email.spf_permissive': 2, 'email.dmarc_missing': 2,
     'email.dmarc_none': 1, 'email.mx_unprotected': 1,
     'dns.dnssec_missing': 1, 'dns.caa_missing': 1,
+    # provisional (cost no points)
+    'rep.listed_drop': 3, 'rep.listed_asndrop': 3, 'rep.listed_c2': 4, 'rep.listed_attacker': 2, 'rep.dnsbl_listed': 2,
+    'net.exposed_ollama': 3, 'net.exposed_openai_api': 3, 'net.exposed_triton': 2, 'net.exposed_gradio': 2,
+    'net.exposed_jupyter': 4, 'net.exposed_ray': 4, 'leak.supabase_secret_key': 4, 'leak.hibp_breach': 2,
 }
 PORTS = {'ftp': 21, 'telnet': 23, 'smb': 445, 'rdp': 3389, 'mssql': 1433, 'oracle': 1521,
          'mysql': 3306, 'postgres': 5432, 'redis': 6379, 'elasticsearch': 9200,

@@ -43,12 +43,13 @@ def sync_issues(project, now=None):
         issues, assessed = scoring.current_issues(project, now=now)
         issues = {a: {issue_key(k): sev for k, sev in keys.items()} for a, keys in issues.items()}
         rows = {(r.asset_id, r.key): r for r in TrackedIssue.objects.filter(project=project)}
-        assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed).select_related('parent')}
+        passed = set(scoring._fresh_checks(project, now, assets=scoring.issue_assets(project))
+                     .filter(status='pass').values_list('asset_id', 'check_id'))
+        assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed | {a for a, _ in passed}).select_related('parent')}
         roots = list(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
                      .values_list('value', flat=True))
         buckets = {a.id: _bucket(a, roots) for a in assets.values()}
         synced = set(state.roots)
-        passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
         waived = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__project=project)
                      .values_list('issue_id', flat=True))
         out = []

@@ -115,12 +115,13 @@ Overview
       <a class="ov-cat" id="cat_{{ c.key }}" href="{{ issues_url }}?category={{ c.key }}">
         <span class="ov-cat-label">{{ c.label }}</span>
         <span class="ov-cat-main">
-          {% if c.assessed %}<span class="ov-grade ov-grade-{{ c.grade|lower }}">{{ c.grade }}</span><span class="ov-cat-score">{{ c.score }}</span>{% if c.raw_score != c.score %}<span class="ov-muted ov-cat-raw">raw {{ c.raw_score }}</span>{% endif %}
+          {% if c.provisional %}<span class="ov-cat-na ov-cat-prov">Provisional, not scored</span>
+          {% elif c.assessed %}<span class="ov-grade ov-grade-{{ c.grade|lower }}">{{ c.grade }}</span><span class="ov-cat-score">{{ c.score }}</span>{% if c.raw_score != c.score %}<span class="ov-muted ov-cat-raw">raw {{ c.raw_score }}</span>{% endif %}
           {% else %}<span class="ov-cat-na">Not assessed</span>{% endif %}
         </span>
         <span class="ov-cat-foot">
           <span>{{ c.open|intcomma }} open{% if c.waived %} · {{ c.waived }} waived{% endif %}</span>
-          {% if c.delta_30 is None %}<span class="ov-muted">No trend yet</span>{% else %}<span class="ov-delta{% if c.delta_30 > 0 %} ov-delta-up{% elif c.delta_30 < 0 %} ov-delta-down{% endif %}">{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}</span>{% endif %}
+          {% if c.provisional %}{% elif c.delta_30 is None %}<span class="ov-muted">No trend yet</span>{% else %}<span class="ov-delta{% if c.delta_30 > 0 %} ov-delta-up{% elif c.delta_30 < 0 %} ov-delta-down{% endif %}">{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}</span>{% endif %}
         </span>
       </a>
       {% endfor %}
@@ -301,7 +302,7 @@ Overview
             <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span></td>
             <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
             <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
-            <td class="ov-num">−{{ r.points }}</td>
+            <td class="ov-num">{% if r.provisional %}<span class="ov-tag">Provisional</span>{% else %}−{{ r.points }}{% endif %}</td>
             <td class="ov-muted text-nowrap ov-hide-sm">{% if r.detected_at %}<time datetime="{{ r.detected_at|date:'c' }}">{{ r.detected_at|date:'Y-m-d' }}</time> · {{ r.age_days }} d{% else %}—{% endif %}</td>
           </tr>
         {% endfor %}

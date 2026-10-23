@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 
 from dashboard.stats import OWNED
 from limes import monitor, scoring
-from limes.checks.catalogue import CHECKS
+from limes.checks.catalogue import CHECKS, PROVISIONAL
 
 OLDEST_LIMIT = 5
 TOP_RISKS = 10
@@ -71,7 +71,7 @@ def top_risks(project, live, now):
             rows.append({'id': t['id'] if t else None, 'asset': asset.value, 'title': CHECKS[key].title if key in CHECKS else key,
                          'key': key, 'category': scoring.category_of(key),
                          'category_label': scoring.CATEGORY_LABELS.get(scoring.category_of(key), scoring.category_of(key)), 'severity': scoring.SEVERITY_NAMES.get(sev, 'unrated'),
-                         'points': scoring.PENALTY.get(sev, 0), 'detected_at': when,
+                         'points': scoring.points(key, sev), 'provisional': key in PROVISIONAL, 'detected_at': when,
                          'age_days': _age(now, when) if when else None})
     rows.sort(key=lambda r: (-r['points'], r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
     return rows[:TOP_RISKS]

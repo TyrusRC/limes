@@ -60,7 +60,8 @@ class CategoryTest(CategoryBase):
         #     a has a high finding -> 870 capped to 799, b medium -> 925, others 950; min 799.
         self.assertEqual(self.by_hand(scoring.category_scores(p)), {
             'web': (925, 'A', 2), 'tls': (799, 'B', 1), 'email': (925, 'A', 1), 'dns': (950, 'A', 1),
-            'network': (None, 'N/A', 0), 'vulnerabilities': (799, 'B', 4)})
+            'network': (None, 'N/A', 0), 'vulnerabilities': (799, 'B', 4),
+            'reputation': (None, 'N/A', 0), 'data_leakage': (None, 'N/A', 0)})
         # headline: a = 950 - 80 (cve-1) - 25 (hsts) - 80 (cert) = 765, the weakest of 4 assessed assets
         self.assertEqual(scoring.project_score(p)['score'], 765)
 
@@ -98,7 +99,8 @@ class CategoryTest(CategoryBase):
         p = self.reconcile_project()
         counts = scoring.category_issue_counts(p)
         self.assertEqual({k: v['open'] for k, v in counts.items()},
-                         {'web': 1, 'tls': 1, 'email': 1, 'dns': 0, 'network': 0, 'vulnerabilities': 3})
+                         {'web': 1, 'tls': 1, 'email': 1, 'dns': 0, 'network': 0, 'vulnerabilities': 3,
+                          'reputation': 0, 'data_leakage': 0})
         self.assertEqual(sum(v['open'] for v in counts.values()),
                          TrackedIssue.objects.filter(project=p, status='open').count())
         TrackedIssue.objects.filter(asset=self.d).update(status='fixed')
@@ -120,7 +122,7 @@ class CategoryTest(CategoryBase):
         scoring.snapshot_scores()
         snap = ScoreSnapshot.objects.get(project=self.p)
         self.assertEqual(snap.categories, {'web': 925, 'tls': 799, 'email': 925, 'dns': 950, 'network': None,
-                                           'vulnerabilities': 799})
+                                           'vulnerabilities': 799, 'reputation': None, 'data_leakage': None})
         self.assertEqual(snap.version, 'limes-score-v3')
         old = ScoreSnapshot.objects.create(project=self.p, date=snap.date - timedelta(days=1), version='v', grade='A')
         self.assertIsNone(old.categories)

@@ -237,7 +237,7 @@ function issue_modal(id) {
 	sev.className = ISSUE_SEVERITY[row.severity] ? 'sev-' + ISSUE_SEVERITY[row.severity] : '';
 	sev.textContent = issue_sev_name(row.severity);
 	issue_text('im_asset', row.asset);
-	issue_text('im_source', row.source === 'check' ? 'Check \u00b7 ' + row.key : 'Finding');
+	issue_text('im_source', (row.source === 'check' ? 'Check \u00b7 ' + row.key : 'Finding') + (row.provisional ? ' \u00b7 Provisional, not scored' : ''));
 	issue_text('im_first', issue_date(row.first_seen));
 	issue_render_waiver(row);
 	issue_text('im_note_count', '');
@@ -331,7 +331,7 @@ function issues_init() {
 				return '<span class="' + (issue_is_ip(d) ? 'mono' : '') + '">' + issue_esc(d) + '</span>';
 			})},
 			{data: 'title', className: 'l-col-wider', render: plain(function(d, row) {
-				return '<button type="button" class="l-link-btn issue_open" data-id="' + Number(row.id) + '">' + issue_esc(d) + '</button>';
+				return '<button type="button" class="l-link-btn issue_open" data-id="' + Number(row.id) + '">' + issue_esc(d) + '</button>' + (row.provisional ? ' <span class="badge l-badge-fp">Provisional</span>' : '');
 			})},
 			{data: 'severity', render: plain(function(d) {
 				return ISSUE_SEVERITY[d] ? '<span class="sev-' + ISSUE_SEVERITY[d] + '">' + issue_sev_name(d) + '</span>' : issue_esc(d);
