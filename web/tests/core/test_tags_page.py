@@ -62,8 +62,7 @@ console.log(JSON.stringify({chips: vm.runInContext('tag_chips_html(' + JSON.stri
 class TagChipEscapingTest(TestCase):
     def test_hostile_names_never_become_markup(self):
         node = shutil.which('node')
-        if not node:
-            self.skipTest('node is not installed')
+        self.assertIsNotNone(node, 'node is required for the JS escaping test: install it in the test image')
         out = subprocess.run([node, '-e', HARNESS, str(WEB / 'static/custom/asset_tags.js'), json.dumps(HOSTILE)],
                              capture_output=True, text=True, timeout=30, check=True).stdout
         data = json.loads(out)

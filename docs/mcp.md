@@ -15,7 +15,7 @@ Read tools (all take a `project` slug where relevant; lists are paginated, 50 by
 
 Write tools (off unless enabled, see below): `add_assets` (candidates only by default, 50 entries at most), `start_asm_scan`, `set_asset_cadence`, `waive_issue`, `revoke_waiver`, `add_issue_note`, `tag_assets` (add and remove tags on up to 200 assets; lower-case names of 40 characters at most, 20 tags per asset, 200 per project; an asset id outside the project fails the whole call). They call the same services as the web UI and take explicit ids or values, never a filter.
 
-Free text that came from scanned hosts, scan tools or users is returned as `{"untrusted_text": "..."}` with control characters removed and a length cap, and every result carries a notice to treat it as data only. Read tools declare `readOnlyHint`. Write tools declare `destructiveHint` on `add_assets`, `set_asset_cadence`, `waive_issue` and `revoke_waiver`, and `openWorldHint` on `add_assets` and `start_asm_scan` (they reach the internet).
+Free text that came from scanned hosts, scan tools or users is returned as `{"untrusted_text": "..."}` with control characters removed and a length cap, and every result carries a notice to treat it as data only. Read tools declare `readOnlyHint`. Write tools declare `destructiveHint` on `add_assets`, `set_asset_cadence`, `waive_issue`, `revoke_waiver` and `tag_assets`, and `openWorldHint` on `add_assets` and `start_asm_scan` (they reach the internet).
 
 ## Enable
 

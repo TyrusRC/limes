@@ -94,5 +94,5 @@ class ScopingTests(McpBase):
             a = registry.annotations(spec)
             self.assertEqual(a['readOnlyHint'], name not in writes, name)
             if name in writes:
-                self.assertEqual(a['destructiveHint'], name in ('revoke_waiver', 'set_asset_cadence', 'waive_issue', 'add_assets'), name)
+                self.assertEqual(a['destructiveHint'], name in ('revoke_waiver', 'set_asset_cadence', 'waive_issue', 'add_assets', 'tag_assets'), name)
             self.assertEqual(a['openWorldHint'], name in ('start_asm_scan', 'add_assets'), name)

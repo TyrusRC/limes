@@ -35,7 +35,7 @@ class TagsCardTest(base.OverviewPageBase):
         self.assertIn('>prod<', html)
         self.assertIn('ov-grade-a', html)  # both prod hosts are clean: 950
         self.assertIn('Not assessed', html)
-        self.assertIn(f'href="{self.issues_url()}?tag=prod"', html)
+        self.assertIn(f'href="{self.issues_url()}?tag=prod&amp;waived=false"', html)
         self.assertNotIn('secret-y', html)
 
     def test_hostile_tag_name_is_escaped(self):

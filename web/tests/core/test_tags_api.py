@@ -1,12 +1,16 @@
+import threading
+
 from django.contrib.auth.models import User
+from django.db import connection, transaction
 from django.contrib.auth.signals import user_logged_in
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rolepermissions.roles import assign_role
 
 from dashboard.models import Project
 from dashboard.views import on_user_logged_in
+from limes import tags
 from startScan.models import Asset, Tag, TrackedIssue
 
 URL = '/api/action/asset/tags/'
@@ -96,12 +100,34 @@ class TagActionTest(TagsBase):
         self.assertEqual(self.a.tags.count(), 20)
 
     def test_project_tag_limit(self):
-        Tag.objects.bulk_create([Tag(project=self.p, name=f'p{i}') for i in range(200)])
+        self.fill(self.p, self.a, 200)
         self.assertEqual(self.tag(assets=[self.a.id], add=['p5']).status_code, 200)  # existing: fine
         self.assertEqual(self.tag(assets=[self.a.id], add=['p201']).status_code, 400)
-        Tag.objects.bulk_create([Tag(project=self.q, name=f'p{i}') for i in range(200)])  # other project: own budget
+        self.fill(self.q, self.c, 200)  # other project: own budget
         self.assertEqual(self.api().post(URL, {'project': 'p2', 'assets': [self.c.id], 'add': ['new']},
                                             format='json').status_code, 400)
+
+    def fill(self, project, asset, n):
+        """n tags on one asset, written straight to the DB (so it can be over the per-asset limit)."""
+        Tag.objects.bulk_create([Tag(project=project, name=f'p{i}') for i in range(n)])
+        Through = Asset.tags.through
+        Through.objects.bulk_create([Through(asset_id=asset.id, tag_id=t) for t in
+                                     Tag.objects.filter(project=project).values_list('id', flat=True)])
+
+    def test_removing_works_on_data_already_over_the_limits(self):
+        self.fill(self.p, self.a, 230)  # 230 on one asset and in the project: over both limits
+        self.assertEqual(self.tag(assets=[self.a.id], remove=['p0']).status_code, 200)
+        self.assertEqual(self.a.tags.count(), 229)
+        self.assertEqual(self.tag(assets=[self.a.id], add=['p1']).status_code, 200)  # nothing new: not refused
+        self.assertEqual(self.tag(assets=[self.a.id], add=['brand-new']).status_code, 400)
+        self.assertEqual(self.tag(assets=[self.b.id], add=['brand-new']).status_code, 400)  # project is over too
+
+    def test_tags_nobody_carries_are_not_listed_or_counted(self):
+        Tag.objects.bulk_create([Tag(project=self.p, name=f'z{i}') for i in range(200)])  # no asset carries them
+        self.assertEqual(self.tag(assets=[self.a.id], add=['real']).status_code, 200)
+        self.assertEqual(self.api().get('/api/tags/', {'project': 'p1'}).json(), [{'name': 'real', 'assets': 1}])
+        self.a.delete()
+        self.assertEqual(self.api().get('/api/tags/', {'project': 'p1'}).json(), [])
 
     def test_at_most_200_assets_per_call(self):
         self.assertEqual(self.tag(assets=list(range(1, 202)), add=['x']).status_code, 400)
@@ -164,3 +190,33 @@ class TagReadTest(TagsBase):
         self.assertEqual([r['id'] for r in rows], [ia.id])
         self.assertEqual(len(self.api().get('/api/issues/', {'project': 'p1'}).json()), 2)
         self.assertEqual(self.api().get('/api/issues/', {'project': 'p1', 'tag': 'nope'}).json(), [])
+
+
+class TagLockTest(TransactionTestCase):
+    def test_change_tags_waits_for_the_project_row_lock(self):
+        """The limit checks read then write; without the project row lock two calls could both pass them."""
+        p = Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
+        a = Asset.objects.create(project=p, kind='hostname', value='a.x.com', scope_tier='owned_host')
+        # The call below writes nothing (the asset already has the tag), so only the lock itself can make it wait.
+        a.tags.add(Tag.objects.create(project=p, name='prod'))
+        done = threading.Event()
+        errors = []
+
+        def other():
+            try:
+                tags.change_tags(p, [a.id], add=['prod'])
+            except Exception as e:  # reported below, never swallowed
+                errors.append(e)
+            finally:
+                connection.close()
+                done.set()
+
+        with transaction.atomic():
+            Project.objects.select_for_update().get(pk=p.pk)
+            t = threading.Thread(target=other)
+            t.start()
+            self.assertFalse(done.wait(1.0), 'change_tags ran while another transaction held the project row')
+        self.assertTrue(done.wait(10))
+        t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(a.tags.count(), 1)

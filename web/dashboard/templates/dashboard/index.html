@@ -139,7 +139,7 @@ Overview
     {% if tag_cards %}
     <div class="ov-cat-grid">
       {% for t in tag_cards %}
-      <a class="ov-cat" href="{{ issues_url }}?tag={{ t.name|urlencode:'' }}">
+      <a class="ov-cat" href="{{ issues_url }}?tag={{ t.name|urlencode:'' }}&amp;waived=false">
         <span class="ov-cat-label">{{ t.name }}</span>
         <span class="ov-cat-main">
           {% if t.assessed %}<span class="ov-grade ov-grade-{{ t.grade|lower }}">{{ t.grade }}</span><span class="ov-cat-score">{{ t.score }}</span>{% if t.raw_score != t.score %}<span class="ov-muted ov-cat-raw">raw {{ t.raw_score }}</span>{% endif %}

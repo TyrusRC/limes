@@ -119,7 +119,7 @@ def add_issue_note(caller, project: Slug, issue_id: RowId, text: Text):
     return {'note_id': n.id}
 
 
-@tool(title='Tag assets', write=True, perm=PERM_MODIFY_TARGETS)
+@tool(title='Tag assets', write=True, perm=PERM_MODIFY_TARGETS, destructive=True)  # remove deletes links and unused tags
 def tag_assets(caller, project: Slug,
                asset_ids: Annotated[list[RowId], Field(min_length=1, max_length=tags.MAX_ASSETS)],
                add: Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=tags.MAX_NAMES)] | None = None,
