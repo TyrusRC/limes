@@ -10,6 +10,7 @@ from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
 IP_BUCKET = '#ips'
+EXPOSED_HOSTS = 20  # owned hostnames re-checked per newly exposed IP
 issue_key = scoring.issue_key
 
 
@@ -29,6 +30,18 @@ def _event(project, kind, row, asset):
              'issue_fixed': f'Fixed {sev} issue {row.key} on {asset.value}'}[kind]
     return events.record(project, kind, title, severity=row.severity, asset=asset, key=row.key,
                          detail={'key': row.key, 'source': row.source, 'reopened': row.reopened})
+
+
+def _queue_exposed(project, ip):
+    """After commit: queue the owned hostnames that resolve to a newly exposed IP, so their risk checks refresh."""
+    from limes import event_queue
+    hosts = list(Asset.objects.filter(project=project, kind='hostname', scope_tier__in=('owned_root', 'owned_host'),
+                                      ip_addresses__address=ip.value).distinct().order_by('id')[:EXPOSED_HOSTS])
+
+    def go():
+        for h in hosts:
+            event_queue.enqueue(h, 'exposed')
+    transaction.on_commit(go)
 
 
 def sync_issues(project, now=None):
@@ -90,4 +103,7 @@ def sync_issues(project, now=None):
         if not synced >= known:
             state.roots = sorted(synced | known)
             state.save(update_fields=['roots'])
+        for ev in out:
+            if ev.kind == 'issue_new' and ev.asset.kind == 'ip' and ev.detail['key'].startswith('net.exposed_'):
+                _queue_exposed(project, ev.asset)
         return out

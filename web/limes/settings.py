@@ -44,6 +44,9 @@ EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
 EVENT_BURST = max(1, env.int('LIMES_EVENT_BURST', default=200))
 CT_EVENT_WINDOW = env.int('LIMES_CT_EVENT_WINDOW', default=3600)  # seconds one cert_new digest row coalesces over
 CT_NEW_HOSTS_PER_HOUR = env.int('LIMES_CT_NEW_HOSTS_PER_HOUR', default=200)  # owned hostnames certificates may add per project per hour
+# crown-jewel names re-resolved (DNS only) at most this often (s; 0 = off), at most DNS_WATCH_PER_TICK a tick
+DNS_WATCH_INTERVAL = env.int('LIMES_DNS_WATCH_INTERVAL', default=900)
+DNS_WATCH_PER_TICK = env.int('LIMES_DNS_WATCH_PER_TICK', default=30)
 EVENT_SHARE = min(0.9, max(0.1, env.float('LIMES_EVENT_SHARE', default=0.5)))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
@@ -250,6 +253,8 @@ CELERY_BEAT_SCHEDULE = {
     'dispatch-due-scans': {'task': 'dispatch_due_scans', 'schedule': 60.0, 'options': {'expires': 55}},
     'enumerate-ranges': {'task': 'enumerate_ranges', 'schedule': 60.0, 'options': {'expires': 55}},
     'monitor-assets': {'task': 'monitor_assets', 'schedule': 60.0, 'options': {'expires': 55}},
+    'drain-events': {'task': 'monitor_assets', 'schedule': 15.0, 'kwargs': {'events_only': True},
+                     'options': {'expires': 14}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},

@@ -426,6 +426,9 @@ class BeatTest(SimpleTestCase):
         entry = settings.CELERY_BEAT_SCHEDULE['monitor-assets']
         self.assertEqual((entry['task'], entry['schedule'], entry['options']), ('monitor_assets', 60.0, {'expires': 55}))
         self.assertEqual(celery_routing.TASK_PLAN['monitor_assets'], (celery_routing.IO, 15 * celery_routing.MIN))
+        drain = settings.CELERY_BEAT_SCHEDULE['drain-events']
+        self.assertEqual((drain['task'], drain['schedule'], drain['kwargs'], drain['options']),
+                         ('monitor_assets', 15.0, {'events_only': True}, {'expires': 14}))
         self.assertIn('limes.monitor', settings.CELERY_IMPORTS)
         self.assertEqual((monitor.MAX_PER_TICK, monitor.TICK_BUDGET), (20, timedelta(seconds=50)))
 

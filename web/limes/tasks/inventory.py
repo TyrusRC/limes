@@ -161,6 +161,8 @@ def record_resolution(asset, record):
     """Write one host's dnsx answer: CNAME, IP assets (via upsert_ip_asset), host->IP links.
     The answer REPLACES the host's links, so a stale (e.g. private) IP cannot veto it forever."""
     from startScan.models import IpAddress
+    from limes import dns_delta  # lazy: dns_delta imports the intel tasks, which import this module
+    dns_delta.observe(asset, record)
     if record.get('cname'):
         asset.cname = record['cname'][0]
     rows = []
