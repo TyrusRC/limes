@@ -95,6 +95,12 @@ class WriteToolTests(WriteBase):
             rows[d].refresh_from_db()
             self.assertEqual(rows[d].status, want, d)
 
+    def test_a_new_owned_asset_gets_an_immediate_first_check_through_the_shared_service(self):
+        with mock.patch('limes.event_queue.enqueue') as q:
+            asset_add.add_assets(self.p1, ['fresh.x.com'], 'owned_host', 'mine', self.admin)
+            asset_add.add_assets(self.p1, ['fresh.x.com'], 'owned_host', 'mine', self.admin)  # re-adding is not new
+        self.assertEqual([(c.args[0].value, c.args[1]) for c in q.call_args_list], [('fresh.x.com', 'manual')])
+
     def test_add_assets_never_touches_existing_rows(self):
         def mk(value, tier, reason):
             return Asset.objects.create(project=self.p1, kind='hostname', value=value, scope_tier=tier,

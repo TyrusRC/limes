@@ -19,7 +19,7 @@ SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl
 
 
 __all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
-           'TrackedIssue', 'ChangeEvent', 'IssueSyncState', 'IssueWaiver', 'IssueNote']
+           'TrackedIssue', 'ChangeEvent', 'IssueSyncState', 'IssueWaiver', 'IssueNote', 'CertSighting']
 
 
 class Tag(models.Model):
@@ -234,6 +234,32 @@ class ChangeEvent(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['project', 'created_at'])]
+
+
+class CertSighting(models.Model):
+    """One certificate seen in the CT log for a project's names, kept once per (project, TBS hash)."""
+    SOURCES = [(s, s) for s in ('certspotter', 'certspotter_api', 'crtsh')]
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    asset = models.ForeignKey(Asset, null=True, blank=True, on_delete=models.SET_NULL)
+    tbs_sha256 = models.CharField(max_length=64)
+    cert_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    names = models.JSONField(default=list)  # at most 100; the rest are only counted
+    other_names = models.IntegerField(default=0)
+    wildcard = models.BooleanField(default=False)
+    issuer = models.CharField(max_length=500, blank=True)
+    not_before = models.DateTimeField(null=True, blank=True)
+    not_after = models.DateTimeField(null=True, blank=True)
+    log_uri = models.CharField(max_length=500, blank=True)
+    entry_index = models.BigIntegerField(null=True, blank=True)
+    source = models.CharField(max_length=20, choices=SOURCES)
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    watch_seen_at = models.DateTimeField(null=True, blank=True)  # set when the watcher delivers this tbs
+    api_while_watch_ok = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['project', 'tbs_sha256'], name='certsighting_proj_tbs')]
+        indexes = [models.Index(fields=['project', 'first_seen_at'])]
 
 
 class IssueSyncState(models.Model):

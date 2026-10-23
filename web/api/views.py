@@ -31,6 +31,7 @@ from startScan.models import *
 from startScan.models import EndPoint
 from startScan.asset_models import CADENCE_TIERS
 from limes.continuous import start_asm_scan
+from limes.event_queue import enqueue
 from limes.scan_target import ensure_scan_target
 from targetApp.models import *
 from api.permissions import *
@@ -732,6 +733,8 @@ class ConfirmAsset(APIView):
 		asset.decision_reason = str(data.get('reason') or '')[:5000]
 		asset.save()
 		warning = ensure_scan_target(asset)[1]
+		if asset.kind in ('hostname', 'ip', 'root_domain'):
+			enqueue(asset, 'manual')
 		invalidate(asset.project_id)
 		return Response({'status': True, 'message': f'confirmed. {warning}' if warning else 'confirmed'})
 

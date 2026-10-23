@@ -27,8 +27,9 @@ class OrganizationDomainListTest(TestCase):
         self.client.get(f'/target/p1/update/organization/{self.org.id}')  # warm-up (lazy prefs creation)
         r = self.client.get(f'/target/p1/update/organization/{self.org.id}')
         self.assertEqual(r.status_code, 200)
-        ids = ', '.join(f"'{d.id}'" for d in self.domains)
-        self.assertIn(f"$('#domains').val([{ids}]).change();", r.content.decode())
+        # the many-to-many has no ORDER BY, so the preselected ids may come in either order
+        orders = [', '.join(f"'{d.id}'" for d in order) for order in (self.domains, self.domains[::-1])]
+        self.assertTrue(any(f"$('#domains').val([{ids}]).change();" in r.content.decode() for ids in orders))
 
 
 class NotificationRedirectLinkTest(SimpleTestCase):

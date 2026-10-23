@@ -45,6 +45,30 @@ MCP_ALLOWED_ORIGINS = env.list('LIMES_MCP_ALLOWED_ORIGINS', default=[])
 MCP_ALLOWED_HOSTS = env.list('LIMES_MCP_ALLOWED_HOSTS', default=[])
 MCP_RATE_PER_MIN = max(1, env.int('LIMES_MCP_RATE_PER_MIN', default=60))
 MCP_WRITE_RATE_PER_MIN = max(1, env.int('LIMES_MCP_WRITE_RATE_PER_MIN', default=10))
+# Certificate watch (limes.ct.watch): opt-in self-hosted certspotter, `make up REALTIME=1` with LIMES_CT_WATCH=true
+CT_WATCH = env.bool('LIMES_CT_WATCH', default=False)
+CT_WATCH_RESTART_MIN = env.int('LIMES_CT_WATCH_RESTART_MIN', default=300)  # seconds between watchlist-driven restarts
+CT_WATCHLIST_MAX = env.int('LIMES_CT_WATCHLIST_MAX', default=5000)
+CT_INGEST_PER_MIN = env.int('LIMES_CT_INGEST_PER_MIN', default=600)  # spool files ingested per minute
+CT_STATE_DIR = env('LIMES_CT_STATE_DIR', default='/var/lib/ct-watch')
+# Cert Spotter API fallback (limes.ct.api): opt-in, key from the environment only. The free tier allows 10 requests/hour.
+CERTSPOTTER_API_KEY = env('LIMES_CERTSPOTTER_API_KEY', default='').strip()
+CERTSPOTTER_HOURLY_BUDGET = max(1, min(env.int('LIMES_CERTSPOTTER_HOURLY_BUDGET', default=7), 10))
+CT_DEGRADED_GRACE_MIN = env.int('LIMES_CT_DEGRADED_GRACE_MIN', default=15)  # minutes a never-alerted degraded watch waits before alerting
+CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before a silent watcher fails its healthcheck
+# Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
+# share of each monitor tick's budget the queue may take
+EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
+LIVE_POLL_SECONDS = max(0, env.int('LIMES_LIVE_POLL_SECONDS', default=30))  # Overview refresh; 0 turns polling off
+EVENT_QUEUE_MAX = max(1, env.int('LIMES_EVENT_QUEUE_MAX', default=1000))
+EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
+EVENT_BURST = max(1, env.int('LIMES_EVENT_BURST', default=200))
+CT_EVENT_WINDOW = env.int('LIMES_CT_EVENT_WINDOW', default=3600)  # seconds one cert_new digest row coalesces over
+CT_NEW_HOSTS_PER_HOUR = env.int('LIMES_CT_NEW_HOSTS_PER_HOUR', default=200)  # owned hostnames certificates may add per project per hour
+# crown-jewel names re-resolved (DNS only) at most this often (s; 0 = off), at most DNS_WATCH_PER_TICK a tick
+DNS_WATCH_INTERVAL = env.int('LIMES_DNS_WATCH_INTERVAL', default=900)
+DNS_WATCH_PER_TICK = max(1, env.int('LIMES_DNS_WATCH_PER_TICK', default=30))
+EVENT_SHARE = min(0.9, max(0.1, env.float('LIMES_EVENT_SHARE', default=0.5)))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
 # NOTE: its terms are only partly published and 1 req/s is Limes's own throttle. Upgrade path: a paid key or Limes's own scanner.
@@ -258,7 +282,7 @@ CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
                   'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
-                  'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks')
+                  'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks', 'limes.ct.api')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
@@ -269,6 +293,9 @@ CELERY_BEAT_SCHEDULE = {
     'hibp-sync': {'task': 'hibp_sync', 'schedule': 86400.0},
     'generate-lookalikes': {'task': 'generate_lookalikes', 'schedule': 86400.0},
     'lookalike-tick': {'task': 'lookalike_tick', 'schedule': 60.0, 'options': {'expires': 55}},
+    'drain-events': {'task': 'monitor_assets', 'schedule': 15.0, 'kwargs': {'events_only': True},
+                     'options': {'expires': 14}},
+    'poll-ct-api': {'task': 'poll_ct_api', 'schedule': 60.0, 'options': {'expires': 55}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
@@ -302,6 +329,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 '''
 LOGGING settings
 '''
+# Log files go in the working directory unless LIMES_LOG_DIR is set (the read-only ct-watch container sets /tmp).
+LOG_DIR = env('LIMES_LOG_DIR', default='')
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': True,
@@ -309,7 +338,7 @@ LOGGING = {
         'file': {
             'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': 'errors.log',
+            'filename': os.path.join(LOG_DIR, 'errors.log'),
         },
         'null': {
             'class': 'logging.NullHandler'
@@ -333,14 +362,14 @@ LOGGING = {
         'db': {
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'brief',
-            'filename': 'db.log',
+            'filename': os.path.join(LOG_DIR, 'db.log'),
             'maxBytes': 1024,
             'backupCount': 3
         },
         'celery': {
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'simple',
-            'filename': 'celery.log',
+            'filename': os.path.join(LOG_DIR, 'celery.log'),
             'maxBytes': 1024 * 1024 * 100,  # 100 mb
         },
     },

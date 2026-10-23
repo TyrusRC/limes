@@ -35,7 +35,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1\n\
     github.com/lc/gau/v2/cmd/gau@v2.2.4\n" | \
     xargs -L1 go install -ldflags="-s -w" && \
-    CGO_ENABLED=0 go install -ldflags="-s -w" github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1
+    CGO_ENABLED=0 go install -ldflags="-s -w" github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1 && \
+    CGO_ENABLED=0 go install -ldflags="-s -w" software.sslmate.com/src/certspotter/cmd/certspotter@v0.25.0
 # assay is our own tool: always the latest main. Adding main's ref busts the layer cache when main
 # moves; GOPROXY=direct resolves @main from GitHub so the module proxy cannot serve a stale commit.
 ADD https://api.github.com/repos/TyrusRC/assay/git/refs/heads/main /tmp/assay-main.json

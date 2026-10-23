@@ -19,6 +19,7 @@ from rolepermissions.decorators import has_permission_decorator
 from django.template.defaultfilters import slugify
 
 
+from dashboard import live
 from dashboard.stats import project_stats
 from startScan.models import *
 from dashboard.models import *
@@ -35,7 +36,9 @@ def index(request, slug):
         return HttpResponseRedirect(reverse('four_oh_four'))
 
     context = dict(project_stats(project))
-    context.update({'dashboard_data_active': 'active', 'project': project})
+    context.update({'dashboard_data_active': 'active', 'project': project,
+                    'realtime': live.realtime(project, timezone.now()), 'live_poll_seconds': settings.LIVE_POLL_SECONDS,
+                    'live_since': live.newest_id(context.get('recent_changes', []), project)})
     return render(request, 'dashboard/index.html', context)
 
 

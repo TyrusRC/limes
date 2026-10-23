@@ -38,3 +38,16 @@ def parse(rows):
         if names:
             certs.append({'id': row['id'], 'names': names})
     return certs
+
+
+def issuers(rows):
+    """Issuer organisations of the valid rows (the same rows `parse` keeps)."""
+    from limes.ct.match import issuer_org  # lazy: keeps this parser module import-light
+    out = set()
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict) and isinstance(row.get('id'), int):
+                org = issuer_org(row.get('issuer_name'))
+                if org:
+                    out.add(org)
+    return out

@@ -16,7 +16,7 @@ from limes.definitions import INITIATED_TASK, LIVE_SCAN, RUNNING_TASK
 from limes.tasks.control import initiate_scan
 from scanEngine.models import EngineType
 from startScan.asset_models import CADENCE_TIERS
-from startScan.models import Asset, ScanHistory
+from startScan.models import Asset, CertSighting, ScanHistory
 from targetApp.models import Domain
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,7 @@ def _dispatch():
 
 STALE_AFTER = timedelta(days=30)
 RETIRE_AFTER = timedelta(days=90)
+SIGHTING_KEEP = timedelta(days=400)
 
 
 @app.task(name='age_assets', bind=False)
@@ -173,4 +174,5 @@ def age_assets():
     now = timezone.now()
     stale = Asset.objects.filter(state='missing', last_seen__lt=now - STALE_AFTER).update(state='stale')
     retired = Asset.objects.filter(state='stale', last_seen__lt=now - RETIRE_AFTER).update(state='retired')
+    CertSighting.objects.filter(first_seen_at__lt=now - SIGHTING_KEEP).delete()
     return {'stale': stale, 'retired': retired}

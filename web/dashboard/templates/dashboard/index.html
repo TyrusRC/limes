@@ -1,6 +1,7 @@
 {% extends 'base/base.html' %}
 {% load humanize %}
 {% load static %}
+{% load rt %}
 {% block title %}
 Overview
 {% endblock title %}
@@ -368,10 +369,10 @@ Overview
   <div class="ov-side">
   <section class="card ov-changes" id="dash_changes" aria-labelledby="h-changes">
     <div class="ov-card-head"><h2 id="h-changes">Recent changes</h2></div>
-    {% if recent_changes %}
-    <ul class="ov-feed">
+    <p class="sr-only" id="live_announce" aria-live="polite"></p>
+    <ul class="ov-feed" id="dash_changes_feed">
       {% for c in recent_changes|slice:":6" %}
-      <li>
+      <li data-id="{{ c.id }}">
         {% if c.kind == 'issue_fixed' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-check"></i></span>
         {% elif c.kind == 'issue_new' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-alert-triangle"></i></span>
         {% elif c.kind == 'issue_regressed' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-rotate-ccw"></i></span>
@@ -383,6 +384,10 @@ Overview
         {% elif c.kind == 'breach_new' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-shield-off"></i></span>
         {% elif c.kind == 'lookalike_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-copy"></i></span>
         {% elif c.kind == 'lookalike_active' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-alert-octagon"></i></span>
+        {% elif c.kind == 'cert_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-shield"></i></span>
+        {% elif c.kind == 'dns_changed' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-shuffle"></i></span>
+        {% elif c.kind == 'monitoring_degraded' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-wifi-off"></i></span>
+        {% elif c.kind == 'monitoring_restored' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-wifi"></i></span>
         {% else %}<span class="ov-fi" aria-hidden="true"><i class="fe-activity"></i></span>{% endif %}
         <div class="ov-feed-text">
           <div class="ov-feed-title">{{ c.title }}</div>
@@ -392,9 +397,8 @@ Overview
       </li>
       {% endfor %}
     </ul>
-    {% else %}
-    <p class="ov-note ov-empty-note ov-pad">No changes recorded yet.</p>
-    {% endif %}
+    <p class="ov-note ov-empty-note ov-pad" id="dash_changes_empty"{% if recent_changes %} hidden{% endif %}>No changes recorded yet.</p>
+    <button type="button" class="ov-stale" id="live_stale" hidden>Updated — refresh</button>
   </section>
 
   <section class="card ov-monitoring" id="dash_monitoring" aria-labelledby="h-monitoring">
@@ -409,8 +413,34 @@ Overview
       {% else %}<p class="ov-mon-line ov-muted mb-0">Nothing due.</p>{% endif %}
     </div>
   </section>
+
+  <section class="card ov-realtime" id="dash_realtime" aria-labelledby="h-realtime">
+    <div class="ov-card-head"><h2 id="h-realtime">Real-time</h2><span class="ov-meta">Instance-wide</span></div>
+    <div class="ov-card-body">
+      <p class="ov-rt-state"><span class="ov-rt-pill ov-rt-{% if realtime.state == 'healthy' or realtime.state == 'idle' %}healthy{% elif realtime.state == 'degraded' %}degraded{% else %}off{% endif %}" data-rt="label">{{ realtime.label }}</span>
+        <span class="ov-rt-mode" data-rt="mode_label">{{ realtime.mode_label }}</span>
+        <span class="ov-rt-reason" data-rt="reason_text">{{ realtime.reason_text }}</span></p>
+      <p class="ov-rt-asof" id="rt_asof">{% if live_poll_seconds %}&nbsp;{% else %}Snapshot from page load{% endif %}</p>
+      <dl class="ov-rt-list">
+        <div><dt>Watcher heartbeat</dt><dd data-rt="watch.heartbeat_age" data-fmt="age">{{ realtime.watch.heartbeat_age|rt_age }}</dd></div>
+        <div><dt>Last certificate for your names</dt><dd data-rt="watch.last_match_age" data-fmt="age">{{ realtime.watch.last_match_age|rt_age }}</dd></div>
+        <div><dt>Names watched</dt><dd><span data-rt="watch.watchlist_size">{{ realtime.watch.watchlist_size|default_if_none:"—" }}</span> <span class="ov-rt-sub">(<span data-rt="watch.watchlist_dropped">{{ realtime.watch.watchlist_dropped }}</span> dropped)</span></dd></div>
+        <div><dt>Restarts, 10 min</dt><dd data-rt="watch.restarts_10m">{{ realtime.watch.restarts_10m }}</dd></div>
+        <div><dt>Certificate backlog</dt><dd data-rt="watch.spool_depth">{{ realtime.watch.spool_depth }}</dd></div>
+        <div><dt>Missed by the watch, 7 d (this project)</dt><dd data-rt="watch.api_only_7d">{{ realtime.watch.api_only_7d }}</dd></div>
+        <div><dt>Event queue</dt><dd><span data-rt="queue.depth">{{ realtime.queue.depth }}</span> <span class="ov-rt-sub">(oldest <span data-rt="queue.oldest_age" data-fmt="age">{{ realtime.queue.oldest_age|rt_age }}</span>)</span></dd></div>
+        <div class="ov-rt-wide"><dt>Queue, 24 h</dt><dd class="ov-rt-sub"><span data-rt="queue.counts.checked">{{ realtime.queue.counts.checked }}</span> checked · <span data-rt="queue.counts.cooled">{{ realtime.queue.counts.cooled }}</span> cooled · <span data-rt="queue.counts.overflow">{{ realtime.queue.counts.overflow }}</span> overflow · <span data-rt="queue.counts.burst">{{ realtime.queue.counts.burst }}</span> burst · <span data-rt="queue.counts.covered">{{ realtime.queue.counts.covered }}</span> covered</dd></div>
+        <div><dt>Discovery to check</dt><dd><span data-rt="latency.t2_p50" data-fmt="age">{{ realtime.latency.t2_p50|rt_age }}</span> <span class="ov-rt-sub">median · <span data-rt="latency.t2_p95" data-fmt="age">{{ realtime.latency.t2_p95|rt_age }}</span> p95</span></dd></div>
+        <div><dt>Change to alert (this project)</dt><dd><span data-rt="latency.t3_p50" data-fmt="age">{{ realtime.latency.t3_p50|rt_age }}</span> <span class="ov-rt-sub">median · <span data-rt="latency.t3_p95" data-fmt="age">{{ realtime.latency.t3_p95|rt_age }}</span> p95</span></dd></div>
+        <div><dt>DNS watched (this project)</dt><dd><span data-rt="dns.watched">{{ realtime.dns.watched }}</span> <span class="ov-rt-sub">(oldest <span data-rt="dns.oldest_age" data-fmt="age">{{ realtime.dns.oldest_age|rt_age }}</span>)</span></dd></div>
+        {% if realtime.api %}<div><dt>Cert Spotter API</dt><dd><span data-rt="api.used_this_hour">{{ realtime.api.used_this_hour }}</span> / <span data-rt="api.budget">{{ realtime.api.budget }}</span> <span class="ov-rt-sub">this hour (oldest poll <span data-rt="api.oldest_poll_age" data-fmt="age">{{ realtime.api.oldest_poll_age|rt_age }}</span>, <span data-rt="api.unpolled">{{ realtime.api.unpolled }}</span> never polled)</span></dd></div>{% endif %}
+      </dl>
+      <p class="ov-rt-error" data-rt="watch.last_error_summary">{{ realtime.watch.last_error_summary|default_if_none:"" }}</p>
+    </div>
+  </section>
   </div>
 </div>
+<div id="ov_live" data-url="{% url 'dashboardLive' project.slug %}" data-since="{{ live_since }}" data-poll="{{ live_poll_seconds }}" hidden></div>
 {{ risk.trend|json_script:"score_trend_data" }}
 {% endblock main_content %}
 

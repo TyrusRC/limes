@@ -186,7 +186,7 @@ class RecentChangesTest(Base):
         self.assertEqual([r['title'] for r in rows], [f't{i}' for i in range(11, 1, -1)])
         self.assertEqual(rows[0]['asset'], 'a.x.com')
         self.assertIsNone(rows[1]['asset'])
-        self.assertEqual(set(rows[0]), {'kind', 'label', 'title', 'severity', 'created_at', 'asset'})
+        self.assertEqual(set(rows[0]), {'id', 'kind', 'label', 'title', 'severity', 'created_at', 'asset'})
         self.assertEqual(rows[0]['label'], 'New issue')
 
     def test_every_change_kind_has_a_label(self):

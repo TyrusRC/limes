@@ -107,6 +107,7 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None, create_
     from django.conf import settings
     from django.db import transaction
     from dashboard.stats import invalidate
+    from limes.event_queue import enqueue
     from limes.owned_ranges import addresses, range_addresses
     from limes.scan_target import ensure_scan_target
     from limes.tasks.inventory import _append_source
@@ -115,6 +116,7 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None, create_
     authorized = active_authorized
     added, existing, skipped, warnings = 0, 0, 0, []
     roots = []  # owned roots added, promoted or re-added, given a scan target once the transaction commits
+    fresh = set()  # ids of assets created or promoted by this call: each gets an immediate first check
     cap = settings.RANGE_ADDRESS_CAP
     # NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
     # Upgrade: select_for_update on the project row around this read and the writes.
@@ -186,9 +188,12 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None, create_
                     # the user confirmed a lookalike's "This is ours"; an agent's candidate add confirms nothing
                     Lookalike.objects.filter(project=project, domain=value).update(status='ours')
                 roots.append(asset)
+                fresh.add(asset.pk)
     for asset in roots:
         warning = ensure_scan_target(asset)[1]
         if warning:
             warnings.append(warning)
+        if asset.pk in fresh and asset.kind in ('hostname', 'ip', 'root_domain'):
+            enqueue(asset, 'manual')  # the queue's own gates (_ours, cooldown, burst) decide whether it runs
     invalidate(project.id)
     return {'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}

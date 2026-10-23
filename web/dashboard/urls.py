@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from . import views
+from . import live, views
 
 urlpatterns = [
     path(
@@ -12,6 +12,10 @@ urlpatterns = [
         '<slug:slug>/dashboard/',
         views.index,
         name='dashboardIndex'),
+    path(
+        '<slug:slug>/dashboard/live',
+        live.live,
+        name='dashboardLive'),
     path(
         '<slug:slug>/profile/',
         views.profile,

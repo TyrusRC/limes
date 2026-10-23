@@ -4,7 +4,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.urls import reverse
 
 from dashboard import activity, posture
@@ -176,8 +176,8 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 88  # a rise must be justified in review (86 + the Brand aggregate + the feed states)
-WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome; none from the cards
+OVERVIEW_QUERIES = 91  # a rise must be justified in review; merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured
+WARM_QUERIES = 18  # a cached GET: session, project, prefs and page chrome, plus the Real-time card's three (it is never cached)
 
 
 class OverviewPageBase(OverviewPageTest):
@@ -212,6 +212,10 @@ class OverviewBudgetTest(OverviewPageBase):
         large = self.queries(40)
         self.assertEqual(small, large)
         self.assertEqual(large, OVERVIEW_QUERIES)
+
+    @override_settings(CERTSPOTTER_API_KEY='k' * 8)
+    def test_page_queries_with_an_api_key(self):
+        self.assertEqual(self.queries(3), OVERVIEW_QUERIES + 1)  # api.card: one query for the roots' poll times
 
     def test_warm_page_query_count(self):
         self.seed(self.p, 5)

@@ -17,7 +17,9 @@ CHANGE_LABELS = {'issue_new': 'New issue', 'issue_fixed': 'Fixed', 'issue_regres
                  'score_dropped': 'Score dropped', 'score_changed': 'Score changed', 'waiver_expired': 'Waiver expired',
                  'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed',
                  'asset_new': 'New asset', 'breach_new': 'New breach',
-                 'lookalike_new': 'New lookalike', 'lookalike_active': 'Lookalike active'}
+                 'lookalike_new': 'New lookalike', 'lookalike_active': 'Lookalike active',
+                 'cert_new': 'New certificate', 'dns_changed': 'DNS changed',
+                 'monitoring_degraded': 'Monitoring degraded', 'monitoring_restored': 'Monitoring restored'}
 
 
 def _key(project_id):
@@ -133,7 +135,7 @@ def _monitoring(project, now):
 def _recent_changes(project):
     from startScan.models import ChangeEvent
     evs = ChangeEvent.objects.filter(project=project).select_related('asset').order_by('-created_at', '-id')[:LIST_LIMIT]
-    return [{'kind': e.kind, 'label': CHANGE_LABELS.get(e.kind, e.kind), 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
+    return [{'id': e.id, 'kind': e.kind, 'label': CHANGE_LABELS.get(e.kind, e.kind), 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
              'asset': e.asset.value if e.asset else None} for e in evs]
 
 

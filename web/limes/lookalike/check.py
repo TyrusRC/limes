@@ -168,7 +168,15 @@ def check_row(row, now, resolve, get, bootstrap, spend):
     if registered and not gone and not stop and _due(ct_at, now, CT_WATCHING if row.status == 'watching' else CT_OTHER):
         status, body = get(crtsh.exact_url(row.domain), provider='crtsh', max_wait=rdap.WAIT, max_bytes=http.MAX_BODY)
         if status == 200 and isinstance(body, list):
+            # Live sightings from the certificate watch (limes.ct.lookalikes) are written by another process while
+            # this check runs: read the stored value now, not the copy loaded at the start of the tick.
+            # NOTE: the row is saved whole below, so a sighting landing between this read and the save is lost
+            # (one count). Upgrade: save with update_fields and a locked read of ct.
+            stored = Lookalike.objects.filter(pk=row.pk).values_list('ct', flat=True).first()
+            live = (stored if isinstance(stored, dict) else {}).get('live')
             ct, ct_at = _ct_summary(body, row.domain), now
+            if isinstance(live, dict):
+                ct = dict(ct, live=live)
 
     if gone:
         status = 'gone'

@@ -284,6 +284,17 @@ class CheckRowTest(Base):
             http.get_json('https://x.test/', provider='rdap:rdap.verisign.com', session=mock.Mock(get=mock.Mock(return_value=resp)))
         self.assertEqual(reserve.call_args[0][:2], ('rdap:rdap.verisign.com', 2.0))
 
+    def test_live_sightings_from_the_certificate_watch_survive_the_crtsh_summary(self):
+        from limes.ct import lookalikes as live
+        row = self.row()
+        self.assertTrue(live.record_sighting(self.p.id, 'examp1e.com', self.now))
+        resolve = Resolver({('examp1e.com', 'NS'): ['ns.x.']})
+        ct = [{'id': 7, 'name_value': 'examp1e.com', 'not_before': '2026-10-20T00:00:00'}]
+        self.run_check(row, resolve, FakeGet({'/domain/': (404, {}), 'crt.sh': (200, ct)}))
+        row.refresh_from_db()
+        self.assertEqual(row.ct['count'], 1)  # the crt.sh summary is the check's
+        self.assertEqual(row.ct['live']['count'], 1)  # and the watch's count is carried over, not wiped
+
     def test_ct_exact_query_and_timeout_leaves_value(self):
         row = self.row()
         resolve = Resolver({('examp1e.com', 'NS'): ['ns.x.']})

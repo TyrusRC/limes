@@ -68,7 +68,7 @@ Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under No
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Build and start / stop the stack. `make up LLM=1` adds the optional local LLM. |
+| `make up` / `make down` | Build and start / stop the stack. `make up LLM=1` adds the optional local LLM; `make up REALTIME=1` adds the certificate watch. |
 | `make username` | Create the first admin user |
 | `make logs` | Tail service logs |
 | `make test` | Run the core test suite in containers |
@@ -129,10 +129,14 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - `manage.py reclassify_roots` converts old hostname rows that are really registrable roots (for
   example `example.co.uk`). It is idempotent and logs every change. Run it once after upgrading.
 - Scheduled tasks `monitor_assets` and `enumerate_ranges` run on the `io` queue; the scheduler locks
-  live in Redis. So do the new `refresh_feeds`, `generate_lookalikes`, `lookalike_tick` and `hibp_sync`.
+  live in Redis. So do the new `refresh_feeds`, `generate_lookalikes`, `lookalike_tick` and `hibp_sync`,
+  `poll_ct_api` (every 60 s; it only calls Cert Spotter when `LIMES_CERTSPOTTER_API_KEY` is set) and the
+  `drain-events` tick (`monitor_assets` with `events_only`, every 15 s), which drains the event-driven check queue.
 - The first run of each new feed and the first lookalike sweep of each root are silent baselines: they
   record what exists and send no alerts. IP reputation, exposed AI services and the leak checks are provisional: they
   appear as issues but do not change any score.
+- The certificate watch is off by default. `make up REALTIME=1` with `LIMES_CT_WATCH=true` starts it and
+  downloads about 157 GB/day (inferred, not measured); read [docs/realtime.md](docs/realtime.md) first.
 
 ## Status
 
@@ -143,6 +147,8 @@ The Overview shows the score by category, exposure, certificates, technologies, 
 coverage, top risks and what changed, plus IP reputation and data leakage cards (provisional) and a
 Brand card. Discovery and reputation are built too: feeds, KEV/EPSS markers, AI-service and leak
 checks, optional breach data, and the lookalike review queue.
+Near-real-time monitoring is built too (opt-in certificate watch, event-driven checks, DNS change
+detection, live Overview); see [docs/realtime.md](docs/realtime.md).
 
 ## Security
 

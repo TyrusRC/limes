@@ -192,6 +192,31 @@ services:
       - ollama_data:/root/.ollama
     networks: [limes_network]
 
+  ct-watch:
+    <<: *app
+    profiles: [realtime]  # opt-in certificate watch (~157 GB/day inbound, inferred): `make up REALTIME=1`
+    entrypoint: ["python3", "manage.py", "ct_watch"]
+    environment:
+      <<: *app-env
+      LIMES_LOG_DIR: /tmp  # the root filesystem is read-only; settings would otherwise open errors.log in /usr/src/app
+    mem_limit: ${CT_WATCH_MEM:-512m}
+    # NOTE: the supervisor holds the full .env and runs as root, and certspotter is its child (with an allowlisted
+    # environment). Upgrade path: a separate non-root certspotter container sharing only the spool volume, no env_file.
+    # NOTE: memory budget is a guess (512m): measure certspotter's footprint on a real watchlist and raise CT_WATCH_MEM.
+    init: true  # reaps the certspotter child and forwards SIGTERM
+    stop_grace_period: 45s  # longer than watch.STOP_WAIT (30 s)
+    pids_limit: 256
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ct_state:/var/lib/ct-watch
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD", "python3", "manage.py", "ct_watch", "--health"]
+      start_period: 120s
+
 networks:
   limes_network:
 
@@ -204,6 +229,7 @@ volumes:
   scan_results:
   static_volume:
   ollama_data:
+  ct_state:
 
 secrets:
   proxy.ca:
