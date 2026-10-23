@@ -41,7 +41,7 @@ CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
 EVENT_QUEUE_MAX = max(1, env.int('LIMES_EVENT_QUEUE_MAX', default=1000))
 EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
-EVENT_BURST = env.int('LIMES_EVENT_BURST', default=200)
+EVENT_BURST = max(1, env.int('LIMES_EVENT_BURST', default=200))
 CT_EVENT_WINDOW = env.int('LIMES_CT_EVENT_WINDOW', default=3600)  # seconds one cert_new digest row coalesces over
 EVENT_SHARE = min(0.9, max(0.1, env.float('LIMES_EVENT_SHARE', default=0.5)))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.

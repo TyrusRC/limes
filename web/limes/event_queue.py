@@ -21,7 +21,9 @@ WHY = 'limes:evq:why'
 DAY_TTL = 2 * 86400
 LAT_MAX = 1000
 
-# KEYS: queue, why. ARGV: member, score, why, cap. An earlier score wins (and takes its reason); a full queue refuses.
+# KEYS: queue, why, burst. ARGV: member, score, why, cap, burst limit (-1 = not charged), burst ttl.
+# An earlier score wins (and takes its reason). Only a request that would be queued is charged to the burst budget,
+# and a refused one is not.
 ENQUEUE_LUA = """
 local old = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if old then
@@ -32,9 +34,31 @@ if old then
   return 'dup'
 end
 if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[4]) then return 'overflow' end
+local lim = tonumber(ARGV[5])
+if lim >= 0 then
+  local used = tonumber(redis.call('GET', KEYS[3]) or '0')
+  if used >= lim then return 'burst' end
+  redis.call('INCR', KEYS[3])
+  redis.call('EXPIRE', KEYS[3], ARGV[6])
+end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
 return 'queued'
+"""
+
+# KEYS: queue, why. ARGV: now, limit. Pops due members with their reasons in one step: a concurrent enqueue cannot
+# slip between the pop and the reason read. NOTE: delivery is at-most-once; a claimed item whose check dies is not
+# retried (the cadence picks the asset up again).
+CLAIM_LUA = """
+local out = {}
+local ms = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
+for _, m in ipairs(ms) do
+  redis.call('ZREM', KEYS[1], m)
+  out[#out + 1] = m
+  out[#out + 1] = redis.call('HGET', KEYS[2], m) or ''
+  redis.call('HDEL', KEYS[2], m)
+end
+return out
 """
 
 
@@ -79,12 +103,24 @@ def count(outcome, n=1, now=None):
         _fail(e)
 
 
+def _push(r, asset_id, project_id, reason, now, delay=0):
+    """The Redis half of enqueue: one atomic script. The WHY timestamp is the due time, so latency stays >= 0."""
+    due = now.timestamp() + delay
+    charged = not reason.startswith('ct_recheck_')  # rechecks are ours, not new events: they must not starve ct_new
+    return _text(r.register_script(ENQUEUE_LUA)(
+        keys=[QUEUE, WHY, burst_key(project_id, now)],
+        args=[str(asset_id), due, f'{reason}|{due}', settings.EVENT_QUEUE_MAX,
+              settings.EVENT_BURST if charged else -1, 3600]))
+
+
 def enqueue(asset, reason, delay=0, now=None):
     if reason not in REASONS:
         raise ValueError(f'unknown event reason {reason!r}')
     if not settings.CONTINUOUS_SCANS or not settings.EVENT_CHECKS:
         return 'off'
     from limes import monitor  # lazy: monitor imports this module's callers
+    # NOTE: this DB read runs before any Redis gate, so a flood of requests costs one query each. Upgrade path: a
+    # cheap cooldown check first, then _ours.
     if not monitor._ours(asset):
         count('skipped', now=now)
         return 'skipped'
@@ -93,27 +129,22 @@ def enqueue(asset, reason, delay=0, now=None):
     try:
         r = get_redis_connection('default')
         if settings.EVENT_COOLDOWN > 0 and not reason.startswith('ct_recheck_'):  # 0 = no cooldown (EX 0 is invalid)
-            cool = cool_key(asset.id)
-            if not r.set(cool, 1, nx=True, ex=settings.EVENT_COOLDOWN):
+            if not r.set(cool_key(asset.id), 1, nx=True, ex=settings.EVENT_COOLDOWN):
                 count('cooled', now=now)
                 return 'cooled'
-        bk = burst_key(asset.project_id, now)
-        pipe = r.pipeline()
-        pipe.incr(bk)
-        pipe.expire(bk, 3600)
-        n = pipe.execute()[0]
-        if n > settings.EVENT_BURST:
-            outcome = 'burst'
-        else:
-            outcome = _text(r.eval(ENQUEUE_LUA, 2, QUEUE, WHY, str(asset.id),
-                                   (now + timedelta(seconds=delay)).timestamp(),
-                                   f'{reason}|{int(now.timestamp())}', settings.EVENT_QUEUE_MAX))
+            cool = cool_key(asset.id)
+        outcome = _push(r, asset.id, asset.project_id, reason, now, delay)
         if outcome in ('burst', 'overflow') and cool:
             r.delete(cool)  # a dropped request must not make the next one 'cooled'
         count(outcome, now=now)
         return outcome
     except RedisError as e:
         _fail(e)
+        if cool:
+            try:
+                get_redis_connection('default').delete(cool)
+            except RedisError:
+                pass
         return 'error'
 
 
@@ -126,24 +157,23 @@ def due_count(now):
 
 
 def claim_due(now, limit):
-    """Pop up to `limit` due entries as (asset_id, reason, enqueued_unix); a member another claimer took is skipped."""
-    out = []
+    """Pop up to `limit` due entries as (asset_id, reason, due_unix); [] on a Redis error (nothing is lost)."""
     try:
         r = get_redis_connection('default')
-        for m in r.zrangebyscore(QUEUE, '-inf', _utc(now).timestamp(), start=0, num=limit):
-            if r.zrem(QUEUE, m) != 1:
-                continue
-            why = _text(r.hget(WHY, m)) or ''
-            r.hdel(WHY, m)
-            reason, _, at = why.partition('|')
-            out.append((int(_text(m)), reason, float(at or 0)))
+        flat = r.register_script(CLAIM_LUA)(keys=[QUEUE, WHY], args=[_utc(now).timestamp(), limit])
     except RedisError as e:
         _fail(e)
         return []
+    out = []
+    for m, why in zip(flat[::2], flat[1::2]):
+        reason, _, at = (_text(why) or '').partition('|')
+        out.append((int(_text(m)), reason, float(at or 0)))
     return out
 
 
 def record_latency(seconds, now=None):
+    if not math.isfinite(seconds):
+        return
     now = _utc(now)
     if seconds < 0:
         seconds = 0
@@ -185,4 +215,4 @@ def percentile(values, q):
     if not values:
         return None
     s = sorted(values)
-    return s[max(0, math.ceil(len(s) * q) - 1)]
+    return s[max(0, -(-len(s) * round(q * 1000) // 1000) - 1)]  # integer ceil: no float edge

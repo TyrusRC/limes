@@ -1,3 +1,4 @@
+import threading
 from datetime import timedelta
 from unittest import mock
 
@@ -113,6 +114,11 @@ class EnqueueTests(Base):
         with self.assertRaises(ValueError):
             eq.enqueue(self.h, 'nope')
 
+    def test_percentile_integer_edge(self):
+        v = list(range(1, 101))
+        self.assertEqual(eq.percentile(v, 0.07), 7)  # float ceil(100 * 0.07) would give 8
+        self.assertEqual(eq.percentile(v, 1.0), 100)
+
     def test_percentile(self):
         v = list(range(1, 101))
         self.assertEqual((eq.percentile(v, 0.5), eq.percentile(v, 0.95)), (50, 95))
@@ -134,3 +140,101 @@ class EnqueueTests(Base):
         for k in keys:
             if k not in (eq.QUEUE, eq.WHY):
                 self.assertGreater(self.r.ttl(k), 0, k)
+
+
+class RaceAndFailureTests(Base):
+    def push(self, i, reason='manual', pid=None, delay=0):
+        return eq._push(get_redis_connection('default'), i, pid or self.p.id, reason, self.now, delay)
+
+    def test_claim_error_loses_nothing(self):
+        self.push(1)
+        self.push(2)
+        real = get_redis_connection('default')
+        with mock.patch('limes.event_queue.get_redis_connection') as g:
+            g.return_value.register_script.return_value.side_effect = RedisConnectionError('x')
+            self.assertEqual(eq.claim_due(self.now, 10), [])
+        self.assertEqual(real.zcard(eq.QUEUE), 2)
+        self.assertEqual(len(eq.claim_due(self.now, 10)), 2)
+
+    def test_claim_returns_reason_and_leaves_no_orphans(self):
+        self.push(1, 'ct_new')
+        self.assertEqual([(a, r) for a, r, _ in eq.claim_due(self.now, 10)], [(1, 'ct_new')])
+        self.assertEqual(self.r.hlen(eq.WHY), 0)
+
+    def _threads(self, fns):
+        errs = []
+
+        def run(f):
+            try:
+                f()
+            except Exception as e:  # noqa: BLE001
+                errs.append(e)
+        ts = [threading.Thread(target=run, args=(f,)) for f in fns]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(errs, [])
+
+    def test_claim_enqueue_race_never_yields_empty_reason(self):
+        got = []
+
+        def claimer():
+            for _ in range(200):
+                got.extend(eq.claim_due(self.now, 50))
+
+        def pusher():
+            for _ in range(200):
+                for i in range(1, 6):
+                    self.push(i, 'ct_cert')
+        self._threads([claimer, pusher, pusher])
+        got.extend(eq.claim_due(self.now, 50))
+        self.assertTrue(got)
+        self.assertTrue(all(r == 'ct_cert' and at > 0 for _, r, at in got), got[:3])
+        self.assertEqual(self.r.hlen(eq.WHY), 0)
+
+    def test_two_claimers_never_share_an_item(self):
+        for i in range(1, 201):
+            self.push(i)
+        a, b = [], []
+        self._threads([lambda: [a.extend(eq.claim_due(self.now, 7)) for _ in range(40)],
+                       lambda: [b.extend(eq.claim_due(self.now, 7)) for _ in range(40)]])
+        ids = [x[0] for x in a + b]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(ids), 200)
+
+    @override_settings(EVENT_QUEUE_MAX=10, EVENT_BURST=1000)
+    def test_concurrent_enqueuers_never_exceed_cap(self):
+        out = []
+        self._threads([lambda k=k: out.extend(self.push(k * 100 + i) for i in range(30)) for k in range(6)])
+        self.assertEqual(self.r.zcard(eq.QUEUE), 10)
+        self.assertEqual(out.count('queued'), 10)
+
+    def test_cooldown_released_when_redis_fails_after_connect(self):
+        real = get_redis_connection('default')
+        with mock.patch('limes.event_queue._push', side_effect=RedisConnectionError('x')):
+            self.assertEqual(eq.enqueue(self.h, 'manual', now=self.now), 'error')
+        self.assertFalse(real.exists(eq.cool_key(self.h.id)))
+
+    @override_settings(EVENT_BURST=2, EVENT_COOLDOWN=0)
+    def test_rechecks_do_not_starve_ct_new(self):
+        for i in range(5):
+            self.assertEqual(self.push(i, 'ct_recheck_1h', delay=3600), 'queued')
+        self.assertEqual([self.push(10 + i, 'ct_new') for i in range(3)], ['queued', 'queued', 'burst'])
+
+    @override_settings(EVENT_BURST=2, EVENT_COOLDOWN=0)
+    def test_dup_and_overflow_do_not_charge_burst(self):
+        self.assertEqual(self.push(1), 'queued')
+        self.assertEqual([self.push(1) for _ in range(3)], ['dup'] * 3)
+        self.assertEqual(self.push(2), 'queued')
+        with override_settings(EVENT_QUEUE_MAX=2):
+            self.assertEqual(self.push(3), 'overflow')
+        self.assertEqual(self.push(3), 'burst')
+
+    def test_delayed_item_latency_is_not_inflated(self):
+        self.push(1, 'ct_recheck_1h', delay=3600)
+        (_, _, at), = eq.claim_due(self.now + timedelta(seconds=3601), 5)
+        self.assertAlmostEqual(self.now.timestamp() + 3600, at, delta=1)
+
+    def test_non_finite_latency_ignored(self):
+        for v in (float('nan'), float('inf')):
+            eq.record_latency(v, now=self.now)
+        self.assertEqual(eq.snapshot(self.now)['latency'], [])
