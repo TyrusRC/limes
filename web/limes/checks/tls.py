@@ -38,8 +38,9 @@ def evaluate(obs, now):
         else:
             expiring = 'fail' if not expired and na - now <= EXPIRING_WINDOW else 'pass'
         ev = {'not_after': na.isoformat()} if na else {}
-        expiry = {'tls.cert_expired': Result('tls.cert_expired', 'fail' if expired else 'pass', ev if expired else {}),
-                  'tls.cert_expiring': Result('tls.cert_expiring', expiring, ev if expiring == 'fail' else {})}
+        # passing results keep not_after too: the Overview lists certificates 15-30 days out, which pass
+        expiry = {'tls.cert_expired': Result('tls.cert_expired', 'fail' if expired else 'pass', ev),
+                  'tls.cert_expiring': Result('tls.cert_expiring', expiring, ev)}
     out = {
         **expiry,
         'tls.cert_hostname_mismatch': flag('tls.cert_hostname_mismatch', cert.get('hostname_ok')),

@@ -2915,6 +2915,9 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		tag = params.get('tag')
 		if tag:
 			qs = qs.filter(tags__name=tag)
+		tech = params.get('technology')
+		if tech:  # a subquery, so the annotated counts do not fan out over the join
+			qs = qs.filter(id__in=Asset.objects.filter(project__slug=project, technologies__name=tech).values('id'))
 		if self.action == 'list' and not params.get('show_low'):
 			from limes.tasks.attribution import REVIEW
 			qs = qs.exclude(scope_tier='candidate', confidence__lt=REVIEW)  # unscored (null) stay visible

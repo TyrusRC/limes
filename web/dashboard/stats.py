@@ -136,6 +136,7 @@ def _recent_changes(project):
 
 def asm_stats(project):
     now = timezone.now()
+    from dashboard import posture
     live = _live_issues(project)
     return {
         'risk': _risk(project),
@@ -146,6 +147,10 @@ def asm_stats(project):
         'findings': _findings(live),
         'risky_assets': _risky_assets(live),
         'monitoring': _monitoring(project, now),
+        'categories': posture.category_cards(project, now),
+        'exposure': posture.exposure(project, now),
+        'certificates': posture.certificates(project, now),
+        'technologies': posture.technologies(project),
     }
 
 
