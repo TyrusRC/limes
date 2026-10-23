@@ -1018,6 +1018,12 @@ a.ov-meta:hover { color: var(--brand-ink); }
 .ov-rt-healthy { background: var(--ok-bg); color: var(--ok-ink); box-shadow: none; }
 .ov-rt-degraded { background: var(--sev-critical-bg); color: var(--sev-critical-ink); box-shadow: none; }
 .ov-rt-off { background: var(--surface-2); color: var(--ink-2); }
+.ov-rt-mode { font-size: var(--text-xs); color: var(--ink-3); }
+.ov-rt-asof { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--ink-3); min-height: 1em; }
+.ov-rt-stale { background: var(--surface-2); color: var(--ink-3); box-shadow: 0 0 0 1px var(--border); font-style: italic; }
+.ov-realtime.ov-rt-notupdating .ov-rt-list { opacity: .55; }
+.ov-rt-list > .ov-rt-wide { flex-direction: column; gap: 2px; }
+.ov-rt-list > .ov-rt-wide dd { text-align: left; }
 .ov-rt-reason { font-size: var(--text-sm); color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
 .ov-rt-reason:empty, .ov-rt-error:empty { display: none; }
 .ov-rt-list { margin: 0; }

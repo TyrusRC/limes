@@ -9,7 +9,7 @@ from django.urls import reverse
 
 from dashboard import live
 from dashboard.stats import CHANGE_LABELS, invalidate
-from startScan.models import ChangeEvent
+from startScan.models import Asset, ChangeEvent
 from tests.core.test_ct_health import Base as HealthBase
 
 X = '<img src=x onerror=alert(1)>'
@@ -34,6 +34,9 @@ class LiveBase(HealthBase):
 
     def ev(self, title='t', project=None, kind='asset_new', **kw):
         return ChangeEvent.objects.create(project=project or self.p, kind=kind, title=title, **kw)
+
+    def asset(self, value):
+        return Asset.objects.create(project=self.p, kind='hostname', value=value, scope_tier='owned_host')
 
     def get(self, slug='p', since=None):
         return self.client.get(reverse('dashboardLive', kwargs={'slug': slug}), {} if since is None else {'since': since})
@@ -73,6 +76,15 @@ class LiveEndpointTest(LiveBase):
         self.assertEqual(r.status_code, 302)
         self.assertIn('login', r['Location'])
 
+    def test_every_response_is_uncacheable(self):
+        for r in (self.get(), self.get(since='x'), self.get(slug='nope'),
+                  self.client.post(reverse('dashboardLive', kwargs={'slug': 'p'}))):
+            self.assertEqual(r['Cache-Control'], 'no-store', r.status_code)
+            self.assertIn('Cookie', r['Vary'], r.status_code)
+
+    def test_payload_names_its_page_size(self):
+        self.assertEqual(self.get().json()['limit'], live.LIVE_LIMIT)
+
     def test_live_does_not_touch_stats(self):
         with mock.patch('dashboard.stats.asm_stats') as a, mock.patch('dashboard.stats.project_stats') as s:
             self.get()
@@ -80,8 +92,9 @@ class LiveEndpointTest(LiveBase):
         counts = []
         for n in (3, 30):
             ChangeEvent.objects.all().delete()
+            Asset.objects.all().delete()
             for i in range(n):
-                self.ev(f'n{i}')
+                self.ev(f'n{i}', asset=self.asset(f'h{i}.x.com'))  # an asset each: a lost select_related shows as N+1
             self.get()  # warm-up: session, prefs
             with CaptureQueriesContext(connection) as q:
                 self.get()
@@ -155,6 +168,20 @@ class LivePageTest(LiveBase):
             self.assertIn('data-poll="0"', self.page())
         ChangeEvent.objects.all().delete()
         self.assertIn('data-since="0"', self.page())
+
+    def test_cache_without_ids_falls_back_to_a_real_cursor(self):
+        e = self.ev('x')
+        legacy = [{'kind': 'asset_new', 'label': 'l', 'title': 't', 'severity': None, 'created_at': self.now, 'asset': None}]
+        self.assertEqual(live.newest_id(legacy, self.p), e.id)  # not 0: that would replay the oldest events as new
+        self.assertEqual(live.newest_id([{'id': 5}, {'id': 9}], self.p), 9)
+        self.assertEqual(live.newest_id([], self.p), 0)  # an empty cache means no events then: all are new
+
+    def test_card_labels_scope_and_poll_off_snapshot(self):
+        html = self.page()
+        self.assertIn('Instance-wide', section(html, 'dash_realtime'))
+        self.assertIn('id="rt_asof"', html)
+        with override_settings(LIVE_POLL_SECONDS=0):
+            self.assertIn('Snapshot from page load', section(self.page(), 'dash_realtime'))
 
     def test_empty_feed_still_has_a_list(self):
         self.assertIn('id="dash_changes_feed"', self.page())  # the first live row needs somewhere to land

@@ -38,7 +38,7 @@ def index(request, slug):
     context = dict(project_stats(project))
     context.update({'dashboard_data_active': 'active', 'project': project,
                     'realtime': live.realtime(project, timezone.now()), 'live_poll_seconds': settings.LIVE_POLL_SECONDS,
-                    'live_since': live.newest_id(context.get('recent_changes', []))})
+                    'live_since': live.newest_id(context.get('recent_changes', []), project)})
     return render(request, 'dashboard/index.html', context)
 
 
