@@ -435,11 +435,11 @@
       - items `{id, target(u), engine, status, started, stopped, duration_s, error(u), initiated_by, automatic: bool}`.
     - `get_scan(caller, project, scan_id: RowId)`:
       - the list fields;
-      - `stages`: `ScanActivity` by time, `[{id, name, title(u), status, time, error(u), traceback_tail(u: redact_log, last 2,000 characters)}]`, at most 200;
+      - `stages`: `ScanActivity` by time, `[{id, name(u), title(u), status, time, error(u), traceback_tail(u: redact_log, last 2,000 characters), traceback_truncated_head}]`, at most 200 and cut once their serialized size passes 60 KB, with `stages_truncated` saying so;
       - `subscans`: count by status.
     - `get_scan_logs(caller, project, scan_id: RowId, activity_id: RowId | None = None, cursor=None, limit: Annotated[int, Field(ge=1, le=50)] = 20)`:
       - `Command` rows newest first;
-      - items `{id, activity_id, time, return_code, command(u, redacted), output_tail(u, redacted, last LOG_CAP characters)}`;
+      - items `{id, activity_id, time, return_code, command(u, redacted), output_tail(u, redacted, last LOG_CAP characters), output_truncated_head}`;
       - redaction secrets come from the scan's `Domain` identity; a `decrypt` failure gives `[]` and never an error;
       - an `activity_id` from another scan gives `not_found`.
     - `list_vulnerabilities(caller, project, severity: Literal[-1,0,1,2,3,4] | None = None, open_only: bool = True, asset_id: RowId | None = None, scan_id: RowId | None = None, cursor=None, limit=50)`:

@@ -15,11 +15,10 @@ from limes.continuous import IN_PROGRESS
 from limes.definitions import PERM_MODIFY_SYSTEM_CONFIGURATIONS
 from limes.mcp import access
 from limes.mcp.access import McpError
-from limes.mcp.redact import redact_log
+from limes.mcp.redact import domain_secrets, redact_log
 from limes.mcp.registry import tool
 from limes.mcp.results import LOG_CAP, Cursor, Limit, RowId, Slug, iso, page, untrusted
 from limes.mcp.tools.inventory import asset_item
-from limes.mcp.tools.scans import _secrets
 from limes.mcp.tools.issues import _issue_item, _with_extras
 from limes.tasks.attribution import REVIEW
 from startScan.models import Asset, ScanHistory, TrackedIssue, Vulnerability
@@ -72,7 +71,7 @@ def get_vulnerability(caller, project: Slug, vulnerability_id: RowId):
     v = _vulns(p).filter(pk=vulnerability_id).select_related('scan_history__domain').first()
     if v is None:
         raise McpError('not_found', 'vulnerability not found')
-    secrets = _secrets(v.scan_history.domain)
+    secrets = domain_secrets(v.scan_history.domain)
     names = lambda qs, f='name': [untrusted(getattr(x, f)) for x in qs.all().order_by('id')[:NAME_LIST_CAP]]
     return {
         'id': v.id, 'name': untrusted(v.name), 'severity': v.severity, 'source': v.source and untrusted(v.source),
@@ -151,7 +150,8 @@ def _mcp_version():
 @tool(title='System status', perm=PERM_MODIFY_SYSTEM_CONFIGURATIONS)
 def get_system_status(caller):
     """Live workers, queue depths, scheduler heartbeat, scans in progress and software versions. System administrators only."""
-    # NOTE: inspect ping blocks a worker thread up to 1 s (5 s hard deadline). Worker names (celery@hostname) are
+    # NOTE: inspect ping blocks a worker thread up to 1 s; the whole broker part has a hard
+    # deadline of DEADLINE_S (4 s). Worker names (celery@hostname) are
     # shown to this admin-only caller: accepted infrastructure disclosure.
     workers, queues = _broker_with_deadline()
     beat = {t.name: iso(t.last_run_at) for t in PeriodicTask.objects.filter(name__in=list(settings.CELERY_BEAT_SCHEDULE))}

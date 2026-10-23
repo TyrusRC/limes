@@ -517,9 +517,11 @@ class LogEdgeTests(ScansBase):
 
     def test_tail_window_helper(self):
         from limes.mcp.redact import tail_window
-        self.assertEqual(tail_window('abc\ndef', 100), 'abc\ndef')
-        self.assertEqual(tail_window('abc\ndefghi\njkl', 9), 'jkl')
-        self.assertEqual(tail_window('x' * 20, 5), '')
+        self.assertEqual(tail_window('abc\ndef', 100), ('abc\ndef', False))
+        self.assertEqual(tail_window('abc\ndefghi\njkl', 9), ('jkl', True))
+        self.assertEqual(tail_window('ab\rcd\refgh', 7), ('efgh', True))
+        self.assertEqual(tail_window('PARTIAL word1 word2', 15), ('word1 word2', True))
+        self.assertEqual(tail_window('x' * 400, 300), ('x' * 44, True))
 
     def test_get_scan_size_budget_and_traceback_window(self):
         import time
@@ -572,3 +574,150 @@ class SystemStatusBrokerDownTests(ScansBase):
         self.assertLess(took, 5)
         self.assertEqual(d['workers'], [])
         self.assertIsNone(d['queues'])
+
+
+ZW = '\u200b'
+ROUND2 = {
+    'slack workflow': ('https://hooks.slack.com/workflows/T0/A0/123/abcdefSECRETxyz', 'abcdefSECRETxyz'),
+    'curl -uX': ('curl -uadmin:Hunter2pw https://x', 'Hunter2pw'),
+    'quoted split by newline': ('password="abc\ndefsecret022"', 'defsecret022'),
+    'pct-encoded name': ('pass%77ord=secret026', 'secret026'),
+    'pw key': ('{"pw": "sec043"}', 'sec043'),
+    'xml': ('<password>sec046</password>', 'sec046'),
+    'xml caps': ('<Password type="x">sec047</Password>', 'sec047'),
+    'glpat': ('glpat-abcdefghij0123456789', 'abcdefghij0123456789'),
+    'openai': ('sk-proj-abcdefghij0123456789ABCD', 'abcdefghij0123456789'),
+    'anthropic': ('sk-ant-api03-abcdefghij0123456789', 'abcdefghij0123456789'),
+    'npm': ('npm_abcdefghij0123456789abcdefghij012345', 'abcdefghij0123456789'),
+    'twilio': ('SK' + '0123456789abcdef' * 2, '0123456789abcdef0123'),
+    'sendgrid': ('SG.abcdefghijklmnop.qrstuvwxyz0123456789ABCDEFG', 'qrstuvwxyz0123456789'),
+    'php arrow': ("'password' => 'sec062'", 'sec062'),
+    'php arrow dq': ('"password" => "sec063"', 'sec063'),
+    'php define': ("define('DB_PASSWORD','sec064');", 'sec064'),
+    'php var': ("$password = 'sec065';", 'sec065'),
+    'env quoted': ("DB_PASSWORD='sec066'", 'sec066'),
+    'yaml unindented': ('password:\nsec067', 'sec067'),
+    'yaml ini colon': ('Password: sec068', 'sec068'),
+    'whsec': ('whsec_abcdEFGH1234abcdEFGH1234', 'abcdEFGH1234'),
+    'sas sig': ('https://a.blob.core.windows.net/c?sv=1&sig=sec069abc%3D', 'sec069abc'),
+    'account key': ('DefaultEndpointsProtocol=https;AccountKey=sec070abc==;', 'sec070abc'),
+    'camel': ('apiKey: sec071', 'sec071'),
+    'x-api-key flag': ('cmd --api-key sec072', 'sec072'),
+    'json nested': ('{"auth": {"user":"u","pass":"sec073"}}', 'sec073'),
+    'password slash url': ('https://bob:pa/ss@w0rd@db.x:5432/db', 'ss@w0rd'),
+    'redis': ('redis://:p@ss020@host:6379/0', 'ss020'),
+    'crlf header': ('Authorization: Bearer abcsecret027\r\nHost: x', 'abcsecret027'),
+    'zw in name': ('pass' + ZW + 'word=sec074', 'sec074'),
+    'hdr fold': ('X-Api-Key: a\n\tsecret075', 'secret075'),
+    'nbsp': ('password\xa0=\xa0sec076', 'sec076'),
+}
+UNTOUCHED = ('\ufb01le \ufb02ow', 'x\u00b2 + 10\u00bd', '\u2460\u2461', '\u2122', 'monkey=banana', 'tokenizer=bpe',
+             'author=alice', 'passed=12 failed=0', 'Bypass=true', 'keyboard=us', 'https://example.com/path@v1',
+             'https://host:8080/path@v1', 'git@github.com:a/b.git', 'GET /static/foo@2x.png', 'nmap -p- host',
+             'nmap -p 80,443 host', 'nmap -pU:53,T:80 host', 'mysql -p12345678 db', 'ffuf -u https://x.com/FUZZ',
+             '9f86d081884c7d659a2feaf0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08')
+
+
+class RedactorRound2Tests(ScansBase):
+    def test_round2_leaks(self):
+        for label, (text, leak) in ROUND2.items():
+            out = redact_log(text)
+            self.assertNotIn(leak, out, label)
+            self.assertIn('***', out, label)
+
+    def test_not_overredacting(self):
+        for plain in UNTOUCHED:
+            self.assertEqual(redact_log(plain), plain)
+
+    def test_fullwidth_still_folds(self):
+        self.assertNotIn('IOSFODNN7EXAMPLE', redact_log('\uff21\uff2b\uff29\uff21IOSFODNN7EXAMPLE'))
+        self.assertNotIn('sec9', redact_log('password\uff1dsec9xx'))
+
+    def test_labelled_value_is_scrubbed_where_it_reappears(self):
+        out = redact_log('password=Zq9secretX ... later Zq9secretX and Zq9secretX%21 ' + 'Zq9secretX')
+        self.assertNotIn('Zq9secretX', out)
+        out = redact_log('login: password=a@b!c9 then url a%40b%21c9 json "a@b!c9"')
+        self.assertNotIn('a%40b%21c9', out)
+        self.assertNotIn('a@b!c9', out)
+        out = redact_log('token="q\\"uote12" later q\\"uote12')
+        self.assertNotIn('uote12', out)
+        import base64
+        b64 = base64.b64encode(b'user:Zq9secretX').decode()
+        self.assertNotIn(b64[8:], redact_log('Zq9secretX=' + 'x\npassword=Zq9secretX\n' + b64))
+        for form in (b64, base64.b64encode(b'xZq9secretX').decode(), base64.b64encode(b'xyZq9secretX!').decode()):
+            self.assertNotIn(form[6:-4], redact_log('see ' + form, ['Zq9secretX']))
+
+    def test_domain_secret_forms(self):
+        self.assertNotIn('a%40b', redact_log('h a%40b', ['a@b']))
+        self.assertNotIn('a\\"b', redact_log('{"h": "a\\"b"}', ['a"b']))
+        self.assertEqual(redact_log('short ab ok', ['ab']), 'short *** ok')
+
+    def test_learning_is_bounded(self):
+        import time
+        text = ''.join(f'password=value{i:06d} ' for i in range(5000)) + 'tail value004999'
+        t = time.monotonic()
+        out = redact_log(text)
+        self.assertLess(time.monotonic() - t, 3)
+        self.assertNotIn('value000001', out)
+
+    def test_probes_1mb(self):
+        import time
+        probes = {
+            'a.': 'a.' * 500000, 'key=': 'key=' * 250000, 'pwd nl': 'password:\n ' * 90000,
+            'quoted': 'password="' + '\\"' * 500000, 'quoted-unterminated': "token='" + 'a' * 1000000,
+            'quoted-repeat': 'password="' * 100000,
+            '://@': 'https://' + 'a' * 1000000, '://x@ rep': ('://' + 'a' * 250 + ' ') * 4000,
+            'AKIA40': ('AKIAABCDEFGHIJKLMNOP ' + 'a/' * 40) * 8000, '40blob': ('A' * 41 + ' ') * 24000,
+            'BEGIN no END': '-----BEGIN PRIVATE KEY-----' + 'A' * 1000000,
+            'END only': 'A' * 1000000 + '-----END PRIVATE KEY-----', 'END no tail': 'A\\' * 500000,
+            'hdr fold': 'Authorization: x' + '\n a' * 300000, 'hdrs': 'cookie:' * 140000,
+            '-u': '-u a' * 250000, '-u colon': '-u ' + 'a' * 1000000, '-p': '-p ' * 330000,
+            '--token': '--token ' * 120000, 'flagsp': '--password' + ' ' * 1000000,
+            'name40': ('a' * 40 + 'key' + 'b' * 40 + ' ') * 12000, 'namecolon': ('a' * 40 + 'key' + 'b' * 40) * 12000,
+            'nl ws': 'password:' + ' ' * 500000 + '\n' + ' ' * 500000, 'bearer': 'bearer ' * 140000,
+            'slack': 'https://hooks.slack.com/services/' * 30000, 'ansi': '\x1b[' + '1;' * 500000,
+            'osc': '\x1b]' + 'a' * 1000000, 'zw': ZW * 1000000, 'xml': '<password>' * 100000,
+            'pct': 'a%41' * 250000, 'cr': '\r' * 1000000, 'sep-name': 'a=' * 500000,
+        }
+        for name, probe in probes.items():
+            t = time.monotonic()
+            redact_log(probe)
+            self.assertLess(time.monotonic() - t, 5, name)
+
+
+class WindowFallbackTests(ScansBase):
+    def logs(self, output):
+        s = self.scan()
+        Command.objects.create(scan_history=s, time=timezone.now(), command='c', output=output)
+        return self.data(self.call('get_scan_logs', project='p1', scan_id=s.id))['items'][0]
+
+    def test_single_long_line(self):
+        from limes.mcp.tools import scans
+        it = self.logs('word ' * 40000 + 'NEWEST')
+        self.assertTrue(it['output_truncated_head'])
+        self.assertTrue(it['output_tail']['untrusted_text'].endswith('NEWEST'))
+        self.assertFalse(self.logs('short')['output_truncated_head'])
+        self.assertLessEqual(scans.WINDOW, 80000)
+
+    def test_cr_only_progress(self):
+        out = '\r'.join(f'progress {i}%' for i in range(30000)) + '\rDONE'
+        it = self.logs(out)
+        self.assertTrue(it['output_truncated_head'])
+        self.assertTrue(it['output_tail']['untrusted_text'].endswith('DONE'))
+
+    def test_minified_json_and_no_break_at_all(self):
+        it = self.logs('{"a":[' + ','.join(['1'] * 60000) + ']}END')
+        self.assertTrue(it['output_tail']['untrusted_text'].endswith('END'))
+        it = self.logs('z' * 200000 + 'END')
+        self.assertTrue(it['output_tail']['untrusted_text'].endswith('END'))
+        self.assertTrue(it['output_truncated_head'])
+
+    def test_straddling_secret_on_one_line_never_partial(self):
+        from limes.mcp.tools import scans
+        secret = 'PARTIALSECRETVALUE9'
+        pad = scans.WINDOW + 5 - len(secret) - len(' tail END')
+        out = self.logs('p' * 50 + ' ' + secret + ' tail END'.rjust(len(' tail END')) if False else
+                        'p' * 50 + secret + ' ' + 'o' * pad + ' END')
+        blob = json.dumps(out)
+        self.assertNotIn('SECRETVALUE9', blob)
+        self.assertNotIn('ECRETVALUE', blob)
