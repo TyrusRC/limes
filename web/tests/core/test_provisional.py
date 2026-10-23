@@ -4,8 +4,9 @@ from rest_framework.test import APIClient
 from rolepermissions.roles import assign_role
 
 from dashboard import activity
+from dashboard.stats import _risky_assets
 from dashboard.views import on_user_logged_in
-from limes import scoring
+from limes import scoring, waivers
 from limes.alerts.issues import sync_issues
 from limes.checks.catalogue import CHECKS, PROVISIONAL
 from startScan.models import Asset, TrackedIssue
@@ -59,6 +60,30 @@ class ProvisionalTest(CategoryBase):
             self.assertEqual(after[c]['grade'], 'N/A')
             self.assertTrue(after[c]['provisional'])
         self.assertEqual(scoring.forecast(p, [], self.now)['score'], before['score'])
+
+    def test_waived_provisional_and_top_penalties_unchanged(self):
+        a = self.host('a.x.com')  # two scored penalties: fewer than TOP_PENALTIES, so a provisional row would show
+        self.check(a, 'web.hsts_missing', 'fail')
+        self.check(a, 'tls.cert_expired', 'fail')
+        before = scoring.project_score(self.p, self.now)
+        self.assertEqual(len(before['top_penalties']), 2)
+        self.check(a, 'net.exposed_jupyter', 'fail')
+        self.check(a, 'leak.supabase_secret_key', 'fail')
+        sync_issues(self.p, now=self.now)
+        issue = TrackedIssue.objects.get(asset=a, key='net.exposed_jupyter')
+        waivers.create_waiver(issue, 'accepted_risk', 'ok', User.objects.create(username='w'), now=self.now)
+        after = scoring.project_score(self.p, self.now)
+        self.assertEqual(after['waived_count'], before['waived_count'])
+        self.assertEqual(after['top_penalties'], before['top_penalties'])
+        self.assertFalse([r for r in after['top_penalties'] if r['issue'] in PROVISIONAL])
+
+    def test_risky_assets_ignore_provisional_severities(self):
+        a = self.host('a.x.com')
+        self.check(a, 'web.hsts_missing', 'fail')
+        self.check(a, 'net.exposed_jupyter', 'fail')  # critical, provisional
+        penalties, _ = scoring.current_issues(self.p, now=self.now)
+        rows = _risky_assets({a: penalties[a.id]})
+        self.assertEqual(rows[0]['counts'], {'critical': 0, 'high': 0, 'medium': 1, 'low': 0})
 
     def test_provisional_worst_severity_has_no_ceiling(self):
         self.assertEqual(scoring._score({'leak.supabase_secret_key': 4, 'web.hsts_missing': 2}), 925)

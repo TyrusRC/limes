@@ -73,12 +73,13 @@ def _sev_counts(categories):
 def _risky_assets(live):
     """Assessed assets below the maximum, weakest first, scored the way the headline is."""
     from limes import scoring
+    from limes.checks.catalogue import PROVISIONAL
     rows = []
     for a, cats in live.items():
         score = scoring._score(cats)
         if score < scoring.MAX_SCORE:
             rows.append({'value': a.value, 'kind': a.kind, 'score': score, 'grade': scoring.grade(score),
-                         'last_seen': a.last_seen, 'counts': _sev_counts(cats.values())})
+                         'last_seen': a.last_seen, 'counts': _sev_counts(s for k, s in cats.items() if k not in PROVISIONAL)})
     rows.sort(key=lambda r: (r['score'], r['value']))
     return rows[:RISKY_LIMIT]
 

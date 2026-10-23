@@ -67,9 +67,13 @@ def grade(score):
     return next(g for floor, g in GRADES if score >= floor)
 
 
-def scored_assets(project):
+def _owned_assets(project, kinds):
     return Asset.objects.filter(project=project, scope_tier__in=('owned_root', 'owned_host'),
-                                kind__in=('root_domain', 'hostname', 'ip')).exclude(state='retired')
+                                kind__in=kinds).exclude(state='retired')
+
+
+def scored_assets(project):
+    return _owned_assets(project, ('root_domain', 'hostname', 'ip'))
 
 
 def _owned_domains(project):
@@ -110,8 +114,7 @@ def _root_of(value, roots):
 
 def issue_assets(project):
     """Assets whose issues are tracked: scored_assets plus owned ranges and ASNs (reputation listings live there)."""
-    return Asset.objects.filter(project=project, scope_tier__in=('owned_root', 'owned_host'),
-                                kind__in=('root_domain', 'hostname', 'ip', 'cidr', 'asn')).exclude(state='retired')
+    return _owned_assets(project, ('root_domain', 'hostname', 'ip', 'cidr', 'asn'))
 
 
 def _fresh_checks(project, now=None, assets=None):

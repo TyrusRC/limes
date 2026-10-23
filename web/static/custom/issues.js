@@ -331,7 +331,7 @@ function issues_init() {
 				return '<span class="' + (issue_is_ip(d) ? 'mono' : '') + '">' + issue_esc(d) + '</span>';
 			})},
 			{data: 'title', className: 'l-col-wider', render: plain(function(d, row) {
-				return '<button type="button" class="l-link-btn issue_open" data-id="' + Number(row.id) + '">' + issue_esc(d) + '</button>' + (row.provisional ? ' <span class="badge l-badge-fp">Provisional</span>' : '');
+				return '<button type="button" class="l-link-btn issue_open" data-id="' + Number(row.id) + '">' + issue_esc(d) + '</button>' + (row.provisional ? ' <span class="badge l-badge-prov">Provisional</span>' : '');
 			})},
 			{data: 'severity', render: plain(function(d) {
 				return ISSUE_SEVERITY[d] ? '<span class="sev-' + ISSUE_SEVERITY[d] + '">' + issue_sev_name(d) + '</span>' : issue_esc(d);
