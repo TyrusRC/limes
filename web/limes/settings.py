@@ -49,6 +49,7 @@ CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before 
 # Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
 # share of each monitor tick's budget the queue may take
 EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
+LIVE_POLL_SECONDS = max(0, env.int('LIMES_LIVE_POLL_SECONDS', default=30))  # Overview refresh; 0 turns polling off
 EVENT_QUEUE_MAX = max(1, env.int('LIMES_EVENT_QUEUE_MAX', default=1000))
 EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
 EVENT_BURST = max(1, env.int('LIMES_EVENT_BURST', default=200))

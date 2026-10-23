@@ -131,7 +131,7 @@ def _monitoring(project, now):
 def _recent_changes(project):
     from startScan.models import ChangeEvent
     evs = ChangeEvent.objects.filter(project=project).select_related('asset').order_by('-created_at', '-id')[:LIST_LIMIT]
-    return [{'kind': e.kind, 'label': CHANGE_LABELS.get(e.kind, e.kind), 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
+    return [{'id': e.id, 'kind': e.kind, 'label': CHANGE_LABELS.get(e.kind, e.kind), 'title': e.title, 'severity': e.severity, 'created_at': e.created_at,
              'asset': e.asset.value if e.asset else None} for e in evs]
 
 

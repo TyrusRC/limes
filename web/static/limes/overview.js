@@ -92,3 +92,132 @@
   new MutationObserver(function () { chart.updateOptions(options(), false, false); })
     .observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 })();
+
+/* Overview live updates: poll the project's live endpoint for new change events and the Real-time card.
+   Everything in the payload is untrusted: it reaches the DOM only through textContent, and the icon classes come from
+   the fixed map below, never from the payload. One request at a time; paused while the tab is hidden; backs off on errors. */
+(function () {
+  var root = document.getElementById('ov_live');
+  var feed = document.getElementById('dash_changes_feed');
+  if (!root || !feed) return;
+  var poll = parseInt(root.dataset.poll, 10);
+  if (!(poll > 0)) return;
+  var url = root.dataset.url;
+  var since = parseInt(root.dataset.since, 10) || 0;
+  var MAX_ROWS = 6, MAX_BACKOFF = 300;
+  var delay = poll, timer = null, inflight = false, lastOk = Date.now();
+
+  var ICONS = {  // kind -> [circle class, icon class]
+    issue_fixed: ['ov-fi-ok', 'fe-check'], issue_new: ['ov-fi-bad', 'fe-alert-triangle'],
+    issue_regressed: ['ov-fi-bad', 'fe-rotate-ccw'], waiver_expired: ['ov-fi-waived', 'fe-clock'],
+    score_dropped: ['ov-fi-warn', 'fe-trending-down'], asset_missing: ['ov-fi-warn', 'fe-eye-off'],
+    asset_auto_confirmed: ['ov-fi-ok', 'fe-globe'], asset_new: ['ov-fi-warn', 'fe-plus-circle'],
+    cert_new: ['ov-fi-warn', 'fe-shield'], dns_changed: ['ov-fi-warn', 'fe-shuffle'],
+    monitoring_degraded: ['ov-fi-bad', 'fe-wifi-off'], monitoring_restored: ['ov-fi-ok', 'fe-wifi']
+  };
+  var PILLS = {Live: 'ov-rt-healthy', Idle: 'ov-rt-healthy', Degraded: 'ov-rt-degraded'};  // anything else is "off"
+
+  function fmtAge(s) {  // mirrors the rt_age template filter
+    if (typeof s !== 'number' || !isFinite(s)) return '—';
+    s = Math.max(0, Math.floor(s));
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    return Math.floor(s / 86400) + 'd';
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function row(ev) {
+    var icon = ICONS[ev.kind] || ['', 'fe-activity'];
+    var li = el('li', 'ov-feed-new');
+    li.dataset.id = String(ev.id);
+    var circle = el('span', 'ov-fi ' + icon[0]);
+    circle.setAttribute('aria-hidden', 'true');
+    circle.appendChild(el('i', icon[1]));
+    var text = el('div', 'ov-feed-text');
+    text.appendChild(el('div', 'ov-feed-title', String(ev.title)));
+    text.appendChild(el('div', 'ov-feed-sub', String(ev.label) + (ev.asset ? ' · ' + String(ev.asset) : '')));
+    var time = el('time', 'ov-feed-time', 'just now');
+    var when = new Date(ev.created_at);
+    if (!isNaN(when)) { time.setAttribute('datetime', when.toISOString()); time.title = when.toLocaleString(); }
+    li.appendChild(circle); li.appendChild(text); li.appendChild(time);
+    return li;
+  }
+
+  function addEvents(events) {
+    var added = false;
+    events.forEach(function (ev) {
+      if (typeof ev.id !== 'number' || ev.id <= since) return;
+      since = ev.id;
+      feed.insertBefore(row(ev), feed.firstChild);
+      added = true;
+    });
+    while (feed.children.length > MAX_ROWS) feed.removeChild(feed.lastChild);
+    if (added) {
+      var empty = document.getElementById('dash_changes_empty');
+      if (empty) empty.hidden = true;
+      var stale = document.getElementById('live_stale');
+      if (stale) stale.hidden = false;
+    }
+  }
+
+  function pick(obj, path) {
+    return path.split('.').reduce(function (o, k) { return o !== null && typeof o === 'object' ? o[k] : undefined; }, obj);
+  }
+
+  function showCard(card) {
+    Array.prototype.forEach.call(document.querySelectorAll('#dash_realtime [data-rt]'), function (n) {
+      var v = pick(card, n.dataset.rt);
+      n.textContent = n.dataset.fmt === 'age' ? fmtAge(v) : (v === null || v === undefined || v === '' ? (n.dataset.rt === 'reason_text' || n.dataset.rt === 'watch.last_error_summary' ? '' : '—') : String(v));
+    });
+    var pill = document.querySelector('#dash_realtime .ov-rt-pill');
+    if (pill) pill.className = 'ov-rt-pill ' + (Object.prototype.hasOwnProperty.call(PILLS, card.label) ? PILLS[card.label] : 'ov-rt-off');
+  }
+
+  function schedule(ms) {
+    clearTimeout(timer);
+    timer = setTimeout(tick, ms);
+  }
+
+  function tick() {
+    if (inflight || document.visibilityState !== 'visible') return;
+    inflight = true;
+    var more = false;
+    fetch(url + '?since=' + since, {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+      .then(function (r) {
+        if (!r.ok) throw new Error('status ' + r.status);
+        return r.json();
+      })
+      .then(function (body) {
+        if (!body || !Array.isArray(body.events)) throw new Error('bad payload');
+        addEvents(body.events);
+        if (body.realtime && typeof body.realtime === 'object') showCard(body.realtime);
+        more = body.events.length >= 20;  // a full page: there may be more waiting
+        delay = poll;
+        lastOk = Date.now();
+      })
+      .catch(function () { delay = Math.min(delay * 2, MAX_BACKOFF); })
+      .then(function () {
+        inflight = false;
+        if (document.visibilityState === 'visible') schedule(more ? 1000 : delay * 1000);
+      });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') { clearTimeout(timer); return; }
+    // back in view: refresh at once if the data is older than one interval, else wait out the rest of it
+    var age = Date.now() - lastOk;
+    schedule(age > poll * 1000 ? 0 : Math.max(0, delay * 1000 - age));
+  });
+
+  var stale = document.getElementById('live_stale');
+  if (stale) stale.addEventListener('click', function () { location.reload(); });
+
+  if (document.visibilityState === 'visible') schedule(delay * 1000);
+})();
