@@ -79,6 +79,8 @@ def forecast_score(caller, project: Slug, issue_ids: Annotated[list[RowId], Fiel
     """The project score if these issues were fixed. Ids from other projects are ignored."""
     p = access.project_for(caller, project)
     now = timezone.now()
+    # NOTE: forecast runs project_score twice, uncached, per call (about 2 x the Overview's cold cost). Upgrade
+    # path: a per-project cache of the score inputs shared with stats.
     out = scoring.forecast(p, issue_ids, now)
     out['current_score'] = out['score'] - out['delta'] if out['delta'] is not None else scoring.project_score(p, now)['score']
     return out

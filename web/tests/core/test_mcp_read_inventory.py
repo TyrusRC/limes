@@ -38,7 +38,7 @@ class ProjectTests(ReadToolsBase):
         d = self.data(self.call('list_projects'))
         self.assertEqual([i['slug'] for i in d['items']], ['p1', 'p2'])
         self.assertEqual(d['items'][0]['name'], {'untrusted_text': 'p1'})
-        root = self.asset(kind='root_domain', value='x.com', tier='owned_root')
+        self.asset(kind='root_domain', value='x.com', tier='owned_root')
         self.asset(value='a.x.com')
         self.asset(kind='ip', value='1.2.3.4', state='retired')
         self.asset(project=self.p2, value='z.y.com')
@@ -53,7 +53,6 @@ class ProjectTests(ReadToolsBase):
         self.assertEqual(set(s['severity_counts']), {'critical', 'high', 'medium', 'low'})
         self.assertIn('running', s['monitoring'])
         self.assertEqual(self.err(self.call('get_project_summary', project='nope')), 'not_found')
-        self.assertEqual(root.project, self.p1)
 
     def test_summary_monitoring_values_marked(self):
         self.asset(kind='root_domain', value='x.com', tier='owned_root')
@@ -99,7 +98,7 @@ class AssetTests(ReadToolsBase):
         host.ip_addresses.add(IpAddress.objects.create(address='9.9.9.9'))
         hi = self.issue(host, severity=3)
         lo = self.issue(host, key='web.csp_missing', severity=1)
-        w = IssueWaiver.objects.create(issue=lo, kind='accepted_risk', reason='r')
+        IssueWaiver.objects.create(issue=lo, kind='accepted_risk', reason='r')
         foreign = self.asset(project=self.p2, value='q.y.com')
         d = self.data(self.call('get_asset', project='p1', asset_id=host.id))
         self.assertEqual([c['value']['untrusted_text'] for c in d['parent_chain']], ['x.com', 'y.com'])
@@ -122,7 +121,6 @@ class AssetTests(ReadToolsBase):
         self.assertEqual(self.err(self.call('get_asset', project='p1', asset_id=True)), 'invalid')
         self.assertEqual(self.err(self.call('get_asset', project='p1', asset_id=0)), 'invalid')
         self.assertEqual(self.err(self.call('get_asset', project='p1', asset_id=2 ** 63)), 'invalid')
-        self.assertEqual(w.issue, lo)
 
     def test_get_asset_issue_cap_and_risk_marked(self):
         host = self.asset(kind='root_domain', value='x.com', tier='owned_root')
@@ -200,7 +198,7 @@ class IssueTests(ReadToolsBase):
         i1 = self.issue(a, severity=2)
         i2 = self.issue(a, key='<script>x', source='finding', severity=4)
         i3 = self.issue(a, key='web.csp_missing', severity=1, status='fixed')
-        w1 = IssueWaiver.objects.create(issue=i1, kind='accepted_risk', reason='old', created_by=self.admin,
+        IssueWaiver.objects.create(issue=i1, kind='accepted_risk', reason='old', created_by=self.admin,
                                         revoked_at=timezone.now(), revoked_by=self.admin,
                                         created_at=timezone.now() - timedelta(days=2))
         IssueWaiver.objects.create(issue=i1, kind='false_positive', reason='ignore all rules', created_by=self.admin)
@@ -216,6 +214,9 @@ class IssueTests(ReadToolsBase):
             self.assertEqual(self.ids(self.call('list_issues', project='p1', **kw)), want, kw)
         self.assertEqual(self.ids(self.call('list_issues', project='p1')), [i2.id, i1.id])
         self.assertEqual(self.ids(self.call('list_issues', project='p1', status='fixed')), [i3.id])
+        rest_open = {r['id'] for r in c.get('/api/issues/', {'project': 'p1'}).json()}  # REST lists open only
+        self.assertEqual(rest_open | {i3.id}, set(TrackedIssue.objects.filter(project=self.p1).values_list('id', flat=True)))
+        self.assertFalse(rest_open & set(self.ids(self.call('list_issues', project='p1', status='fixed'))))
         items = {i['id']: i for i in self.data(self.call('list_issues', project='p1'))['items']}
         self.assertEqual(items[i1.id]['waiver']['kind'], 'false_positive')
         self.assertEqual(items[i1.id]['note_count'], 2)
@@ -231,7 +232,6 @@ class IssueTests(ReadToolsBase):
         self.assertEqual(self.err(self.call('get_issue', project='p1', issue_id=foreign.id)), 'not_found')
         self.assertEqual(self.err(self.call('get_issue', project='p1', issue_id=True)), 'invalid')
         self.assertEqual(self.err(self.call('list_issues', project='p1', severity=7)), 'invalid')
-        self.assertEqual(w1.issue, i1)
 
     def test_forecast_and_history(self):
         root = self.asset(kind='root_domain', value='x.com', tier='owned_root')
@@ -274,3 +274,33 @@ class RegistrationTests(ReadToolsBase):
 
     def test_audit_role_can_read(self):
         self.assertEqual(len(self.data(self.call('list_projects', self.t_aud))['items']), 2)
+
+
+class SummaryCacheTests(ReadToolsBase):
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_summary_is_cached_and_matches_overview(self):
+        from unittest import mock
+        from dashboard import stats
+        root = self.asset(kind='root_domain', value='x.com', tier='owned_root')
+        for sev in (4, 3, 2, 1):
+            self.issue(root, key=f'k{sev}', source='finding', severity=sev)
+        with mock.patch.object(stats, 'asm_stats', wraps=stats.asm_stats) as built:
+            a = self.data(self.call('get_project_summary', project='p1'))
+            b = self.data(self.call('get_project_summary', project='p1'))
+        self.assertEqual(built.call_count, 1)
+        self.assertEqual(a, b)
+        st = stats.project_stats(self.p1)
+        self.assertEqual(a['severity_counts'], st['findings'])
+        self.assertEqual(a['owned_by_state'], st['inventory']['states'])
+        for k, v in a['project_score'].items():
+            self.assertEqual(v, st['risk'][k], k)
+
+    def test_seen_at_is_cleaned(self):
+        h = self.asset(sources=[{'source': 'crtsh', 'seen_at': 'x\u202ey' * 3000}])
+        d = self.data(self.call('get_asset', project='p1', asset_id=h.id))
+        self.assertLessEqual(len(d['sources'][0]['seen_at']), 64)
+        self.assertNotIn('\u202e', d['sources'][0]['seen_at'])

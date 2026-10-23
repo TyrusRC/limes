@@ -8,7 +8,7 @@ from limes import monitor, scoring
 from limes.mcp import access
 from limes.mcp.access import McpError
 from limes.mcp.registry import tool
-from limes.mcp.results import Cursor, Limit, RowId, Slug, iso, page, untrusted
+from limes.mcp.results import Cursor, Limit, RowId, Slug, clean, iso, page, untrusted
 from limes.tasks.attribution import REVIEW
 from dashboard import stats
 from startScan.asset_models import ASSET_KINDS, ASSET_STATES, SCOPE_TIERS, Asset, IssueWaiver, TrackedIssue
@@ -38,7 +38,6 @@ def waived_exists(now):
     return Exists(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk')))
 
 
-
 @tool(title='List projects')
 def list_projects(caller, cursor: Cursor = None, limit: Limit = 50):
     """List the projects you can read (slug, name, creation time), ordered by slug."""
@@ -54,17 +53,17 @@ def _counts(qs, field):
 def get_project_summary(caller, project: Slug):
     """The project's score and grade, asset counts, open issue counts by severity and monitoring state: the numbers the Overview shows."""
     p = access.project_for(caller, project)
-    now = timezone.now()
-    score = scoring.project_score(p, now)
+    # The Overview's cached stats (60 s, same cache key): a repeated call must not recompute the score.
+    cached = stats.project_stats(p)
+    score, monitoring = cached['risk'], cached['monitoring']
     assets = Asset.objects.filter(project=p)
-    monitoring = stats._monitoring(p, now)
     return {
         'project_score': {k: score[k] for k in ('version', 'score', 'grade', 'raw_score', 'raw_grade', 'waived_count',
                                                 'coverage', 'check_coverage', 'asset_count', 'unassessed')},
         'assets_by_kind': _counts(assets, 'kind'),
         'assets_by_state': _counts(assets, 'state'),
-        'owned_by_state': stats._inventory(p)['states'],
-        'severity_counts': stats._findings(stats._live_issues(p)),
+        'owned_by_state': cached['inventory']['states'],
+        'severity_counts': cached['findings'],
         'monitoring': {
             'enabled': monitoring['enabled'], 'running': monitoring['running'],
             'next_due': [{'value': untrusted(r['value']), 'cadence_tier': r['cadence_tier']}
@@ -104,6 +103,8 @@ def _parent_chain(asset):
 
 
 def _risk(asset):
+    # NOTE: asset_breakdown rebuilds the project's baselines on every call (a few queries per owned root), so a
+    # get_asset loop costs that each time. Upgrade path: a per-project cache of the baselines, as stats has.
     if not scoring.scored_assets(asset.project).filter(pk=asset.pk).exists():
         return None
     out = scoring.asset_breakdown(asset)
@@ -140,7 +141,8 @@ def get_asset(caller, project: Slug, asset_id: RowId):
         'added_by': a.added_by.username if a.added_by else None, 'missed_count': a.missed_count,
         'parent_chain': _parent_chain(a),
         'sources': [{'source': untrusted(s.get('source')), 'evidence': untrusted(s.get('evidence')),
-                     'seen_at': s.get('seen_at')} for s in a.sources or [] if isinstance(s, dict)],
+                     'seen_at': clean(str(s['seen_at']), 64) if s.get('seen_at') else None}
+                    for s in a.sources or [] if isinstance(s, dict)],
         'tracking': tracking,
         'ip_addresses': [ip.address for ip in a.ip_addresses.all()],
         'technologies': [untrusted(t.name) for t in a.technologies.all()],
