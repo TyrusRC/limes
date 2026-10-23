@@ -37,6 +37,13 @@ Issues
       </select>
     </div>
     <div class="l-field">
+      <label for="f_kev">Exploitability</label>
+      <select id="f_kev" class="form-select">
+        <option value="">Any</option>
+        <option value="true">Known exploited</option>
+      </select>
+    </div>
+    <div class="l-field">
       <label for="f_waived">Waiver status</label>
       <select id="f_waived" class="form-select">
         <option value="">Waived and not waived</option>
@@ -62,12 +69,13 @@ Issues
     <thead>
       <tr>
         <th class="l-col-check"><input type="checkbox" class="form-check-input" id="issue_pick_all" aria-label="Select all issues on this page"></th>
-        <th>Asset</th><th>Issue</th><th>Severity</th><th>Source</th><th>First seen</th><th>Status</th><th>Notes</th>
+        <th>Asset</th><th>Issue</th><th>Severity</th><th>KEV</th><th>EPSS</th><th>Source</th><th>First seen</th><th>Status</th><th>Notes</th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 </section>
+<p class="l-muted small mt-2">CISA KEV (CC0) &middot; EPSS by FIRST.org / Empirical Security</p>
 
 <div class="modal fade" id="issue_modal" tabindex="-1" aria-labelledby="im_title" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable l-issue-dialog">
@@ -81,6 +89,7 @@ Issues
             <span id="im_source"></span>
             <span>First seen <span id="im_first"></span></span>
           </div>
+          <div class="l-meta-row" id="im_cves" hidden></div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>

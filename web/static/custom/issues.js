@@ -64,11 +64,18 @@ function issue_post(url, body) {
 
 function issue_url() {
 	var u = '/api/issues/?project=' + encodeURIComponent(issue_project());
-	['severity', 'category', 'source', 'waived'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
 		var v = document.getElementById('f_' + k).value;
 		if (v) u += '&' + k + '=' + encodeURIComponent(v);
 	});
 	return u;
+}
+
+// EPSS probability (0..1) as a percent for people; null when FIRST has no score.
+function issue_epss(v) {
+	if (v === null || v === undefined) return '';
+	var pct = Number(v) * 100;
+	return (pct > 0 && pct < 1 ? '<1' : String(Math.round(pct))) + '%';
 }
 
 function issue_waiver_text(w) {
@@ -239,6 +246,15 @@ function issue_modal(id) {
 	issue_text('im_asset', row.asset);
 	issue_text('im_source', (row.source === 'check' ? 'Check \u00b7 ' + row.key : 'Finding') + (row.provisional ? ' \u00b7 Provisional, not scored' : ''));
 	issue_text('im_first', issue_date(row.first_seen));
+	var cves = document.getElementById('im_cves');
+	cves.replaceChildren();
+	(row.cves || []).forEach(function(c) {
+		var item = issue_el('span', 'mono', c.cve);
+		if (c.kev) item.append(' ', issue_el('span', 'badge l-badge-kev', 'KEV'));
+		if (c.epss !== null && c.epss !== undefined) item.append(' ', issue_el('span', 'l-muted', 'EPSS ' + issue_epss(c.epss)));
+		cves.append(item);
+	});
+	cves.hidden = !(row.cves || []).length;
 	issue_render_waiver(row);
 	issue_text('im_note_count', '');
 	document.getElementById('issue_notes').replaceChildren();
@@ -306,7 +322,7 @@ function issues_init() {
 	var plain = function(fn) { return function(d, t, row) { return t === 'display' ? fn(d, row) : d; }; };
 	// ?category=, ?severity=, ?source= and ?waived= preselect a filter, but only to a value the select already offers
 	var query = new URLSearchParams(location.search);
-	['severity', 'category', 'source', 'waived'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
 		var sel = document.getElementById('f_' + k), v = query.get(k);
 		if (!sel) return;
 		if (v && Array.prototype.some.call(sel.options, function(o) { return o.value === v; })) sel.value = v;
@@ -336,6 +352,12 @@ function issues_init() {
 			{data: 'severity', render: plain(function(d) {
 				return ISSUE_SEVERITY[d] ? '<span class="sev-' + ISSUE_SEVERITY[d] + '">' + issue_sev_name(d) + '</span>' : issue_esc(d);
 			})},
+			{data: 'kev', className: 'text-nowrap', render: plain(function(d) {
+				return d ? '<span class="badge l-badge-kev">KEV</span>' : '<span class="l-muted"><span aria-hidden="true">\u2013</span><span class="visually-hidden">Not known exploited</span></span>';
+			})},
+			{data: 'epss', className: 'text-nowrap', render: plain(function(d) {
+				return d === null || d === undefined ? '<span class="l-muted"><span aria-hidden="true">\u2013</span><span class="visually-hidden">No EPSS score</span></span>' : issue_esc(issue_epss(d));
+			})},
 			{data: 'source', className: 'text-nowrap', render: plain(function(d, row) {
 				return d === 'check' ? '<span class="l-muted">Check</span> <span class="mono">' + issue_esc(row.key) + '</span>' : '<span class="l-muted">Finding</span>';
 			})},
@@ -350,7 +372,7 @@ function issues_init() {
 	});
 	$('#issue_results_filter input').attr('aria-label', 'Filter this list');
 	$('#issue_results').on('error.dt', function() { issue_toast('Could not load issues.'); });
-	['severity', 'category', 'source', 'waived'].forEach(function(k) {
+	['severity', 'category', 'source', 'waived', 'kev'].forEach(function(k) {
 		document.getElementById('f_' + k).addEventListener('change', function() { table.ajax.url(issue_url()).load(); });
 	});
 	table.on('draw', issue_forecast);

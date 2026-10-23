@@ -291,7 +291,7 @@ Overview
   </section>
 
   <section class="card ov-wide" id="dash_top_risks" aria-labelledby="h-top">
-    <div class="ov-card-head"><h2 id="h-top">Top risks</h2><span class="ov-meta">Open issues costing the most points, waived ones left out</span></div>
+    <div class="ov-card-head"><h2 id="h-top">Top risks</h2><span class="ov-meta">Open issues costing the most points, waived ones left out. Ties: known exploited, then EPSS</span></div>
     {% if top_risks %}
     <div class="table-responsive ov-flush">
       <table class="table mb-0 ov-table">
@@ -299,7 +299,7 @@ Overview
         <tbody>
         {% for r in top_risks %}
           <tr>
-            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span></td>
+            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}{% widthratio r.epss 1 100 as pct %}EPSS {% if pct == "0" %}&lt;1{% else %}{{ pct }}{% endif %}%{% endif %}</span>{% endif %}</td>
             <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
             <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
             <td class="ov-num">{% if r.provisional %}<span class="ov-tag">Provisional</span>{% else %}−{{ r.points }}{% endif %}</td>

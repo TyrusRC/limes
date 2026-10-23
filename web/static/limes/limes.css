@@ -976,6 +976,8 @@ a.ov-meta:hover { color: var(--brand-ink); }
 .ov-table td.ov-asset a:hover { color: var(--brand-ink); }
 .ov-table a[class^="sev-"]:hover { text-decoration: none; filter: brightness(0.97); }
 .ov-tag { font-size: 11px; font-weight: 600; color: var(--ink-3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; background: var(--surface); white-space: nowrap; }
+.ov-tag.ov-kev { color: var(--sev-critical-ink); background: var(--sev-critical-bg); border-color: transparent; }
+.badge.l-badge-kev { color: var(--sev-critical-ink); background: var(--sev-critical-bg); border-color: transparent; font-weight: 600; }
 .ov-cell-score { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .ov-counts { display: inline-flex; gap: 4px; }
 .ov-count { min-width: 24px; height: 22px; padding: 0 6px; border-radius: var(--radius-sm); font-size: var(--text-xs); display: inline-grid; place-items: center; color: var(--ink-3); font-weight: 500; }

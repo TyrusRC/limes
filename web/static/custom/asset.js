@@ -202,6 +202,16 @@ function asset_reputation_html(checks) {
 	return rows ? asset_section('Reputation', asset_table(['Feed', 'Entry', 'Listed since', 'Credit'], rows)) : '';
 }
 
+// InternetDB banner-matched CVEs of an IP: not verified, never scored. CVE ids are validated server-side; escape anyway.
+function asset_unverified_cves_html(rows) {
+	if (!rows || !rows.length) return '';
+	var body = rows.map(function(r) {
+		var pct = r.epss === null || r.epss === undefined ? '' : (r.epss > 0 && r.epss < 0.01 ? '<1' : Math.round(r.epss * 100)) + '%';
+		return '<tr><td class="mono">' + asset_esc(r.cve) + '</td><td>' + (r.kev ? '<span class="badge l-badge-kev">KEV</span>' : '') + '</td><td class="text-nowrap">' + asset_esc(pct) + '</td></tr>';
+	}).join('');
+	return asset_section('Unverified CVEs (InternetDB banner)', '<p class="l-hint">Banner match, not verified, not scored.</p>' + asset_table(['CVE', 'Known exploited', 'EPSS'], body));
+}
+
 // Score sub-line under the title, and the top-penalties card above the Assets table.
 function load_asset_score() {
 	var box = document.getElementById('asset_score'), card = document.getElementById('asset_penalties');
@@ -304,7 +314,7 @@ function get_asset_modal(id) {
 			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
 			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
 			asset_cadence_html(a) +
-			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
+			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
 			asset_intel_html(a.enrichment) + '</div>'
 		);

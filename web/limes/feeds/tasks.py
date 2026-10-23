@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from limes import reputation
+from limes import exploit, reputation
 from limes.celery import app
 from limes.continuous import tick_lock
 from limes.feeds import sources, store
@@ -46,6 +46,7 @@ def refresh_feeds():
             if store.fetch(feed, now, SESSION) == 'ok':
                 changed.append(feed.name)
         _reputation(changed)
+        _cve_intel(changed, now)
         return {'fetched': fetched, 'changed': changed}
 
 
@@ -64,6 +65,22 @@ def _reputation(changed):
         raise
     except Exception as e:  # noqa: BLE001 - the downloads are done; a failed evaluation retries next tick
         logger.warning('reputation evaluation failed: %s', type(e).__name__)  # type only: never a message
+
+
+INTEL = 'limes:cve_intel:refreshed'
+
+
+def _cve_intel(changed, now):
+    """Refresh the KEV/EPSS markers when either feed changed, and at least daily (newly held CVEs need a row)."""
+    try:
+        if not (set(changed) & {'kev', 'epss'}) and cache.get(INTEL) is not None:
+            return
+        exploit.refresh_cve_intel(now)
+        cache.set(INTEL, 1, 24 * 3600)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as e:  # noqa: BLE001 - the downloads are done; a failed refresh retries next tick
+        logger.warning('cve intel refresh failed: %s', type(e).__name__)
 
 
 def refresh_one(name, force=False):

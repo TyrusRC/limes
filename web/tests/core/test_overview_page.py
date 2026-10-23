@@ -176,7 +176,7 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 85  # a rise must be justified in review
+OVERVIEW_QUERIES = 86  # a rise must be justified in review
 WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome; none from the cards
 
 
