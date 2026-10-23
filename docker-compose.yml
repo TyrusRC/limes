@@ -177,6 +177,9 @@ services:
     <<: *app
     profiles: [realtime]  # opt-in certificate watch (~157 GB/day inbound, inferred): `make up REALTIME=1`
     entrypoint: ["python3", "manage.py", "ct_watch"]
+    environment:
+      <<: *app-env
+      LIMES_LOG_DIR: /tmp  # the root filesystem is read-only; settings would otherwise open errors.log in /usr/src/app
     mem_limit: ${CT_WATCH_MEM:-512m}
     # NOTE: the supervisor holds the full .env and runs as root, and certspotter is its child (with an allowlisted
     # environment). Upgrade path: a separate non-root certspotter container sharing only the spool volume, no env_file.

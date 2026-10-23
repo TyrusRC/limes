@@ -300,6 +300,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 '''
 LOGGING settings
 '''
+# Log files go in the working directory unless LIMES_LOG_DIR is set (the read-only ct-watch container sets /tmp).
+LOG_DIR = env('LIMES_LOG_DIR', default='')
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': True,
@@ -307,7 +309,7 @@ LOGGING = {
         'file': {
             'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': 'errors.log',
+            'filename': os.path.join(LOG_DIR, 'errors.log'),
         },
         'null': {
             'class': 'logging.NullHandler'
@@ -331,14 +333,14 @@ LOGGING = {
         'db': {
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'brief',
-            'filename': 'db.log',
+            'filename': os.path.join(LOG_DIR, 'db.log'),
             'maxBytes': 1024,
             'backupCount': 3
         },
         'celery': {
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'simple',
-            'filename': 'celery.log',
+            'filename': os.path.join(LOG_DIR, 'celery.log'),
             'maxBytes': 1024 * 1024 * 100,  # 100 mb
         },
     },
