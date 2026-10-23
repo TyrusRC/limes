@@ -4,6 +4,7 @@ from datetime import timedelta
 from unittest import mock
 
 import dns.resolver
+from django.conf import settings
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -33,7 +34,7 @@ class Base(MonitorBase):
     def wipe(self):
         for k in self.r.scan_iter('limes:evq*'):
             self.r.delete(k)
-        self.r.delete('limes:tick:monitor_assets')
+        self.r.delete('limes:tick:monitor_assets', monitor.FULL_TICK_KEY)
 
     def host(self, value, **kw):
         kw.setdefault('last_resolved_at', self.now - HOUR)
@@ -76,6 +77,14 @@ class DrainTest(Base):
         self.assertEqual(len(left), 9)
         for k, s in left.items():
             self.assertEqual(s, scores[k])
+
+    def test_failed_check_is_counted_as_error_not_skipped(self):
+        eq.enqueue(self.host('h.x.com'), 'manual')
+        with mock.patch.object(monitor, 'check_asset', side_effect=RuntimeError('boom')):
+            monitor.monitor_assets()
+        counts = eq.snapshot(timezone.now())['counts']
+        self.assertEqual((counts.get('error'), counts.get('skipped'), len(eq.snapshot(timezone.now())['latency'])),
+                         (1, None, 0))
 
     def test_events_only_idle_and_locked(self):
         h = self.host('h.x.com')
@@ -124,13 +133,57 @@ class DrainTest(Base):
         self.assertEqual((self.calls, get.calls), ([], []))
         self.assertEqual(eq.snapshot(timezone.now())['counts']['skipped'], 1)
 
-    def test_redis_outage_degrades_to_cadence(self):
+    def test_lock_outage_fails_closed(self):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        self.host('d.x.com', last_resolved_at=None)
+        with mock.patch('limes.continuous.get_redis_connection', side_effect=RedisConnectionError('x')), \
+                mock.patch.object(monitor, 'check_asset') as ck:
+            self.assertEqual(monitor.monitor_assets(), {'checked': 0, 'reason': 'locked'})
+        ck.assert_not_called()
+
+    def test_queue_outage_degrades_to_cadence(self):
         self.host('d.x.com', last_resolved_at=None)
         from redis.exceptions import ConnectionError as RedisConnectionError
         with mock.patch.object(eq, 'get_redis_connection', side_effect=RedisConnectionError('x')), \
                 mock.patch.object(monitor, 'check_asset', return_value={'status': 'ok', 'project_id': self.p.id}) as ck:
             self.assertEqual(monitor.monitor_assets(), {'checked': 1})
         self.assertEqual(ck.call_args.kwargs.get('reason'), None)
+
+
+class FullTickFairnessTest(Base):
+    def at(self, ts):
+        return mock.patch.object(monitor.timezone, 'now', return_value=timezone.datetime.fromtimestamp(ts, timezone.utc))
+
+    def test_drain_yields_when_the_full_tick_is_due_soon(self):
+        h = self.host('h.x.com')
+        eq.enqueue(h, 'manual')
+        t0 = 1_900_000_000.0
+        ok = {'status': 'ok', 'project_id': self.p.id}
+        with mock.patch.object(monitor, 'check_asset', return_value=ok) as ck:
+            with self.at(t0):
+                self.assertEqual(monitor.monitor_assets(events_only=True), {'checked': 1})  # no full tick seen yet
+            eq.enqueue(self.host('i.x.com'), 'manual')
+            monitor.stamp_full_tick(t0)
+            with self.at(t0 + 40):
+                self.assertEqual(monitor.monitor_assets(events_only=True), {'checked': 0, 'reason': 'yield'})
+            with self.at(t0 + 10):
+                self.assertEqual(monitor.monitor_assets(events_only=True), {'checked': 1})
+        self.assertEqual(ck.call_count, 2)
+
+    def test_full_tick_runs_every_minute_under_a_permanent_queue(self):
+        # two contenders: a drain every 15 s holds the lock for the event share once it runs, the full tick fires on
+        # the minute and is locked out while a drain holds the lock
+        held_until, full, base = 0.0, 0, 1_900_000_000.0
+        for step in range(40):
+            t = base + step * 15
+            if step % 4 == 0:
+                if t >= held_until:
+                    full += 1
+                    monitor.stamp_full_tick(t)
+                    held_until = t + 5  # a quiet full tick
+            elif not monitor.drain_yields(t) and t >= held_until:
+                held_until = t + monitor.TICK_BUDGET.total_seconds() * settings.EVENT_SHARE
+        self.assertEqual(full, 10)
 
 
 class CtRecheckTest(Base):
@@ -157,6 +210,36 @@ class CtRecheckTest(Base):
         self.assertEqual(self.claim_and_check({}, t2), 'ct_recheck_24h')
         self.assertEqual(self.r.zcard(eq.QUEUE), 0)
         self.assertEqual(ChangeEvent.objects.filter(kind='asset_new').count(), 1)
+
+    def test_pending_ct_intent_survives_a_lost_item(self):
+        h = self.host('n.x.com', last_resolved_at=None)
+        eq.enqueue(h, 'ct_new')
+        eq.claim_due(self.now + timedelta(seconds=5), 10)  # claimed, then the check never ran (covered drop, crash, soft limit)
+        self.assertEqual(self.reload(h).enrichment['monitor']['pending'], 'ct_new')
+        self.check(h, {}, now=self.now, reason='manual')  # any later check honours it
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new', asset=h).count(), 1)
+        self.assertNotIn('pending', self.reload(h).enrichment['monitor'])
+        self.assertEqual(eq.claim_due(self.now + timedelta(hours=2), 10)[0][1], 'ct_recheck_1h')
+        self.check(h, {}, now=self.now)  # nothing pending now: no second event
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new', asset=h).count(), 1)
+
+    @override_settings(EVENT_QUEUE_MAX=1)
+    def test_pending_ct_intent_survives_a_refused_enqueue(self):
+        eq.enqueue(self.host('a.x.com'), 'manual')
+        h = self.host('n.x.com', last_resolved_at=None)
+        self.assertEqual(eq.enqueue(h, 'ct_new'), 'overflow')
+        self.check(h, public('n.x.com'), now=self.now)  # the cadence check picks it up
+        self.assertEqual(ChangeEvent.objects.filter(kind='asset_new', asset=h).count(), 1)
+
+    def test_covered_drop_keeps_pending(self):
+        root = self.asset('root_domain', 'x.com', tier='owned_root')
+        h = self.host('n.x.com', parent=root)
+        d = Domain.objects.create(name='x.com', project=self.p, insert_date=timezone.now())
+        ScanHistory.objects.create(domain=d, scan_type=EngineType.objects.create(engine_name='e', yaml_configuration='{}'),
+                                   scan_status=IN_PROGRESS[0], start_scan_date=timezone.now())
+        eq.enqueue(h, 'ct_new')
+        monitor.monitor_assets()
+        self.assertEqual(self.reload(h).enrichment['monitor']['pending'], 'ct_new')
 
     def test_resolving_recheck_queues_no_more(self):
         h = self.host('n.x.com', last_resolved_at=None)
@@ -216,6 +299,7 @@ class TriggerTest(Base):
             h = self.host(f'h{i}.x.com')
             h.ip_addresses.add(link)
             hosts.append(h)
+        Asset.objects.filter(pk=hosts[0].pk).update(state='retired')
         with mock.patch('limes.scoring.current_issues', return_value=({}, {ip.id})):
             sync_issues(self.p)  # first sync: silent baseline, marks the ip bucket synced
         with mock.patch('limes.scoring.current_issues',
@@ -225,7 +309,7 @@ class TriggerTest(Base):
         self.assertEqual(TrackedIssue.objects.filter(key='net.exposed_rdp').count(), 1)
         queued = [int(m) for m in self.r.zrange(eq.QUEUE, 0, -1)]
         self.assertEqual(len(queued), 20)
-        self.assertTrue(set(queued) <= {h.id for h in hosts})
+        self.assertTrue(set(queued) <= {h.id for h in hosts[1:]})  # a retired host is not queued
         self.assertEqual(self.r.hget(eq.WHY, str(queued[0])).decode().split('|')[0], 'exposed')
 
 
@@ -257,7 +341,8 @@ class DnsWatchTest(Base):
         n, _ = self.watch({('h.x.com', 'A'): dns.resolver.NoNameservers})
         self.assertEqual(n, 0)
         self.assertFalse(ChangeEvent.objects.exists())
-        self.assertEqual(self.reload(h).enrichment['dns']['watched_at'], (self.now - timedelta(minutes=16)).isoformat())
+        self.assertGreater(self.reload(h).enrichment['dns']['watched_at'], (self.now - timedelta(minutes=1)).isoformat())
+        self.assertEqual(self.watch({('h.x.com', 'A'): dns.resolver.NoNameservers})[0], 0)  # stamped: not retried
 
     @override_settings(DNS_WATCH_PER_TICK=1)
     def test_per_tick_oldest_first(self):

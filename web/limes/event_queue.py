@@ -22,14 +22,22 @@ DAY_TTL = 2 * 86400
 LAT_MAX = 1000
 
 # KEYS: queue, why, burst. ARGV: member, score, why, cap, burst limit (-1 = not charged), burst ttl.
-# An earlier score wins (and takes its reason). Only a request that would be queued is charged to the burst budget,
+# An earlier score wins (and takes its reason), except that a pending ct_recheck_* keeps its reason so the chain
+# is not lost (it then runs early). NOTE: a recheck pulled forward by another event leaves the later recheck of the
+# chain undone. Upgrade path: keep two members. Only a request that would be queued is charged to the burst budget,
 # and a refused one is not.
 ENQUEUE_LUA = """
 local old = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if old then
   if tonumber(ARGV[2]) < tonumber(old) then
     redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
-    redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+    local prev = redis.call('HGET', KEYS[2], ARGV[1]) or ''
+    local why = string.match(prev, '^(ct_recheck_[^|]*)|')
+    if why then
+      redis.call('HSET', KEYS[2], ARGV[1], why .. '|' .. ARGV[2])  -- a pending recheck keeps its reason
+    else
+      redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+    end
   end
   return 'dup'
 end
@@ -124,6 +132,8 @@ def enqueue(asset, reason, delay=0, now=None):
     if not monitor._ours(asset):
         count('skipped', now=now)
         return 'skipped'
+    if reason == 'ct_new':
+        monitor.mark_pending(asset, 'ct_new')  # before any queue gate: a dropped item must not lose the discovery
     now = _utc(now)
     cool = None
     try:

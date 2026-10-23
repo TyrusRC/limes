@@ -44,6 +44,17 @@ class EnqueueTests(Base):
         self.assertAlmostEqual(got[0][2], self.now.timestamp(), delta=2)
         self.assertEqual(eq.claim_due(self.now, 10), [])
 
+    @override_settings(EVENT_COOLDOWN=0)
+    def test_pending_recheck_keeps_its_reason_but_may_come_earlier(self):
+        eq.enqueue(self.h, 'ct_recheck_24h', delay=23 * 3600, now=self.now)
+        self.assertEqual(eq.enqueue(self.h, 'manual', now=self.now), 'dup')
+        (aid, reason, due), = eq.claim_due(self.now, 10)
+        self.assertEqual((aid, reason), (self.h.id, 'ct_recheck_24h'))
+        self.assertAlmostEqual(due, self.now.timestamp(), delta=2)
+        eq.enqueue(self.h, 'manual', now=self.now)  # a plain entry is still overwritten by an earlier one
+        eq.enqueue(self.h, 'exposed', now=self.now - timedelta(seconds=5))
+        self.assertEqual(eq.claim_due(self.now, 10)[0][1], 'exposed')
+
     def test_cooldown(self):
         self.assertEqual(eq.enqueue(self.h, 'manual', now=self.now), 'queued')
         self.assertEqual(eq.enqueue(self.h, 'manual', now=self.now), 'cooled')
@@ -79,7 +90,7 @@ class EnqueueTests(Base):
         eq.enqueue(self.h, 'ct_recheck_1h', delay=3600, now=self.now)
         self.assertEqual(eq.enqueue(self.h, 'ct_cert', now=self.now), 'dup')
         got = eq.claim_due(self.now, 10)
-        self.assertEqual([(a, r) for a, r, _ in got], [(self.h.id, 'ct_cert')])
+        self.assertEqual([(a, r) for a, r, _ in got], [(self.h.id, 'ct_recheck_1h')])  # moved up, reason kept
 
     @override_settings(EVENT_COOLDOWN=0)
     def test_later_request_keeps_earlier_entry(self):

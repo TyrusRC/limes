@@ -53,7 +53,7 @@ CT_EVENT_WINDOW = env.int('LIMES_CT_EVENT_WINDOW', default=3600)  # seconds one 
 CT_NEW_HOSTS_PER_HOUR = env.int('LIMES_CT_NEW_HOSTS_PER_HOUR', default=200)  # owned hostnames certificates may add per project per hour
 # crown-jewel names re-resolved (DNS only) at most this often (s; 0 = off), at most DNS_WATCH_PER_TICK a tick
 DNS_WATCH_INTERVAL = env.int('LIMES_DNS_WATCH_INTERVAL', default=900)
-DNS_WATCH_PER_TICK = env.int('LIMES_DNS_WATCH_PER_TICK', default=30)
+DNS_WATCH_PER_TICK = max(1, env.int('LIMES_DNS_WATCH_PER_TICK', default=30))
 EVENT_SHARE = min(0.9, max(0.1, env.float('LIMES_EVENT_SHARE', default=0.5)))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.

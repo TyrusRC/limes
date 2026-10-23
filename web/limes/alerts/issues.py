@@ -36,7 +36,7 @@ def _queue_exposed(project, ip):
     """After commit: queue the owned hostnames that resolve to a newly exposed IP, so their risk checks refresh."""
     from limes import event_queue
     hosts = list(Asset.objects.filter(project=project, kind='hostname', scope_tier__in=('owned_root', 'owned_host'),
-                                      ip_addresses__address=ip.value).distinct().order_by('id')[:EXPOSED_HOSTS])
+                                      ip_addresses__address=ip.value).exclude(state='retired').distinct().order_by('id')[:EXPOSED_HOSTS])
 
     def go():
         for h in hosts:

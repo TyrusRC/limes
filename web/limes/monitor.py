@@ -12,6 +12,8 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django_redis import get_redis_connection
+from redis.exceptions import RedisError
 
 from dashboard.models import Project
 from dashboard.stats import invalidate
@@ -235,7 +237,7 @@ def _names(a, resolve, now):
     cname = collect._lookup(resolve, name, 'CNAME')
     addrs = list(v4) + list(v6)
     before = set(Asset.objects.filter(project_id=a.project_id, kind='ip', value__in=addrs).values_list('value', flat=True))
-    inventory.record_resolution(a, {'a': v4, 'aaaa': v6, 'cname': [c.rstrip('.') for c in cname] if cname != 'error' else []})
+    inventory.record_resolution(a, {'a': v4, 'aaaa': v6, 'cname': [c.rstrip('.') for c in cname] if cname != 'error' else None})
     Asset.objects.filter(pk=a.pk).update(last_resolved_at=now)  # record_resolution stamps the wall clock
     a.mark_missing_or_seen(True)
     new = list(Asset.objects.filter(project_id=a.project_id, kind='ip', value__in=set(addrs) - before, scope_tier__in=OWNED))
@@ -260,6 +262,18 @@ def _internetdb(ip, get, now):
     return data or {}, True
 
 
+def mark_pending(asset, what):
+    """Persist a CT discovery on the asset until a check has acted on it: the queue is at-most-once and bounded, the
+    row is not. The next check that runs for the asset emits the event and clears the flag (the monitor dict is
+    rewritten without it)."""
+    with transaction.atomic():
+        row = Asset.objects.select_for_update().get(pk=asset.pk)
+        mon = (row.enrichment or {}).get('monitor') or {}
+        if mon.get('pending') != what:
+            row.enrichment = {**(row.enrichment or {}), 'monitor': {**mon, 'pending': what}}
+            row.save(update_fields=['enrichment'])
+
+
 def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, observers=None, reason=None):
     """One light check of one monitored asset. Re-reads the row first: stopped, rejected or covered assets are
     skipped untouched. Returns the stored enrichment['monitor'] plus the project id, or {'status': 'skipped'}."""
@@ -269,6 +283,7 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     if a is None:
         return {'status': 'skipped'}
     resolve = _once(resolve)
+    pending = ((a.enrichment or {}).get('monitor') or {}).get('pending')  # CT intent whose queue item may have been lost
     baseline = a.last_resolved_at is None  # the first check records silently, like a range's first sweep
     _mark_attempt(a, now)
     status, reason, new = 'ok', None, []
@@ -303,14 +318,15 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
         status, reason = 'refused', result['refused']
     if result['timeout']:
         status, reason = 'timeout', 'the host did not finish answering within the check deadline'
-    if trigger == 'ct_new':  # the new host's own event is never silent; its children keep the first-check rule
+    discovered = trigger == 'ct_new' or pending == 'ct_new'  # whichever check runs first honours a CT discovery
+    if discovered:  # the new host's own event is never silent; its children keep the first-check rule
         events.record_asset_new(a.project, a, ports=ports, enqueue=False)
-    if trigger in ('ct_new', 'ct_recheck_1h') and status == 'unresolved':
+    if status == 'unresolved':
         # a pre-certificate name may not resolve yet: look again 1 h and 24 h after discovery
-        if trigger == 'ct_new':
-            enqueue(a, 'ct_recheck_1h', delay=3600, now=now)
-        else:
+        if trigger == 'ct_recheck_1h':
             enqueue(a, 'ct_recheck_24h', delay=23 * 3600, now=now)
+        elif discovered:
+            enqueue(a, 'ct_recheck_1h', delay=3600, now=now)
     if not baseline:
         for ip in new:
             events.record_asset_new(a.project, ip, ports=open_ports.get(ip.value, ()))
@@ -329,14 +345,43 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     return {**monitor, 'project_id': a.project_id}
 
 
+FULL_TICK_KEY = 'limes:tick:monitor_assets:full'
+FULL_EVERY = 60.0  # the beat interval of the full tick
+
+
+def stamp_full_tick(ts):
+    try:
+        get_redis_connection('default').set(FULL_TICK_KEY, ts, ex=300)
+    except RedisError as e:
+        logger.warning('full tick stamp unavailable (%s)', type(e).__name__)
+
+
+def drain_yields(ts):
+    """True when the next full tick is due within one drain's budget: a drain started now could hold the tick lock
+    past it and starve the cadence and the DNS watch. No stamp (first run, expired, Redis down) means no yield.
+    NOTE: this gives the full tick the lock at the cost of event latency up to about half a minute in the worst
+    phase. Upgrade path: a dedicated event worker."""
+    try:
+        last = get_redis_connection('default').get(FULL_TICK_KEY)
+        age = ts - float(last) if last is not None else 0
+    except (RedisError, ValueError) as e:
+        logger.warning('full tick stamp unreadable (%s)', type(e).__name__)
+        return False
+    return age >= FULL_EVERY - TICK_BUDGET.total_seconds() * settings.EVENT_SHARE - 5
+
+
 @app.task(name='monitor_assets', bind=False)
 def monitor_assets(events_only=False):
     """Beat tick: check the queued events, then (unless events_only) the due assets within TICK_BUDGET, then sync
     issues and send alerts per touched project."""
     if not settings.CONTINUOUS_SCANS:
         return {'checked': 0, 'reason': 'disabled'}
-    if events_only and not due_count(timezone.now()):
-        return {'checked': 0, 'reason': 'idle'}
+    if events_only:
+        now = timezone.now()
+        if not due_count(now):
+            return {'checked': 0, 'reason': 'idle'}
+        if drain_yields(now.timestamp()):
+            return {'checked': 0, 'reason': 'yield'}
     with tick_lock('monitor_assets') as got:
         return _tick(events_only) if got else {'checked': 0, 'reason': 'locked'}
 
@@ -348,6 +393,8 @@ def dns_watch(now, deadline, resolve=collect._resolve):
         return 0
     cutoff = (now - timedelta(seconds=settings.DNS_WATCH_INTERVAL)).isoformat()
     rows = []
+    # NOTE: loads every crown-jewel name each full tick and filters in Python. Upgrade path: a DB-side filter on
+    # enrichment__dns__watched_at or a dedicated column.
     for a in Asset.objects.filter(scope_tier__in=OWNED, kind__in=('hostname', 'root_domain'), cadence_tier='crown_jewel') \
             .exclude(state='retired'):
         watched = ((a.enrichment or {}).get('dns') or {}).get('watched_at') or ''
@@ -362,6 +409,7 @@ def dns_watch(now, deadline, resolve=collect._resolve):
         try:
             v4, v6, cname = (collect._lookup(resolve, name, t) for t in ('A', 'AAAA', 'CNAME'))
             if 'error' in (v4, v6, cname):
+                dns_delta.touch(a, now)  # no evidence either way; retried at the next interval, not first in line
                 continue
             event = dns_delta.observe(a, {'a': v4, 'aaaa': v6, 'cname': [c.rstrip('.') for c in cname]},
                                       now=now, watched=True)
@@ -379,9 +427,12 @@ def _tick(events_only=False):
     now = timezone.now()
     start = time.monotonic()
     share = TICK_BUDGET.total_seconds() * settings.EVENT_SHARE
+    if not events_only:
+        stamp_full_tick(now.timestamp())
     checked, touched = 0, set()
 
     def run_check(asset, reason=None):
+        """'checked', 'skipped' (no longer ours) or 'error'."""
         nonlocal checked
         try:
             out = check_asset(asset, reason=reason)
@@ -389,12 +440,12 @@ def _tick(events_only=False):
             raise
         except Exception:
             logger.exception('monitor check failed for asset %s', asset.pk)
-            return False
+            return 'error'
         if out.get('status') == 'skipped':
-            return False
+            return 'skipped'
         checked += 1
         touched.add(asset.project_id)
-        return True
+        return 'checked'
 
     # Event checks first, one claim at a time so what the share leaves unreached keeps its score and place.
     # NOTE: event checks and the DNS watch share LIMES_EVENT_SHARE of the tick (25 s by default), so the cadence keeps
@@ -414,10 +465,10 @@ def _tick(events_only=False):
         if asset.kind == 'hostname' and _root_of(asset.value, scanning.get(asset.project_id, [])):
             count('covered')  # the root's scan in progress covers it
             continue
-        ok = run_check(asset, reason or None)
-        count('checked' if ok else 'skipped')
-        if ok:
-            record_latency(timezone.now().timestamp() - enqueued if enqueued else 0)
+        outcome = run_check(asset, reason or None)
+        count(outcome)
+        if outcome == 'checked' and enqueued:
+            record_latency(timezone.now().timestamp() - enqueued)
     if not events_only:
         dns_watch(now, start + share)
         deadline = start + TICK_BUDGET.total_seconds()
