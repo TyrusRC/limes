@@ -21,6 +21,21 @@ class NormaliseTest(SimpleTestCase):
             self.assertIsNone(match.normalise(bad), repr(bad))
 
 
+    def test_lookalike_unicode_is_not_folded_onto_ascii(self):
+        for bad in ['\uff57\uff57\uff57.x.com',  # full-width www
+                    '\u24e7.com',                 # circled x
+                    'x\u200b.com',                # zero-width space
+                    'x\u00ad.com',                # soft hyphen
+                    '\ufb01.x.com',               # fi ligature
+                    '\u212a.x.com',               # Kelvin sign (lowercases to ASCII k)
+                    'xn--zzzz\u00e9.com',
+                    'xn--.x.com']:
+            self.assertIsNone(match.normalise(bad), repr(bad))
+        self.assertNotEqual(match.normalise('stra\u00dfe.x.com'), ('strasse.x.com', False))  # IDNA 2008 keeps sharp s apart
+        m, _ = match.classify(['\u212aelvin.x.com', 'www.x.com'], idx(roots={'x.com': [(1, 10)]}))
+        self.assertEqual(m[1].owned, [('www.x.com', False, 10)])
+
+
 class ClassifyTest(SimpleTestCase):
     def test_longest_root_wins(self):
         i = idx(roots={'x.com': [(1, 10)], 'a.x.com': [(1, 11)]})

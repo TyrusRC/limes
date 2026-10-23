@@ -59,6 +59,6 @@ def record_asset_new(project, asset, ports=(), enqueue=True):
     title = f'New {asset.kind} {asset.value}' + (f' exposes {key[len("net.exposed_"):]}' if key else '')
     parent = asset.parent.value if asset.parent_id else None
     event = safe_record(project, 'asset_new', title, asset=asset, detail={'ports': ports, 'parent': parent}, key=key)
-    if enqueue:
-        event_queue.enqueue(asset, 'asset_new')
+    if enqueue:  # after commit: a rolled-back asset must not be queued
+        transaction.on_commit(lambda: event_queue.enqueue(asset, 'asset_new'))
     return event

@@ -45,7 +45,15 @@ def record_sighting(project_id, domain, now):
     if m is None:
         return False
     with transaction.atomic():
-        row = m.objects.select_for_update().filter(project_id=project_id, domain=domain).first()
+        ascii_form = _ascii(domain)
+        if ascii_form is None:
+            return False
+        try:
+            unicode_form = ascii_form.encode('ascii').decode('idna')
+        except UnicodeError:
+            unicode_form = ascii_form
+        row = (m.objects.select_for_update()  # the row may store either form
+               .filter(project_id=project_id, domain__in={domain, ascii_form, unicode_form}).first())
         if row is None:
             return False
         ct = row.ct if isinstance(row.ct, dict) else {}

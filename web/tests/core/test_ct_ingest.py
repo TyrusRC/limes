@@ -178,6 +178,86 @@ class IngestTest(Base):
         self.assertAlmostEqual(float(self.r.lrange(f'limes:ct:age:{self.now:%Y%m%d}', 0, -1)[0]), 90, delta=0.01)
 
 
+class SentEventTest(Base):
+    def seed(self):
+        ingest.seed_issuers(self.root, {"let's encrypt"}, self.now - timedelta(days=1))
+
+    def test_cert_after_digest_sent_starts_a_new_row(self):
+        self.run_ingest(['a.x.com'], tbs='1' * 64)
+        ChangeEvent.objects.update(digested_at=self.now)
+        self.run_ingest(['b.x.com'], tbs='2' * 64)
+        self.assertEqual(sorted(ChangeEvent.objects.values_list('detail__count', flat=True)), [1, 1])
+        self.assertEqual(ChangeEvent.objects.filter(digested_at__isnull=True).count(), 1)
+
+    def test_alert_row_already_sent_is_not_folded_into(self):
+        args = (self.p, self.root, ['a.x.com'], True, 'Evil CA', self.now)
+        ingest.record_cert_event(*args)
+        ChangeEvent.objects.update(notified_at=self.now)
+        ingest.record_cert_event(*args)
+        self.assertEqual(ChangeEvent.objects.filter(immediate=True).count(), 2)
+
+    def test_second_rogue_issuer_gets_its_own_alert(self):
+        self.seed()
+        self.run_ingest(['a.x.com'], tbs='1' * 64, issuer='O=Evil CA')
+        self.run_ingest(['b.x.com'], tbs='2' * 64, issuer='O=Rogue CA')
+        titles = sorted(ChangeEvent.objects.filter(immediate=True).values_list('title', flat=True))
+        self.assertEqual(titles, ['New certificate for x.com from a new issuer (Evil CA)',
+                                  'New certificate for x.com from a new issuer (Rogue CA)'])
+
+    def test_chat_syntax_in_issuer_is_neutralised(self):
+        self.seed()
+        self.run_ingest(['a.x.com'], issuer='O=<!channel> @everyone <@U123> <http://evil|click> [x](http://e)')
+        ev = ChangeEvent.objects.get(immediate=True)
+        for ch in '<>@[]':
+            self.assertNotIn(ch, ev.title + ev.detail['issuer'])
+
+
+class MultiRootTest(Base):
+    def test_cert_for_two_roots_updates_each(self):
+        z = Asset.objects.create(project=self.p, kind='root_domain', value='z.org', scope_tier='owned_root')
+        for r in (self.root, z):
+            ingest.seed_issuers(r, {"let's encrypt"}, self.now - timedelta(days=1))
+        self.run_ingest(['a.x.com', 'b.z.org'], issuer='O=Evil CA')
+        hot = ChangeEvent.objects.filter(immediate=True)
+        self.assertEqual({e.asset_id for e in hot}, {self.root.id, z.id})
+        for r in (self.root, z):
+            r.refresh_from_db()
+            self.assertIn('evil ca', r.enrichment['ct_issuers']['orgs'])
+        self.assertEqual(CertSighting.objects.count(), 1)
+
+    def test_subdomain_root_is_indexed(self):
+        shop = Asset.objects.create(project=self.p, kind='root_domain', value='shop.z.com', scope_tier='owned_root')
+        Asset.objects.create(project=self.p, kind='root_domain', value='co.uk', scope_tier='owned_root')
+        i = ingest.load_index()
+        self.assertEqual(i.roots['shop.z.com'], [(self.p.id, shop.id)])
+        self.assertNotIn('co.uk', i.roots)
+        self.run_ingest(['api.shop.z.com'])
+        self.assertEqual(Asset.objects.get(value='api.shop.z.com').parent, shop)
+
+
+class HostAllowanceTest(Base):
+    @override_settings(CT_NEW_HOSTS_PER_HOUR=5)
+    def test_hourly_cap_turns_the_rest_into_candidates(self):
+        for i in range(3):
+            self.run_ingest([f'h{i}-{j}.x.com' for j in range(4)], tbs=f'{i:064x}')
+        hosts = Asset.objects.filter(kind='hostname', scope_tier='owned_host').exclude(pk=self.www.pk)
+        cands = Asset.objects.filter(kind='hostname', scope_tier='candidate')
+        self.assertEqual((hosts.count(), cands.count()), (5, 7))
+        self.assertEqual(len(self.queued()), 5)
+
+    def test_redis_down_fails_closed_to_candidates(self):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        with mock.patch.object(ingest, 'get_redis_connection', side_effect=RedisConnectionError('x')):
+            ingest.ingest(self.rec(['new.x.com']), 'certspotter_api', ingest.load_index(), self.now)
+        self.assertEqual(Asset.objects.get(value='new.x.com').scope_tier, 'candidate')
+
+    def test_names_are_upserted_in_sorted_order(self):
+        from limes.tasks import inventory
+        with mock.patch.object(inventory, 'upsert_hostname_asset', wraps=inventory.upsert_hostname_asset) as up:
+            self.run_ingest(['c.x.com', 'a.x.com', 'b.x.com'])
+        self.assertEqual([c.args[1] for c in up.call_args_list], ['a.x.com', 'b.x.com', 'c.x.com'])
+
+
 class CoTenantTest(Base):
     def test_cotenants_become_candidates_with_hourly_cap(self):
         self.run_ingest(['www.x.com', 'shop.other.net'])
@@ -255,6 +335,54 @@ class ParseRecordTest(TestCase):
         self.assertIsNone(ingest.parse_record(self.good(entry_index=True))['entry_index'])
         self.assertIsNone(ingest.parse_record(self.good(cert_sha256='zz'))['cert_sha256'])
         self.assertIsNone(ingest.parse_record(self.good(not_before='9999999-01-01T00:00:00Z'))['not_before'])
+
+
+class PartialSeedTest(Base):
+    def test_partial_response_extends_history_without_baselining(self):
+        ingest.seed_issuers(self.root, {'A CA'}, self.now, complete=False)
+        self.root.refresh_from_db()
+        data = self.root.enrichment['ct_issuers']
+        self.assertEqual((data['seeded'], set(data['orgs'])), (False, {'a ca'}))
+        ingest.seed_issuers(self.root, {'B CA'}, self.now, complete=True)
+        self.root.refresh_from_db()
+        self.assertTrue(self.root.enrichment['ct_issuers']['seeded'])
+
+    def test_crtsh_response_at_the_row_cap_is_partial(self):
+        rows = [{'id': i, 'name_value': f'h{i}.x.com', 'issuer_name': 'O=LE'} for i in range(1, 4)]
+        with mock.patch.object(intel, 'MAX_NAMES_PER_ROOT', 3):
+            intel.run_crtsh(self.p, self.root, get=Fake(crtsh=(200, rows)))
+        self.root.refresh_from_db()
+        self.assertFalse(self.root.enrichment['ct_issuers']['seeded'])
+
+
+class LookalikeRowTest(Base):
+    def test_record_sighting_finds_a_unicode_stored_row(self):
+
+        class Row:
+            def __init__(self):
+                self.ct, self.domain, self.saved = None, 'b\u00fccher.example', False
+
+            def save(self, update_fields=None):
+                self.saved = True
+        row, seen = Row(), {}
+
+        class QS:
+            def select_for_update(self):
+                return self
+
+            def filter(self, **kw):
+                seen.update(kw)
+                return self
+
+            def first(self):
+                return row
+
+        class Model:
+            objects = QS()
+        with mock.patch.object(lookalikes, 'model', return_value=Model):
+            self.assertTrue(lookalikes.record_sighting(self.p.id, 'xn--bcher-kva.example', self.now))
+        self.assertEqual(seen['domain__in'], {'xn--bcher-kva.example', 'b\u00fccher.example'})
+        self.assertEqual(row.ct['count'], 1)
 
 
 class CrtshSeedTest(TestCase):

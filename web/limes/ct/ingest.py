@@ -36,6 +36,14 @@ _CONTROL = re.compile(r'[\x00-\x1f\x7f-\x9f  ]')
 _ORGS_KEY = 'ct_issuers'
 
 
+_CHAT = str.maketrans({'<': '\u2039', '>': '\u203a', '@': '\uff20', '[': '(', ']': ')', '`': "'"})
+
+
+def _chat_safe(v, limit):
+    """Text bound for event titles, which reach chat: no mention, link or markup syntax survives."""
+    return _text(v, limit).translate(_CHAT)
+
+
 def _text(v, limit):
     return _CONTROL.sub(' ', v)[:limit] if isinstance(v, str) else ''
 
@@ -87,7 +95,7 @@ def load_index():
     root_sets = {}
     rest = []
     for pid, aid, kind, tier, value in rows:
-        if kind == 'root_domain' and tier == 'owned_root' and domains.registrable(value) == value:
+        if kind == 'root_domain' and tier == 'owned_root' and domains.registrable(value):  # not a public suffix itself
             roots.setdefault(value, []).append((pid, aid))
             root_sets.setdefault(pid, set()).add(value)
         elif tier == 'owned_host':
@@ -142,9 +150,11 @@ def note_issuer(root, org_key, now):
     return _write_issuers(root, now, change)
 
 
-def seed_issuers(root, orgs, now):
+def seed_issuers(root, orgs, now, complete=True):
     """Learn the issuers crt.sh lists for still-valid certificates (about a year of history) and baseline the root.
-    Nothing is learned from an empty answer: a failed fetch must not mark the root baselined."""
+    Nothing is learned from an empty answer: a failed fetch must not mark the root baselined. A partial answer
+    (`complete` False: the response hit the row cap) extends the history silently and leaves the root unbaselined,
+    so the next run can finish the job."""
     keys = {k for k in (o.casefold() for o in orgs if isinstance(o, str)) if k}
     if not keys:
         return
@@ -152,7 +162,7 @@ def seed_issuers(root, orgs, now):
     def change(data):
         for k in keys:
             data['orgs'][k] = now.isoformat()
-        data['seeded'] = True
+        data['seeded'] = data['seeded'] or bool(complete)
     _write_issuers(root, now, change)
 
 
@@ -160,14 +170,21 @@ def seed_issuers(root, orgs, now):
 
 def record_cert_event(project, asset, names, immediate, issuer, now):
     """One cert_new row per asset and kind of urgency per CT_EVENT_WINDOW; later certificates count into it.
-    NOTE: the lock covers an existing row only, so two first certificates racing can both insert one."""
+    A row already sent (notified or digested) is never folded into: later certificates start a new row, and an
+    immediate row is per issuer, so a second rogue CA alerts on its own.
+    NOTE: the lock covers an existing row only, so two first certificates racing can both insert one. Root-anchored
+    events are serialised by note_issuer's root-row lock; only host-only projects can race. Upgrade path: lock the
+    project row."""
     names = [n for n in names if isinstance(n, str)]
-    issuer = _text(issuer, 200)
+    issuer = _chat_safe(issuer, 200)
     with transaction.atomic():
-        row = (ChangeEvent.objects.select_for_update()
-               .filter(kind='cert_new', project=project, asset=asset, immediate=immediate,
-                       created_at__gte=now - timedelta(seconds=settings.CT_EVENT_WINDOW))
-               .order_by('-created_at').first())
+        rows = (ChangeEvent.objects.select_for_update()
+                .filter(kind='cert_new', project=project, asset=asset, immediate=immediate,
+                        notified_at__isnull=True, digested_at__isnull=True,
+                        created_at__gte=now - timedelta(seconds=settings.CT_EVENT_WINDOW)))
+        if immediate:
+            rows = rows.filter(detail__issuer=issuer)
+        row = rows.order_by('-created_at').first()
         if row is not None:
             detail = dict(row.detail or {})
             detail['count'] = int(detail.get('count') or 1) + 1
@@ -224,6 +241,18 @@ def _cand_allow(root_id, now):
     return allow
 
 
+def _host_allow(project_id, now):
+    """One new owned hostname from certificates, within the project's hourly allowance (fails closed)."""
+    key = f'limes:ct:host:{project_id}:{now.astimezone(dt_tz.utc):%Y%m%d%H}'
+    try:
+        pipe = get_redis_connection('default').pipeline()
+        pipe.incr(key)
+        pipe.expire(key, 3600)
+        return pipe.execute()[0] <= settings.CT_NEW_HOSTS_PER_HOUR
+    except RedisError:
+        return False
+
+
 def _shown(name, wildcard):
     return f'*.{name}' if wildcard else name
 
@@ -255,13 +284,17 @@ def _project(project_id, pm, record, source, index, now, silent):
                 CertSighting.objects.filter(pk=sighting.pk).update(watch_seen_at=now)
             return False
         label = 'ct' if source == 'certspotter' else source
-        names = [(n, rid) for n, w, rid in ours if not w and n != roots[rid].value][:match.STORED_NAMES]
+        # sorted: watcher and poller lock rows in the same order, so they cannot deadlock on each other
+        names = sorted({(n, rid) for n, w, rid in ours if not w and n != roots[rid].value})[:match.STORED_NAMES]
         have = {a.value: a for a in Asset.objects.filter(project=project, kind='hostname',
                                                           value__in=[n for n, _ in names])}
         first = None
         for name, rid in names:
             a = have.get(name)
             if a is None:
+                if not _host_allow(project.id, now):  # over the hourly allowance: suggest it, never own it
+                    inventory.upsert_candidate(project, 'hostname', name, label, f'cert:{tbs[:16]}')
+                    continue
                 a = inventory.upsert_hostname_asset(project, name, parent=roots[rid], source=label,
                                                     evidence=f'cert:{tbs[:16]}')
                 reason = 'ct_new'
@@ -274,17 +307,23 @@ def _project(project_id, pm, record, source, index, now, silent):
         for _, aid in pm.hosts:
             if aid in host_assets:
                 queue.append((host_assets[aid], 'ct_cert'))
-        root = roots[ours[0][2]] if ours else None
-        anchor = first or root or (queue[0][0] if queue else None)
+        by_root = {}
+        for n, w, rid in ours:
+            by_root.setdefault(rid, []).append(_shown(n, w))
+        anchor = first or (roots[min(by_root)] if by_root else None) or (queue[0][0] if queue else None)
         if anchor is not None:
             sighting.asset = anchor
             sighting.save(update_fields=['asset'])
         for asset, reason in queue:
             transaction.on_commit(lambda a=asset, r=reason: event_queue.enqueue(a, r))
-        if root is not None and pm.others:
-            _cotenants(project, root, tbs, ours, pm.others, index, now)
-        if not silent and (root or anchor) is not None:
-            _announce(project, root or anchor, root is not None, shown, org, now)
+        for rid in sorted(by_root):  # every root the certificate covers, in a fixed order
+            if pm.others:
+                _cotenants(project, roots[rid], tbs, [o for o in ours if o[2] == rid], pm.others, index, now)
+        if not silent and by_root:
+            for rid in sorted(by_root):
+                _announce(project, roots[rid], True, by_root[rid], org, now)
+        elif not silent and anchor is not None:
+            _announce(project, anchor, False, shown, org, now)
     return True
 
 

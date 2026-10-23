@@ -72,10 +72,15 @@ class AssetNewTest(TestCase):
 
     def test_enqueues_a_check_unless_told_not_to(self):
         with mock.patch('limes.alerts.events.event_queue.enqueue') as enq:
-            events.record_asset_new(self.p, self.a)
+            with self.captureOnCommitCallbacks(execute=False) as cbs:
+                events.record_asset_new(self.p, self.a)
+            enq.assert_not_called()  # nothing is queued until the transaction commits
+            for cb in cbs:
+                cb()
             enq.assert_called_once_with(self.a, 'asset_new')
             enq.reset_mock()
-            events.record_asset_new(self.p, self.a, enqueue=False)
+            with self.captureOnCommitCallbacks(execute=True):
+                events.record_asset_new(self.p, self.a, enqueue=False)
             enq.assert_not_called()
 
     def test_no_parent_and_failure_never_raises(self):

@@ -112,7 +112,8 @@ def run_crtsh(project, root, get=http.get_json):
                                    done=done)
         candidates, capped = candidates + n, capped + c
     from limes.ct import ingest  # lazy: ingest imports this module
-    ingest.seed_issuers(root, crtsh.issuers(rows) if status == 200 else set(), timezone.now())
+    complete = isinstance(rows, list) and len(rows) < MAX_NAMES_PER_ROOT  # a response at the cap may be truncated
+    ingest.seed_issuers(root, crtsh.issuers(rows) if status == 200 else set(), timezone.now(), complete=complete)
     return {'hostnames': hostnames, 'candidates': candidates, 'candidates_capped': capped}
 
 

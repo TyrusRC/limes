@@ -4,6 +4,7 @@ hostile: they are normalised first, then matched only by exact lookup on dot-sep
 import re
 from typing import NamedTuple
 
+import idna
 import validators
 
 MAX_NAMES = 1000
@@ -33,16 +34,27 @@ def normalise(raw):
     """(name, wildcard) or None. Extends crtsh._clean: IDNA, charset, length and a single leading `*.` only."""
     if not isinstance(raw, str) or any(d in raw for d in _DOTS):
         return None
-    n = raw.strip().lower()
+    n = raw.strip()
     if n.endswith('.'):
         n = n[:-1]
     wildcard = n.startswith('*.')
     if wildcard:
         n = n[2:]
-    try:
-        n = n.encode('idna').decode('ascii')
-    except UnicodeError:
-        return None
+    if n.isascii():
+        n = n.lower()
+        try:  # an xn-- label must be real punycode
+            for label in n.split('.'):
+                if label.startswith('xn--'):
+                    idna.decode(label)
+        except (idna.IDNAError, UnicodeError):
+            return None
+    else:
+        # strict IDNA 2008, no case or compatibility mapping: full-width, circled, zero-width, soft-hyphen, ligature
+        # and Kelvin forms are refused instead of being folded onto an ASCII name (IDNA 2003 would fold them)
+        try:
+            n = idna.encode(n, strict=True, uts46=False).decode('ascii').lower()
+        except (idna.IDNAError, UnicodeError):
+            return None
     if len(n) > 253 or not _NAME.fullmatch(n) or validators.domain(n) is not True:
         return None
     return n, wildcard
