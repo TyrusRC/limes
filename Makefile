@@ -13,6 +13,11 @@ ifeq ($(LLM), 1)
 SERVICES += ollama
 COMPOSE_ALL_FILES += --profile llm
 endif
+# The MCP server is optional: `make up MCP=1` adds it.
+ifeq ($(MCP), 1)
+SERVICES += mcp
+COMPOSE_ALL_FILES += --profile mcp
+endif
 
 # Check if 'docker compose' command is available, otherwise use 'docker-compose'
 DOCKER_COMPOSE := $(shell if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)

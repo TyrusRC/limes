@@ -97,3 +97,95 @@ def classify_asset_entry(raw):
     if domains.registrable(value) is None:
         return _err(f'public suffix cannot be a root domain: {s}')
     return _ok('root_domain' if domains.registrable(value) == value else 'hostname', value)
+
+
+def add_assets(project, raw, tier, reason, user, active_authorized=None, create_only=False):
+    """Add owned assets by explicit entries (the REST view and the MCP tool both call this). `raw` is a list of
+    entries, `tier` one of owned_root/owned_host/co_brand, `active_authorized` None when the caller did not give it.
+    create_only: an existing row of any tier is left exactly as it is (no promotion, no new reason or source).
+    Returns {'added', 'existing', 'skipped', 'warnings'}."""
+    from django.conf import settings
+    from django.db import transaction
+    from dashboard.stats import invalidate
+    from limes.owned_ranges import addresses, range_addresses
+    from limes.scan_target import ensure_scan_target
+    from limes.tasks.inventory import _append_source
+    from startScan.models import Asset
+    set_authorized = tier == 'co_brand' and active_authorized is not None
+    authorized = active_authorized
+    added, existing, skipped, warnings = 0, 0, 0, []
+    roots = []  # owned roots added, promoted or re-added, given a scan target once the transaction commits
+    cap = settings.RANGE_ADDRESS_CAP
+    # NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
+    # Upgrade: select_for_update on the project row around this read and the writes.
+    used = range_addresses(project)
+    with transaction.atomic():
+        for entry in raw:
+            if not isinstance(entry, str):
+                skipped += 1
+                warnings.append('entry must be a string')
+                continue
+            c = classify_asset_entry(entry)
+            if c['error']:
+                skipped += 1
+                warnings.append(c['error'])
+                continue
+            # The project cap is all-or-nothing per entry, against a running total across the request.
+            # Only a missing row or a promoted candidate/dependency adds addresses: an owned row is already
+            # in `used`, a rejected or co_brand one is skipped or left alone below.
+            # NOTE: one query per CIDR (about 24 per range, 5000 entries per request at most). Upgrade:
+            # read the project's cidr tiers once before the loop.
+            new_cidrs = []
+            if c['kind'] == 'cidr' and tier in ('owned_root', 'owned_host'):  # only owned ranges count toward the cap
+                for v in c['values']:
+                    row_tier = Asset.objects.filter(project=project, kind='cidr', value=v).values_list(
+                        'scope_tier', flat=True).first()
+                    if row_tier in (None, 'candidate', 'dependency'):
+                        new_cidrs.append(v)
+            need = sum(addresses(v) for v in new_cidrs)
+            if need and used + need > cap:
+                skipped += len(c['values'])
+                warnings.extend(
+                    f"{entry.strip()} would add {need} addresses, over this project's cap of {cap} "
+                    f'({used} in use): add fewer ranges or ask the operator to raise LIMES_RANGE_ADDRESS_CAP'
+                    for _ in c['values'])
+                continue
+            used += need
+            if c['warning'] and c['warning'] not in warnings:
+                warnings.append(c['warning'])
+            for value in c['values']:
+                asset, created = Asset.objects.get_or_create(
+                    project=project, kind=c['kind'], value=value,
+                    defaults={'scope_tier': tier, 'state': 'active'})
+                # Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
+                # those are explicit decisions made through Confirm/Reject.
+                if not created and asset.scope_tier == 'rejected':
+                    skipped += 1
+                    warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+                    continue
+                if not created and create_only:
+                    existing += 1
+                    continue
+                promote = created or asset.scope_tier in ('candidate', 'dependency')
+                if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
+                    existing += 1
+                    roots.append(asset)  # idempotent: re-adding links a root whose earlier clash was cleared
+                    continue
+                if promote:
+                    asset.scope_tier = tier
+                    asset.state = 'active'
+                if set_authorized:
+                    asset.active_authorized = authorized
+                asset.added_by = user
+                if reason:
+                    asset.decision_reason = reason
+                _append_source(asset, 'manual', reason or f'added by {user.get_username()}')
+                asset.save()
+                added += 1
+                roots.append(asset)
+    for asset in roots:
+        warning = ensure_scan_target(asset)[1]
+        if warning:
+            warnings.append(warning)
+    invalidate(project.id)
+    return {'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}

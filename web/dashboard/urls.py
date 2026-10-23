@@ -17,6 +17,10 @@ urlpatterns = [
         views.profile,
         name='profile'),
     path(
+        '<slug:slug>/api-tokens/',
+        views.api_tokens,
+        name='api_tokens'),
+    path(
         '<slug:slug>/admin_interface/',
         views.admin_interface,
         name='admin_interface'),

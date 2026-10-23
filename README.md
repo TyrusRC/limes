@@ -109,13 +109,10 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 ## Status
 
 Built and merged: inventory and discovery, continuous tracking of added assets, the risk score and
-checks, change alerts, waivers, notes and the fix forecast, and the portal in light and dark themes.
+checks, change alerts, waivers, notes and the fix forecast, a native MCP server (Streamable HTTP and
+stdio, personal API tokens; see [`docs/mcp.md`](docs/mcp.md)), and the portal in light and dark themes.
 The Overview shows the score by category, exposure, certificates, technologies, remediation, discovery,
 coverage, top risks and what changed.
-
-Designed, not built yet (spec in [`docs/superpowers/specs`](docs/superpowers/specs)):
-
-- a native MCP server so AI agents can query and analyze Limes data (`2026-10-17-mcp-server-design.md`).
 
 ## Security
 

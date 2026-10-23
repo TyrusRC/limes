@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django_redis import get_redis_connection
 from redis.exceptions import LockError, RedisError
@@ -14,6 +15,7 @@ from limes.common_func import create_scan_object
 from limes.definitions import INITIATED_TASK, LIVE_SCAN, RUNNING_TASK
 from limes.tasks.control import initiate_scan
 from scanEngine.models import EngineType
+from startScan.asset_models import CADENCE_TIERS
 from startScan.models import Asset, ScanHistory
 from targetApp.models import Domain
 
@@ -25,6 +27,27 @@ MAX_IN_FLIGHT = 2  # NOTE: global ceiling: automation waits while this many scan
 MAX_DISPATCH_PER_TICK = 1
 MAX_ATTEMPTS_PER_TICK = 5
 IN_PROGRESS = (INITIATED_TASK, RUNNING_TASK)
+
+CADENCE_KINDS = ('root_domain', 'hostname', 'ip', 'cidr', 'asn')
+
+
+def set_cadence(asset, tier):
+    """Set how often an owned asset is rediscovered or monitored. Explicit: it overrides the monitor's activity
+    rule ('off' stops monitoring). Returns (ok, message); the REST view and the MCP tool both call this."""
+    if asset.kind not in CADENCE_KINDS:
+        return False, 'cadence applies to roots, hostnames, IPs, ranges and ASNs only'
+    if asset.scope_tier not in ('owned_root', 'owned_host'):
+        return False, 'cadence applies to owned assets only'
+    if not isinstance(tier, str) or tier not in dict(CADENCE_TIERS):
+        return False, 'unknown cadence tier'
+    with transaction.atomic():
+        row = Asset.objects.select_for_update().get(pk=asset.pk)
+        row.cadence_tier = tier
+        row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
+        row.save(update_fields=['cadence_tier', 'enrichment'])
+    from dashboard.stats import invalidate
+    invalidate(asset.project_id)
+    return True, f'cadence set to {tier}'
 
 
 def start_asm_scan(asset, engine_id=None, initiated_by_id=None):

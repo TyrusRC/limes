@@ -2,6 +2,7 @@ import json
 import logging
 
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.contrib.auth import update_session_auth_hash
@@ -55,6 +56,43 @@ def profile(request, slug):
     return render(request, 'dashboard/profile.html', {
         'form': form
     })
+
+
+def api_tokens(request, slug):
+    # Personal MCP tokens. The plaintext is rendered once in the create response and is stored nowhere.
+    from limes.mcp import tokens
+    if not settings.MCP_ENABLED or not Project.objects.filter(slug=slug).exists():
+        return HttpResponseRedirect(reverse('four_oh_four'))
+    error, new_token, form = None, None, {}
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'revoke':
+            tok = get_object_or_404(ApiToken, token_id=request.POST.get('token_id', ''), user=request.user)
+            tokens.revoke(tok)
+            return redirect('api_tokens', slug=slug)
+        if action == 'create':
+            form = {'name': request.POST.get('name', ''), 'days': request.POST.get('days', ''),
+                    'scope': request.POST.get('scope', '')}
+            try:
+                days = int(form['days'])
+            except ValueError:
+                days = None
+            try:
+                _, new_token = tokens.create_token(request.user, form['name'], days, form['scope'])
+                form = {}
+            except tokens.TokenError as e:
+                error = str(e)
+    now = timezone.now()
+    rows = []
+    for t in request.user.api_tokens.order_by('-created_at', '-id'):
+        status = 'revoked' if t.revoked_at else 'expired' if t.expires_at <= now else 'active'
+        rows.append({'t': t, 'status': status})
+    response = render(request, 'dashboard/api_tokens.html', {
+        'rows': rows, 'error': error, 'new_token': new_token, 'form': form,
+        'expiry_days': tokens.EXPIRY_DAYS, 'default_days': tokens.DEFAULT_DAYS,
+        'writes_enabled': settings.MCP_WRITES_ENABLED})
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 @has_permission_decorator(PERM_MODIFY_SYSTEM_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)

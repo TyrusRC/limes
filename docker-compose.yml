@@ -114,6 +114,25 @@ services:
       retries: 3
       start_period: 30s
 
+  mcp:
+    <<: *app
+    profiles: [mcp]  # optional MCP server: `make up MCP=1`
+    entrypoint: /usr/src/app/mcp-entrypoint.sh
+    mem_limit: ${MCP_MEM:-1g}
+    # Least privilege: MCP reads the database only. No tool config, nuclei templates or wordlists; scan results read-only.
+    # NOTE: env_file still hands it the whole .env; upgrade path: a dedicated MCP env file and a read-only DB role.
+    volumes:
+      - scan_results:/usr/src/scan_results:ro
+    environment:
+      <<: *app-env
+      DOMAIN_NAME: ${DOMAIN_NAME}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), 5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   worker-scan:
     <<: *app
     entrypoint: ["/usr/src/app/celery-entrypoint.sh", "scan"]
