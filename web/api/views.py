@@ -2889,7 +2889,7 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			return Asset.objects.none()
 		qs = (
 			Asset.objects.filter(project__slug=project)
-			.select_related('parent')
+			.select_related('parent', 'parent__parent')
 			.prefetch_related('technologies', 'ip_addresses', 'tags')
 			.annotate(vuln_count=Count('vulnerabilities', distinct=True),
 					  has_target=Exists(Domain.objects.filter(project=OuterRef('project'), name=OuterRef('value'))))

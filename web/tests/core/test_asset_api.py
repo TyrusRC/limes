@@ -178,7 +178,13 @@ class AssetListApiTest(TestCase):
         a.tags.create(name='t1')
         a.technologies.create(name='nginx')
         a.ip_addresses.create(address='1.2.3.4')
-        with self.assertNumQueries(6):  # same count with one more row: does not scale
+        # an IP swept from a range that came from an ASN: its monitor state reads parent and grandparent
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS64500', scope_tier='owned_host')
+        rng = Asset.objects.create(project=self.p, kind='cidr', value='198.51.100.0/24',
+                                   scope_tier='owned_host', parent=asn)
+        Asset.objects.create(project=self.p, kind='ip', value='198.51.100.7', scope_tier='owned_host',
+                             parent=rng, sources=[{'source': 'cidr', 'evidence': '198.51.100.0/24'}])
+        with self.assertNumQueries(6):  # same count with more rows: does not scale
             rows = self._get(project='p1').json()
         c = next(r for r in rows if r['value'] == 'c.x.com')
         self.assertEqual((c['tags'], c['technologies'], c['ip_addresses'], c['vuln_count']),
