@@ -1,0 +1,4 @@
+{"description": "RDAP bootstrap file for Domain Name System registrations", "publication": "2026-10-01T12:00:00Z", "version": "1.0", "services": [
+ [["com", "net"], ["https://rdap.verisign.com/com/v1/"]],
+ [["kg"], ["http://rdap.cctld.kg/"]]
+]}

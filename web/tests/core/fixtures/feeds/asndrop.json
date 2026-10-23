@@ -1,0 +1,3 @@
+{"asn":245,"rir":"arin","domain":"example.test","cc":"US","asname":"EXAMPLE-AS"}
+{"asn":403005,"rir":"arin","domain":"example.invalid","cc":"SC","asname":"BLATANTHOST"}
+{"type":"metadata","timestamp":1792730642,"size":300,"records":3,"copyright":"(c) 2026 The Spamhaus Project SLU","terms":"https://www.spamhaus.org/drop/terms/"}

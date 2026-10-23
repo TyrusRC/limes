@@ -1,0 +1,3 @@
+{"cidr":"2400:cb00:1::/48","sblid":"SBL111111","rir":"ripencc"}
+{"cidr":"2a00:1450::/32","sblid":"SBL222222","rir":"ripencc"}
+{"type":"metadata","timestamp":1792730642,"size":300,"records":3,"copyright":"(c) 2026 The Spamhaus Project SLU","terms":"https://www.spamhaus.org/drop/terms/"}

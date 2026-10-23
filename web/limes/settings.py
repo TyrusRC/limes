@@ -44,6 +44,10 @@ RANGE_ENUMERATION = env.bool('LIMES_RANGE_ENUMERATION', default=False)
 RANGE_ADDRESS_CAP = max(1, min(env.int('LIMES_RANGE_ADDRESS_CAP', default=4096), 65536))
 INTERNETDB_DAILY_BUDGET = env.int('LIMES_INTERNETDB_DAILY_BUDGET', default=5000)
 PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
+# Third-party reputation feeds (limes/feeds). Opt-in names: blocklist_de, cins (terms unclear, off by default).
+FEEDS_OPTIN = env.list('LIMES_FEEDS_OPTIN', default=[])
+# Sent only to abuse.ch hosts, never logged. Empty: Feodo is fetched without a key.
+ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
@@ -234,13 +238,15 @@ CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor')
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
+                  'limes.feeds.tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
     'dispatch-due-scans': {'task': 'dispatch_due_scans', 'schedule': 60.0, 'options': {'expires': 55}},
     'enumerate-ranges': {'task': 'enumerate_ranges', 'schedule': 60.0, 'options': {'expires': 55}},
     'monitor-assets': {'task': 'monitor_assets', 'schedule': 60.0, 'options': {'expires': 55}},
+    'refresh-feeds': {'task': 'refresh_feeds', 'schedule': 3600.0, 'options': {'expires': 3300}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
