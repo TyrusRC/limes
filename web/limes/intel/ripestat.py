@@ -40,13 +40,14 @@ def announced_prefixes_url(asn):
 def parse_announced_prefixes(obj):
     """Canonical, deduplicated network strings in answer order; anything that is not a prefix is dropped."""
     rows = _data(obj).get('prefixes')
-    out = []
+    out, seen = [], set()
     for row in rows if isinstance(rows, list) else []:
         raw = row.get('prefix') if isinstance(row, dict) else None
         try:
             net = str(ipaddress.ip_network(raw, strict=False)) if isinstance(raw, str) else None
         except ValueError:
             net = None
-        if net and net not in out:
+        if net and net not in seen:
+            seen.add(net)
             out.append(net)
     return out

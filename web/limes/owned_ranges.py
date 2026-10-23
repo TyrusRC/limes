@@ -88,6 +88,21 @@ def _iso(now):
 
 # ---- ASN -> announced prefixes ----
 
+def _minus(nets, held):
+    """nets without the address space of held: a net inside a held one is dropped, a net holding one is split
+    (address_exclude), so a user's /24 inside an announced /23 is neither counted nor walked twice."""
+    out = list(nets)
+    for h in held:
+        nxt = []
+        for n in out:
+            if n.version != h.version or not n.overlaps(h):
+                nxt.append(n)
+            elif not n.subnet_of(h):
+                nxt.extend(n.address_exclude(h))
+        out = nxt
+    return sorted(out)
+
+
 def refresh_asn(asset, get=http.get_json, now=None):
     """Sync an ASN's announced public prefixes into cidr children. A provider failure changes nothing ({})."""
     now = now or timezone.now()
@@ -105,17 +120,21 @@ def refresh_asn(asset, get=http.get_json, now=None):
     # more-specifics fold into their covering prefix, so a /22 announced with its /24s counts and enumerates once
     nets = list(ipaddress.collapse_addresses(n for n in parsed if n.version == 4 and not scope.is_reserved_network(n)))
     # prefixes the project already holds as owned ranges (user-added or another ASN's) are not ours to count or re-parent
-    held = set(Asset.objects.filter(project=asset.project, kind='cidr', scope_tier__in=OWNED)
-               .exclude(state='retired').exclude(parent=asset).values_list('value', flat=True))
-    nets = [n for n in nets if str(n) not in held]
+    held = Asset.objects.filter(project=asset.project, kind='cidr', scope_tier__in=OWNED) \
+        .exclude(state='retired').exclude(parent=asset).values_list('value', flat=True)
+    nets = _minus(nets, [ipaddress.ip_network(v, strict=False) for v in held])
     skipped = {'skipped_v6': len(v6), 'skipped_v6_examples': v6[:3]}
     total = sum(n.num_addresses for n in nets)
     cap = settings.RANGE_ADDRESS_CAP
     free = cap - range_addresses(asset.project, exclude_parent=asset)
-    if total > free:  # checked before any child is stored: an over-cap ASN stores nothing and counts toward no cap
+    if total > free:  # checked before any child is stored: an over-cap ASN stores nothing new
+        kept = Asset.objects.filter(parent=asset, kind='cidr', scope_tier__in=OWNED).exclude(state='retired').count()
+        # the prefixes accepted earlier were within the cap when stored and still count in range_addresses
+        note = (f'; the {kept} prefix{"es" if kept != 1 else ""} accepted earlier {"are" if kept != 1 else "is"} still '
+                'walked, new announcements are not added') if kept else ''
         out = {'status': 'refused', 'checked_at': _iso(now), **skipped,
                'reason': f"{asset.value} announces {total} addresses, over this project's {cap}-address cap "
-                         f"({max(free, 0)} still free): add the specific ranges you own instead"}
+                         f"({max(free, 0)} still free): add the specific ranges you own instead{note}"}
         _set(asset, 'asn', out)
         return out
     announced = {str(n) for n in nets}

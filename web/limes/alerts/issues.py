@@ -84,7 +84,7 @@ def sync_issues(project, now=None):
         # ... and only while the range is actually being walked: switched off, set to off or refused, it is released
         held = {buckets[a.id] for a in assets.values() if buckets[a.id].startswith('cidr:')
                 and settings.RANGE_ENUMERATION and a.parent.cadence_tier != 'off'
-                and ((a.parent.enrichment or {}).get('enum') or {}).get('status') == 'running'
+                and ((a.parent.enrichment or {}).get('enum') or {}).get('status', 'running') == 'running'
                 and ((a.parent.enrichment or {}).get('enum') or {}).get('pass', 0) == 0}
         known = set(buckets.values()) - held
         if not synced >= known:

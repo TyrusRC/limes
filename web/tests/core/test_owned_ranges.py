@@ -155,6 +155,43 @@ class AsnTest(Base):
         self.assertEqual(out['prefixes'], ['198.51.101.0/28'])
         self.assertIsNone(Asset.objects.get(pk=mine.pk).parent)
 
+    def test_held_range_inside_an_announced_prefix_is_not_counted_twice(self):
+        mine = self.cidr('203.0.114.0/24')  # the user's own /24 inside the ASN's /23
+        a = self.asn()
+        with override_settings(RANGE_ADDRESS_CAP=512):  # the /24 held + the other /24: exactly 512, only if not doubled
+            out = r.refresh_asn(a, get=Get(['203.0.114.0/23']), now=self.now)
+        self.assertEqual(out['status'], 'ok')
+        self.assertEqual(out['prefixes'], ['203.0.115.0/24'])
+        self.assertIsNone(Asset.objects.get(pk=mine.pk).parent)
+        a2 = self.asn('AS64501')  # a held /23 swallows an announced /24 entirely
+        out = r.refresh_asn(a2, get=Get(['203.0.114.128/25']), now=self.now)
+        self.assertEqual(out['prefixes'], [])
+
+    def test_failed_child_write_rolls_the_refresh_back(self):
+        a = self.asn(enrichment={'asn': {'status': 'ok', 'prefixes': []}})
+        real, calls = Asset.mark_missing_or_seen, []
+
+        def flaky(self_, seen):
+            calls.append(self_.value)
+            if len(calls) == 2:
+                raise RuntimeError('killed mid-refresh')
+            return real(self_, seen)
+        with mock.patch.object(Asset, 'mark_missing_or_seen', flaky):
+            with self.assertRaises(RuntimeError):
+                r.refresh_asn(a, get=Get(['198.51.101.0/28', '198.51.102.0/28']), now=self.now)
+        self.assertFalse(Asset.objects.filter(project=self.p, kind='cidr').exists())  # no half-stored children
+        a.refresh_from_db()
+        self.assertEqual(a.enrichment['asn'], {'status': 'ok', 'prefixes': []})
+
+    def test_over_cap_reason_says_earlier_prefixes_are_kept(self):
+        a = self.asn()
+        r.refresh_asn(a, get=Get(['198.51.101.0/28']), now=self.now)
+        with override_settings(RANGE_ADDRESS_CAP=32):
+            out = r.refresh_asn(a, get=Get(['198.51.101.0/28', '198.51.104.0/24']), now=self.now)
+        self.assertEqual(out['status'], 'refused')
+        self.assertIn('1 prefix accepted earlier is still walked', out['reason'])
+        self.assertTrue(Asset.objects.filter(parent=a, value='198.51.101.0/28').exists())
+
     def test_failed_lookup_backs_off(self):
         a = self.asn()
         r.refresh_asn(a, get=Get(ripe_status=500), now=self.now)
@@ -278,6 +315,15 @@ class EnumTest(Base):
         self.assertEqual(sorted(ev), ['203.0.114.1', '203.0.114.2'])
         self.assertTrue(ev['203.0.114.1'].immediate)
         self.assertFalse(ev['203.0.114.2'].immediate)
+
+    def test_range_not_yet_stepped_holds_its_bucket(self):
+        c = self.cidr('203.0.114.0/30')  # no enum state yet: its first step has not saved 'running'
+        one = Asset.objects.create(project=self.p, kind='ip', value='203.0.114.0', scope_tier='owned_host', parent=c)
+        with mock.patch('limes.scoring.current_issues', return_value=({}, set())):
+            issues.sync_issues(self.p)
+        with mock.patch('limes.scoring.current_issues', return_value=({one.id: {'net.exposed_rdp': 3}}, {one.id})):
+            self.assertEqual(issues.sync_issues(self.p), [])
+        self.assertNotIn(f'cidr:{c.value}', IssueSyncState.objects.get(project=self.p).roots)
 
     def test_first_pass_issue_sync_is_silent(self):
         c = self.cidr('203.0.114.0/30')

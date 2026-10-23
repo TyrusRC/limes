@@ -29,19 +29,20 @@ def ensure_scan_target(asset):
     by another project or by none. Never raises: a failure is logged and returned as a generic warning,
     so the caller's own operation (add, confirm, decide) is never lost to it."""
     try:
-        if not _wants_target(asset):
-            return None, None
-        domain = Domain.objects.filter(name=asset.value).first()
-        if domain is None:
-            try:
-                with transaction.atomic():
-                    return Domain.objects.create(name=asset.value, project_id=asset.project_id,
-                                                 insert_date=timezone.now()), None
-            except IntegrityError:  # lost a race to another creator: read what won
-                domain = Domain.objects.filter(name=asset.value).first()
-        if domain is not None and domain.project_id == asset.project_id:
-            return domain, None
-        return None, OTHER_PROJECT_MSG.format(value=asset.value)
+        with transaction.atomic():  # a savepoint: a swallowed DB error rolls back only this, never the caller's work
+            if not _wants_target(asset):
+                return None, None
+            domain = Domain.objects.filter(name=asset.value).first()
+            if domain is None:
+                try:
+                    with transaction.atomic():
+                        return Domain.objects.create(name=asset.value, project_id=asset.project_id,
+                                                     insert_date=timezone.now()), None
+                except IntegrityError:  # lost a race to another creator: read what won
+                    domain = Domain.objects.filter(name=asset.value).first()
+            if domain is not None and domain.project_id == asset.project_id:
+                return domain, None
+            return None, OTHER_PROJECT_MSG.format(value=asset.value)
     except Exception:
         logger.exception('ensure_scan_target failed for asset %s', getattr(asset, 'pk', None))
         return None, FAILED_MSG.format(value=asset.value)

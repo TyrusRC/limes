@@ -81,6 +81,20 @@ class ScanTargetTest(Base):
         self.assertEqual((d.name, w, Domain.objects.count()), ('x.com', None, 1))
 
 
+class SavepointTest(Base):
+    def test_swallowed_db_error_leaves_the_callers_transaction_usable(self):
+        from django.db import connection, transaction
+
+        def broken(**kw):  # a real database error: it aborts the surrounding transaction
+            with connection.cursor() as c:
+                c.execute('SELECT 1/0')
+        r = self.root()
+        with transaction.atomic():  # a future caller inside its own atomic block
+            with mock.patch.object(scan_target.Domain.objects, 'filter', side_effect=broken):
+                self.assertEqual(ensure_scan_target(r), (None, scan_target.FAILED_MSG.format(value='x.com')))
+            self.assertEqual(Asset.objects.filter(pk=r.pk).count(), 1)  # not 'current transaction is aborted'
+
+
 class WiredBase(Base):
     def setUp(self):
         super().setUp()
