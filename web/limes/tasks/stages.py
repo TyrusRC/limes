@@ -892,6 +892,8 @@ def code_audit(self, urls=[], ctx={}, description=None):
 		return 0
 	try:
 		leak.scan_artifacts(f'{self.results_dir}/code_artifacts', mapping, self.domain.project, timezone.now())
+	except SoftTimeLimitExceeded:
+		raise
 	except Exception as e:  # never raised: the leak scan must not cost the code audit; log the type only
 		logger.warning(f'Leak scan failed: {type(e).__name__}')
 	try:

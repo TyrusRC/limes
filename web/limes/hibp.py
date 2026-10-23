@@ -28,7 +28,11 @@ REFRESH = timedelta(days=7)
 RECENT = timedelta(days=365)
 MAX_WAIT = 30  # seconds a call may wait for its rate-limit slot
 MAX_NAMES = 200  # breaches kept per root per sync
-NAME_RE = re.compile(r'[A-Za-z0-9_.-]{1,100}')
+NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}')
+
+
+def _name_ok(n):
+    return isinstance(n, str) and NAME_RE.fullmatch(n) is not None and '..' not in n
 
 
 class _Stop(Exception):
@@ -38,9 +42,13 @@ class _Stop(Exception):
 def _call(path, key):
     if not ratelimit.take_daily('hibp', HIBP_DAILY_BUDGET):
         raise _Stop('budget')
-    status, body = http.get_json(API + path, provider='hibp', headers={'hibp-api-key': key}, max_wait=MAX_WAIT)
+    status, body = http.get_json(API + path, provider='hibp', headers={'hibp-api-key': key}, max_wait=MAX_WAIT,
+                                 budget=lambda: ratelimit.take_daily('hibp', HIBP_DAILY_BUDGET))
     if status is None:
         raise _Stop('busy')
+    if status == 401:
+        log.warning('hibp: key rejected')
+        raise _Stop('key rejected')
     return status, body
 
 
@@ -50,7 +58,8 @@ def _due(root, latest, now):
         stamp = datetime.fromisoformat(state.get('fetched_at') or '')
     except ValueError:
         return True
-    return state.get('latest') != latest or now - stamp >= REFRESH
+    return (state.get('latest') != latest or now - stamp >= REFRESH
+            or DomainBreach.objects.filter(root=root, published__isnull=True).exists())  # dates still pending
 
 
 def _counts(body):
@@ -58,7 +67,7 @@ def _counts(body):
     if isinstance(body, dict):
         for names in body.values():
             for n in set(names) if isinstance(names, list) else ():
-                if isinstance(n, str) and NAME_RE.fullmatch(n) and (n in counts or len(counts) < MAX_NAMES):
+                if _name_ok(n) and (n in counts or len(counts) < MAX_NAMES):
                     counts[n] = counts.get(n, 0) + 1
     return counts
 
@@ -92,9 +101,14 @@ def _sync_root(root, latest, key, now):
     counts = _counts(body)
     rows = {b.breach_name: b for b in DomainBreach.objects.filter(root=root)}
     fresh = {}
+    stopped = None
     for name in counts:
         if name not in rows or rows[name].published is None:
-            fresh[name] = _dates(name, key)
+            try:
+                fresh[name] = _dates(name, key)
+            except _Stop as e:  # keep the counts; the dates fill in on later days (_due sees the null dates)
+                stopped = e
+                break
     new = [n for n in counts if n not in rows]
     for name, n in counts.items():
         defaults = {'project': root.project, 'addresses': n}
@@ -102,12 +116,21 @@ def _sync_root(root, latest, key, now):
             defaults.update(breach_date=fresh[name][0], published=fresh[name][1])
         DomainBreach.objects.update_or_create(root=root, breach_name=name, defaults=defaults)
     recent = DomainBreach.objects.filter(root=root, published__gte=now - RECENT).exists()
-    _write(root, [Result('leak.hibp_breach', 'fail' if recent else 'pass', {})], now)
+    pending = DomainBreach.objects.filter(root=root, breach_name__in=list(counts), published__isnull=True).exists()
+    if recent:
+        result = Result('leak.hibp_breach', 'fail', {})
+    elif pending:  # unknown dates are never a pass
+        result = Result('leak.hibp_breach', 'error', {'reason': 'breach dates pending'})
+    else:
+        result = Result('leak.hibp_breach', 'pass', {})
+    _write(root, [result], now)
     if state.get('baselined'):
         for name in new:
             events.safe_record(root.project, 'breach_new', f'New breach {name} affects {counts[name]} addresses at {root.value}',
                                asset=root, detail={'breach': name, 'addresses': counts[name]})
     intel._store(root, 'hibp', {'latest': latest, 'baselined': True}, now)
+    if stopped:
+        raise stopped
     return True
 
 
@@ -126,20 +149,24 @@ def hibp_sync():
         if not got:
             return {'reason': 'locked'}
         now = timezone.now()
-        done, touched, stopped = 0, {}, None
+        done, touched, stopped, roots = 0, {}, None, []
         try:
             status, body = _call('latestbreach', key)
             latest = body.get('Name') if status == 200 and isinstance(body, dict) else None
-            if not isinstance(latest, str):
+            if not _name_ok(latest):
                 return {'roots': 0, 'reason': 'no latest breach'}
             for root in Asset.objects.filter(kind='root_domain', scope_tier='owned_root').exclude(state='retired') \
-                    .select_related('project').order_by('id'):
+                    .select_related('project'):
+                roots.append(root)
+            # least recently synced first, so one big root cannot starve the others day after day
+            roots.sort(key=lambda r: ((r.enrichment or {}).get('hibp') or {}).get('fetched_at') or '')
+            for root in roots:
                 if not _due(root, latest, now):
                     continue
+                touched[root.project_id] = root.project
                 try:
                     if _sync_root(root, latest, key, now):
                         done += 1
-                        touched[root.project_id] = root.project
                 except (SoftTimeLimitExceeded, _Stop):
                     raise
                 except Exception:  # noqa: BLE001 - one root must not stop the rest; no message (may echo data)

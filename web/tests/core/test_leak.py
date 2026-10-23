@@ -4,9 +4,11 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from datetime import timedelta
 from unittest import mock
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
@@ -29,6 +31,10 @@ def jwt(role='service_role'):
 SB = 'sb_secret_' + 'Ab3dEf6hJk9mNp2qRs5tUv8xYz0123'
 
 
+# a JWT whose payload is nested far past the JSON parser's recursion limit
+HOSTILE = '.'.join([_b64({'alg': 'x'}), _b64('{"a":' + '[' * 3000 + ']' * 3000 + '}'), 'SIGNATUREpartZZ1234'])
+
+
 class ScanTextTest(SimpleTestCase):
     def test_service_role_jwt_detected_key_never_stored(self):
         tok = jwt()
@@ -48,6 +54,22 @@ class ScanTextTest(SimpleTestCase):
         self.assertEqual(out, [{'kind': 'sb_secret', 'shape': 'sb_secret_…' + SB[-4:]}])
         self.assertNotIn(SB[10:20], out[0]['shape'])
         self.assertEqual(leak.scan_text('sb_publishable_' + 'A' * 30)['secrets'], [])
+
+    def test_placeholders_escapes_and_hostile_input(self):
+        self.assertEqual(leak.scan_text('sb_secret_' + 'x' * 20)['secrets'], [])
+        self.assertEqual(leak.scan_text('sb_secret_your_key_here_please')['secrets'], [])
+        # sourcesContent: the key follows a JSON-escaped newline / tab
+        for esc in ('\\n', '\\t'):
+            self.assertEqual(len(leak.scan_text(f'a{esc}{SB}')['secrets']), 1, esc)
+            self.assertEqual(len(leak.scan_text(f'a{esc}{jwt()}')['secrets']), 1, esc)
+        self.assertEqual(leak.scan_text(f'"{HOSTILE}" "{SB}"')['secrets'][0]['kind'], 'sb_secret')
+
+    def test_no_quadratic_blowup(self):
+        for text in ('-eyJ' * 50000, 'https://' + 'a.s3' * 50000, 'https://' * 25000, 'eyJ' + 'a' * 200000,
+                     ('eyJaaaaaaaaaaaa.' * 12500)):
+            t = time.monotonic()
+            leak.scan_text(text)
+            self.assertLess(time.monotonic() - t, 1.0, text[:20])
 
     def test_backends(self):
         text = 'https://abcd.supabase.co/rest/v1 https://x-default-rtdb.firebaseio.com/ https://bkt.s3.amazonaws.com/a'
@@ -95,6 +117,30 @@ class ScanArtifactsTest(TestCase):
             self.assertNotIn(secret, dump)
         self.assertFalse(Asset.objects.filter(value='cdn.other.net').exists())
 
+    def test_hostile_jwt_and_unowned_files_do_not_stop_others(self):
+        self.put('h.js', f'"{HOSTILE}"')
+        self.put('a.js', f'"{SB}"')
+        self.put('m.mjs', f'"{SB}"')
+        self.put('b.js', f'"{SB}"')
+        mapping = {'h.js': 'https://www.x.com/h.js', 'a.js': 'https://user:pw@app.x.com/a.js', 'b.js': 'https://cdn.other.net/b.js'}
+        real = leak._read
+        with mock.patch.object(leak, '_read', side_effect=real) as rd:
+            out = leak.scan_artifacts(self.dir, mapping, self.p, self.now)
+        self.assertEqual([c.args[0].endswith('b.js') for c in rd.call_args_list].count(True), 0)  # unowned: never read
+        self.assertEqual(out['hosts'], 2)
+        self.assertEqual(RiskCheck.objects.get(asset=self.app, check_id='leak.supabase_secret_key').evidence['artifact_url'],
+                         'https://app.x.com/a.js')
+        self.assertEqual(RiskCheck.objects.get(asset=self.www, check_id='leak.supabase_secret_key').status, 'pass')
+        # one file raising must not stop the next
+        with mock.patch.object(leak, '_read', side_effect=lambda path: (_ for _ in ()).throw(RecursionError()) if path.endswith('h.js') else f'"{SB}"'):
+            leak.scan_artifacts(self.dir, {'h.js': 'https://www.x.com/h.js', 'a.js': 'https://app.x.com/a.js'}, self.p, self.now)
+        self.assertEqual(RiskCheck.objects.get(asset=self.app, check_id='leak.supabase_secret_key').status, 'fail')
+
+    def test_mjs_scanned(self):
+        self.put('m.mjs', f'"{SB}"')
+        leak.scan_artifacts(self.dir, {'m.mjs': 'https://app.x.com/m.mjs'}, self.p, self.now)
+        self.assertEqual(RiskCheck.objects.get(asset=self.app, check_id='leak.supabase_secret_key').status, 'fail')
+
     def test_fixed_key_flips_to_pass(self):
         self.put('a.js', f'"{SB}"')
         leak.scan_artifacts(self.dir, {'a.js': 'https://app.x.com/a.js'}, self.p, self.now)
@@ -131,6 +177,13 @@ class CodeAuditTest(TestCase):
                 mock.patch.object(stages.leak, 'scan_artifacts', side_effect=RuntimeError('x')):
             self.assertEqual(stages.code_audit.run(), 0)
 
+    def test_code_audit_reraises_soft_time_limit(self):
+        with mock.patch.object(stages.mantis, 'audit_dir') as audit, \
+                mock.patch.object(stages.leak, 'scan_artifacts', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                stages.code_audit.run()
+        audit.assert_not_called()
+
 
 class FakeGet:
     def __init__(self, routes):
@@ -164,6 +217,7 @@ class HibpTest(TestCase):
 
     def run_sync(self, routes=None, now=None):
         get = FakeGet(routes or self.routes)
+        self.last_calls = get.calls
         with mock.patch.object(hibp.http, 'get_json', get):
             return hibp.hibp_sync.run(), get
 
@@ -208,6 +262,53 @@ class HibpTest(TestCase):
         self.run_sync({**self.routes, 'breachedDomain/x.com': (403, None)})
         rc = RiskCheck.objects.get(asset=self.root, check_id='leak.hibp_breach')
         self.assertEqual((rc.status, rc.evidence), ('error', {'reason': 'domain not verified with HIBP'}))
+
+    def test_budget_exhausted_mid_root_keeps_counts_and_does_not_starve_next_root(self):
+        names = [f'B{i}' for i in range(60)]
+        two = Asset.objects.create(project=self.p, kind='root_domain', value='y.com', scope_tier='owned_root')
+        routes = {'latestbreach': (200, {'Name': 'B0'}),
+                  'breachedDomain/x.com': (200, {'a': names}),
+                  'breachedDomain/y.com': (200, {'a': ['Only']}),
+                  'breach/Only': (200, {'BreachDate': '2021-01-01', 'AddedDate': '2021-01-02T00:00:00Z'})}
+        for n in names:
+            routes[f'breach/{n}'] = (200, {'BreachDate': '2021-01-01', 'AddedDate': '2021-01-02T00:00:00Z'})
+        calls = {'n': 0}
+
+        def take(provider, limit):
+            calls['n'] += 1
+            return calls['n'] <= 50
+        with mock.patch.object(hibp.ratelimit, 'take_daily', side_effect=take):
+            out, _ = self.run_sync(routes)
+        self.assertEqual(out['stopped'], 'budget')
+        self.assertEqual(DomainBreach.objects.filter(root=self.root).count(), 60)  # counts kept, dates pending
+        self.assertEqual(RiskCheck.objects.get(asset=self.root, check_id='leak.hibp_breach').status, 'error')
+        calls['n'] = 0  # next day: the dated root is no longer first in line, the pending dates fill in
+        with mock.patch.object(hibp.ratelimit, 'take_daily', side_effect=take):
+            self.run_sync(routes)
+        self.assertTrue(DomainBreach.objects.filter(root=two).exists())
+        calls['n'] = 0
+        with mock.patch.object(hibp.ratelimit, 'take_daily', side_effect=take):
+            self.run_sync(routes)
+        self.assertFalse(DomainBreach.objects.filter(root=self.root, published__isnull=True).exists())
+
+    def test_401_stops_run_and_logs_key_rejected_without_key(self):
+        with self.assertLogs('limes.hibp', 'WARNING') as logs:
+            out, get = self.run_sync({'latestbreach': (401, {'message': 'bad'})})
+        self.assertEqual(out['stopped'], 'key rejected')
+        self.assertEqual(len(get.calls), 1)
+        self.assertEqual(sum('key rejected' in m for m in logs.output), 1)
+        self.assertNotIn(KEY, ' '.join(logs.output))
+
+    def test_unsafe_breach_names_ignored(self):
+        routes = {**self.routes, 'breachedDomain/x.com': (200, {'a': ['..', '../x', '.hid', 'Ok_1', 'a..b']})}
+        self.run_sync(routes)
+        self.assertEqual(set(DomainBreach.objects.values_list('breach_name', flat=True)), {'Ok_1'})
+        self.assertTrue(all('..' not in u for u, _ in self.last_calls))
+
+    def test_unsafe_latest_name_ignored(self):
+        out, get = self.run_sync({**self.routes, 'latestbreach': (200, {'Name': '../../etc'})})
+        self.assertEqual(out['reason'], 'no latest breach')
+        self.assertEqual(len(get.calls), 1)
 
     def test_hibp_budget_exhausted_stops(self):
         with mock.patch.object(hibp.ratelimit, 'take_daily', return_value=False):
