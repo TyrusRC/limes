@@ -2,12 +2,15 @@
 token is returned once by create_token and is never logged, stored or put in an exception message."""
 import hashlib
 import hmac
+import logging
 import re
 import secrets
 import string
 from datetime import timedelta
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.views.decorators.debug import sensitive_variables
 from django.utils import timezone
 from dashboard.models import ApiToken
 
@@ -19,7 +22,11 @@ EXPIRY_DAYS = (30, 90, 365)
 DEFAULT_DAYS = 90
 SCOPES = ('read', 'read_write')
 TOUCH_EVERY = timedelta(minutes=1)
-TOKEN_RE = re.compile(r'^lmk_([a-z0-9]{8})_([A-Za-z0-9_-]{43})$')
+SECRET_CHARS = -(-SECRET_BYTES * 4 // 3)  # token_urlsafe(32) is 43 unpadded base64url characters
+_BODY = r'lmk_([a-z0-9]{%d})_([A-Za-z0-9_-]{%d})' % (ID_LEN, SECRET_CHARS)
+TOKEN_RE = re.compile('^' + _BODY + '$')
+TOKEN_FIND_RE = re.compile(_BODY)  # a token anywhere inside a string (used to scrub logs)
+logger = logging.getLogger(__name__)
 
 
 class TokenError(ValueError):
@@ -30,6 +37,7 @@ def hash_token(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+@sensitive_variables('raw')
 def create_token(user, name, days, scope, now=None):
     """Returns (ApiToken, full token). The full token exists only in this return value."""
     name = (name or '').strip()
@@ -44,18 +52,24 @@ def create_token(user, name, days, scope, now=None):
     now = now or timezone.now()
     for _ in range(5):  # an id collision (36^8) is retried, not surfaced
         token_id = ''.join(secrets.choice(ID_ALPHABET) for _ in range(ID_LEN))
-        if not ApiToken.objects.filter(token_id=token_id).exists():
+        raw = f'{PREFIX}{token_id}_{secrets.token_urlsafe(SECRET_BYTES)}'
+        try:
+            with transaction.atomic():
+                tok = ApiToken.objects.create(user=user, name=name, token_id=token_id, token_hash=hash_token(raw),
+                                              scope=scope, created_at=now, expires_at=now + timedelta(days=days))
             break
+        except IntegrityError:
+            continue
     else:
         raise TokenError('could not allocate a token id')
-    raw = f'{PREFIX}{token_id}_{secrets.token_urlsafe(SECRET_BYTES)}'
-    tok = ApiToken.objects.create(user=user, name=name, token_id=token_id, token_hash=hash_token(raw), scope=scope,
-                                  created_at=now, expires_at=now + timedelta(days=days))
     return tok, raw
 
 
+@sensitive_variables('raw')
 def verify(raw, now=None):
     """The token's ApiToken, or None for any failure (malformed, unknown, wrong secret, expired, revoked, inactive user)."""
+    # NOTE: an unknown id returns before hashing while a wrong secret pays sha256 + compare, so timing reveals only
+    # whether a (non-secret) id exists. Upgrade path: hash a dummy value on the unknown-id branch.
     try:
         m = TOKEN_RE.match(raw) if isinstance(raw, str) else None
         if not m:
@@ -66,7 +80,8 @@ def verify(raw, now=None):
         if not tok.usable(now or timezone.now()) or not tok.user.is_active:
             return None
         return tok
-    except Exception:  # fail closed; the message could carry the token, so nothing is logged here
+    except Exception as e:  # fail closed; log the type only: the message could carry the token
+        logger.warning('verify failed: %s', type(e).__name__)
         return None
 
 

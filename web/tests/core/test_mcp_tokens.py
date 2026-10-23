@@ -1,5 +1,6 @@
 import hashlib
 from datetime import timedelta
+from unittest import mock
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import connection
@@ -46,6 +47,31 @@ class TokenTests(TestCase):
         self.assertFalse(revoke(tok))
         self.assertIsNone(verify(raw))
 
+    def test_verify_uses_compare_digest(self):
+        import hmac
+        from limes.mcp import tokens
+        _, raw = create_token(self.u, 'a', 90, 'read')
+        with mock.patch.object(tokens.hmac, 'compare_digest', wraps=hmac.compare_digest) as cd:
+            self.assertIsNotNone(verify(raw))
+        cd.assert_called_once()
+
+    def test_id_collision_is_retried(self):
+        from limes.mcp import tokens
+        first, _ = create_token(self.u, 'a', 90, 'read')
+        ids = iter(list(first.token_id) + list('abcdefgh'))
+        with mock.patch.object(tokens.secrets, 'choice', side_effect=lambda a: next(ids)):
+            tok, _ = create_token(self.u, 'b', 90, 'read')
+        self.assertEqual(tok.token_id, 'abcdefgh')
+
+    def test_verify_db_error_fails_closed_and_logs_no_token(self):
+        from limes.mcp import tokens
+        _, raw = create_token(self.u, 'a', 90, 'read')
+        with mock.patch.object(tokens.ApiToken.objects, 'select_related', side_effect=RuntimeError(raw)):
+            with self.assertLogs('limes.mcp.tokens', 'WARNING') as cm:
+                self.assertIsNone(verify(raw))
+        self.assertIn('RuntimeError', cm.output[0])
+        self.assertNotIn(raw, cm.output[0])
+
     def test_create_validates(self):
         for args in (('', 90, 'read'), ('x' * 101, 90, 'read'), ('n', 7, 'read'), ('n', 90, 'admin')):
             with self.assertRaises(TokenError):
@@ -85,6 +111,31 @@ class AuditTests(TestCase):
             self.assertNotIn(leak, out)
         self.assertIn('"api_key": "***"', out)
         self.assertLessEqual(len(out), 1024)
+
+    def test_scrub_token_shaped_values(self):
+        from limes.mcp.tokens import create_token
+        u = User.objects.create_user('scrub-user', password='x')
+        tok, raw = create_token(u, 'a', 90, 'read')
+        secret = raw.split('_', 2)[2]
+        out = audit.scrub_args({'text': 'my token ' + raw + ' ok', 'items': [{'note': [raw]}, (raw,)],
+                                'Api_Key': 'S3'})
+        self.assertNotIn(secret, out)
+        self.assertIn('lmk_%s_***' % tok.token_id, out)
+        self.assertIn('"Api_Key": "***"', out)
+
+    def test_log_call_long_fields_do_not_lose_the_row(self):
+        audit.log_call(token_pk=None, token_public_id='abcd1234', user_id=None, tool='t' * 100, project='p' * 80,
+                       args={}, outcome='ok', write=False, duration_ms=1)
+        row = McpCallLog.objects.get()
+        self.assertEqual((len(row.tool), len(row.project)), (64, 50))
+
+    def test_purge_in_batches(self):
+        old = timezone.now() - timedelta(days=100)
+        for _ in range(5):
+            McpCallLog.objects.create(token_public_id='x', tool='t', outcome='ok', duration_ms=1, created_at=old)
+        with mock.patch.object(audit, 'PURGE_BATCH', 2):
+            self.assertEqual(audit.purge_mcp_logs(), {'deleted': 5})
+        self.assertEqual(McpCallLog.objects.count(), 0)
 
     def test_log_call_and_purge(self):
         audit.log_call(token_pk=None, token_public_id='abcd1234', user_id=None, tool='list_projects', project='p1',
