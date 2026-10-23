@@ -674,11 +674,7 @@ class AddAssets(APIView):
 	MAX_ENTRIES = 5000
 
 	def post(self, request):
-		from api.asset_add import classify_asset_entry
-		from django.conf import settings
-		from limes.owned_ranges import addresses, range_addresses
-		from limes.tasks.inventory import _append_source
-		from dashboard.stats import invalidate
+		from api.asset_add import add_assets
 		data = request.data
 		if not isinstance(data, dict):
 			return Response({'status': False, 'message': 'expected a JSON object'})
@@ -696,82 +692,10 @@ class AddAssets(APIView):
 		if tier not in ('owned_root', 'owned_host', 'co_brand'):
 			tier = 'owned_host'
 		reason = str(data.get('reason') or '')[:5000]
-		set_authorized = tier == 'co_brand' and 'active_authorized' in data
-		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
-		added, existing, skipped, warnings = 0, 0, 0, []
-		roots = []  # owned roots added, promoted or re-added, given a scan target once the transaction commits
-		cap = settings.RANGE_ADDRESS_CAP
-		# NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
-		# Upgrade: select_for_update on the project row around this read and the writes.
-		used = range_addresses(project)
-		with transaction.atomic():
-			for entry in raw:
-				if not isinstance(entry, str):
-					skipped += 1
-					warnings.append('entry must be a string')
-					continue
-				c = classify_asset_entry(entry)
-				if c['error']:
-					skipped += 1
-					warnings.append(c['error'])
-					continue
-				# The project cap is all-or-nothing per entry, against a running total across the request.
-				# Only a missing row or a promoted candidate/dependency adds addresses: an owned row is already
-				# in `used`, a rejected or co_brand one is skipped or left alone below.
-				# NOTE: one query per CIDR (about 24 per range, 5000 entries per request at most). Upgrade:
-				# read the project's cidr tiers once before the loop.
-				new_cidrs = []
-				if c['kind'] == 'cidr' and tier != 'co_brand':
-					for v in c['values']:
-						row_tier = Asset.objects.filter(project=project, kind='cidr', value=v).values_list(
-							'scope_tier', flat=True).first()
-						if row_tier in (None, 'candidate', 'dependency'):
-							new_cidrs.append(v)
-				need = sum(addresses(v) for v in new_cidrs)
-				if need and used + need > cap:
-					skipped += len(c['values'])
-					warnings.extend(
-						f"{entry.strip()} would add {need} addresses, over this project's cap of {cap} "
-						f'({used} in use): add fewer ranges or ask the operator to raise LIMES_RANGE_ADDRESS_CAP'
-						for _ in c['values'])
-					continue
-				used += need
-				if c['warning'] and c['warning'] not in warnings:
-					warnings.append(c['warning'])
-				for value in c['values']:
-					asset, created = Asset.objects.get_or_create(
-						project=project, kind=c['kind'], value=value,
-						defaults={'scope_tier': tier, 'state': 'active'})
-					# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
-					# those are explicit decisions made through Confirm/Reject.
-					if not created and asset.scope_tier == 'rejected':
-						skipped += 1
-						warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
-						continue
-					promote = created or asset.scope_tier in ('candidate', 'dependency')
-					if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
-						existing += 1
-						roots.append(asset)  # idempotent: re-adding links a root whose earlier clash was cleared
-						continue
-					if promote:
-						asset.scope_tier = tier
-						asset.state = 'active'
-					if set_authorized:
-						asset.active_authorized = authorized
-					asset.added_by = request.user
-					if reason:
-						asset.decision_reason = reason
-					_append_source(asset, 'manual', reason or f'added by {request.user.get_username()}')
-					asset.save()
-					added += 1
-					roots.append(asset)
-		for asset in roots:
-			warning = ensure_scan_target(asset)[1]
-			if warning:
-				warnings.append(warning)
-		invalidate(project.id)
-		return Response({'status': True, 'message': {
-			'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}})
+		authorized = None  # not given: leave the flag alone
+		if 'active_authorized' in data:
+			authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
+		return Response({'status': True, 'message': add_assets(project, raw, tier, reason, request.user, authorized)})
 
 
 def _load_asset(request):
@@ -846,27 +770,13 @@ class SetAssetCadence(APIView):
 	A cadence set here is explicit: it overrides the monitor's activity rule ('off' stops monitoring)."""
 	permission_classes = [HasPermission]
 	permission_required = PERM_INITATE_SCANS_SUBSCANS
-	KINDS = ('root_domain', 'hostname', 'ip', 'cidr', 'asn')
-
 	def post(self, request):
+		from limes.continuous import set_cadence
 		asset = _load_asset(request)
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
-		if asset.kind not in self.KINDS:
-			return Response({'status': False, 'message': 'cadence applies to roots, hostnames, IPs, ranges and ASNs only'})
-		if asset.scope_tier not in ('owned_root', 'owned_host'):
-			return Response({'status': False, 'message': 'cadence applies to owned assets only'})
-		tier = request.data.get('cadence_tier')
-		if not isinstance(tier, str) or tier not in dict(CADENCE_TIERS):
-			return Response({'status': False, 'message': 'unknown cadence tier'})
-		with transaction.atomic():
-			row = Asset.objects.select_for_update().get(pk=asset.pk)
-			row.cadence_tier = tier
-			row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
-			row.save(update_fields=['cadence_tier', 'enrichment'])
-		from dashboard.stats import invalidate
-		invalidate(asset.project_id)
-		return Response({'status': True, 'message': f'cadence set to {tier}'})
+		ok, message = set_cadence(asset, request.data.get('cadence_tier'))
+		return Response({'status': ok, 'message': message})
 
 
 class AssetScore(APIView):
