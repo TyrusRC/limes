@@ -356,11 +356,11 @@ def _announce(project, asset, has_root, names, org, now):
 
 def ingest(record, source, index, now, seen_at=None, silent=False, api_ok=False):
     """Apply one checked record (parse_record) to every project it matches. Returns the ids of the projects where a
-    sighting was created; a certificate already seen is a no-op (it only stamps `watch_seen_at`)."""
+    sighting was created (`silent` is a bool or the set of project ids to keep quiet); a certificate already seen is a no-op (it only stamps `watch_seen_at`)."""
     matches, _dropped = match.classify(record['dns_names'], index)
     touched = set()
     for pid, pm in matches.items():
-        if _project(pid, pm, record, source, index, now, silent, api_ok):
+        if _project(pid, pm, record, source, index, now, (pid in silent) if isinstance(silent, (set, frozenset)) else silent, api_ok):
             touched.add(pid)
         for dom in pm.lookalikes:
             if _once(f'limes:ct:look:{pid}:{dom}:{record["tbs_sha256"]}', 86400):

@@ -1,5 +1,8 @@
 import json
 import logging
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import timedelta
 from unittest import mock
 
@@ -91,9 +94,10 @@ class PollTest(Base):
         t.assert_called_once()
 
     def test_one_request_per_slot(self):
+        Asset.objects.create(project=self.p, kind='root_domain', value='z.org', scope_tier='owned_root')
         s = Session(Resp(body=[]), Resp(body=[]))
         self.assertIsNotNone(api.poll_once(self.now, session=s))
-        self.assertIsNone(api.poll_once(self.now, session=s))
+        self.assertIsNone(api.poll_once(self.now, session=s))  # z.org is still due: only the slot stops it
         self.assertEqual(len(s.calls), 1)
         self.assertEqual(self.r.ttl(api.SLOT_KEY), 515)  # ceil(3600 / 7)
 
@@ -186,3 +190,128 @@ class PollTest(Base):
                          {'task': 'poll_ct_api', 'schedule': 60.0, 'options': {'expires': 55}})
         self.assertEqual(celery_routing.TASK_PLAN['poll_ct_api'], (celery_routing.IO, 15 * celery_routing.MIN))
         self.assertIn('limes.ct.api', settings.CELERY_IMPORTS)
+
+
+def serve(handler):
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            handler(self)
+    srv = HTTPServer(('127.0.0.1', 0), H)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f'http://127.0.0.1:{srv.server_address[1]}/v1/issuances'
+
+
+class RealNetworkTest(Base):
+    def run_against(self, handler, **patches):
+        srv, url = serve(handler)
+        self.addCleanup(srv.shutdown)
+        self.addCleanup(srv.server_close)
+        self.r.delete(api.SLOT_KEY)
+        with mock.patch.multiple(api, URL=url, **patches):
+            with self.assertLogs('limes.ct.api', level='WARNING') as logs:
+                out = api.poll_once(self.now)
+        return out, '\n'.join(r.getMessage() + str(r.exc_info) for r in logs.records)
+
+    def test_connection_dropped_mid_body_backs_off(self):
+        def h(req):
+            req.send_response(200)
+            req.send_header('Content-Length', '1000')
+            req.end_headers()
+            req.wfile.write(b'[{"id"')
+            req.wfile.flush()
+            req.connection.close()
+        out, text = self.run_against(h)
+        self.assertEqual(out['status'], 'error')
+        self.assertEqual(self.cursor()['retry_at'], (self.now + timedelta(seconds=900)).isoformat())
+        self.assertNotIn('SECRET', text)
+        self.assertNotIn('Traceback', text)
+
+    def test_slow_drip_is_cut_at_the_deadline(self):
+        def h(req):
+            req.send_response(200)
+            req.send_header('Content-Length', '100000')
+            req.end_headers()
+            try:
+                for _ in range(100):
+                    req.wfile.write(b' ')
+                    req.wfile.flush()
+                    time.sleep(0.2)
+            except OSError:
+                pass
+        t = time.monotonic()
+        out, _ = self.run_against(h, DEADLINE=1)
+        self.assertLess(time.monotonic() - t, 8)
+        self.assertEqual(out['status'], 'error')
+        self.assertIsNotNone(self.cursor()['retry_at'])
+
+
+class CursorTest(Base):
+    def test_second_project_adding_a_root_does_not_silence_the_first(self):
+        CertSighting.objects.create(project=self.p, tbs_sha256='1' * 64, source='certspotter_api')
+        self.root.enrichment = {'certspotter': {'after': '1', 'baseline_done': True, 'polled_at': self.now.isoformat(), 'retry_at': None}}
+        self.root.save()
+        o = Project.objects.create(name='o', slug='o', insert_date=self.now)
+        root2 = Asset.objects.create(project=o, kind='root_domain', value='x.com', scope_tier='owned_root')
+        out, s = self.poll(Resp(body=[issuance(1, '1' * 64), issuance(2, '2' * 64, ['new.x.com'])]),
+                           now=self.now + timedelta(hours=1))
+        self.assertNotIn('after', dict(s.calls[0][1]['params']))  # the new project needs the whole history
+        ev = ChangeEvent.objects.filter(kind='cert_new')
+        self.assertEqual({e.project_id for e in ev}, {self.p.id})
+        self.assertEqual(CertSighting.objects.filter(project=o).count(), 2)
+        out, s = self.poll(Resp(body=[]), now=self.now + timedelta(hours=2))
+        self.assertTrue(self.cursor(root2)['baseline_done'])
+        self.assertTrue(self.cursor()['baseline_done'])
+
+    def test_zero_issuance_root_alerts_on_its_first_cert(self):
+        self.poll(Resp(body=[], headers={'Retry-After': '60'}))
+        c = self.cursor()
+        self.assertEqual((c['after'], c['baseline_done']), (None, True))
+        self.poll(Resp(body=[issuance(7, '7' * 64, ['new.x.com'])]), now=self.now + timedelta(minutes=5))
+        self.assertEqual(ChangeEvent.objects.filter(kind='cert_new').count(), 1)
+
+    def test_failed_cert_stops_the_page_and_is_skipped_after_three(self):
+        items = [issuance(1, '1' * 64), issuance(2, '2' * 64), issuance(3, '3' * 64)]
+        real = api.ingest.ingest
+
+        def flaky(record, *a, **kw):
+            if record['tbs_sha256'] == '2' * 64:
+                raise RuntimeError('boom')
+            return real(record, *a, **kw)
+        with mock.patch('limes.ct.api.ingest.ingest', side_effect=flaky):
+            for n in (1, 2):
+                self.poll(Resp(body=items), now=self.now + timedelta(minutes=n))
+                self.assertEqual(self.cursor()['after'], '1')
+                self.assertEqual(CertSighting.objects.count(), 1)
+            self.poll(Resp(body=items), now=self.now + timedelta(minutes=3))
+        self.assertEqual(self.cursor()['after'], '3')
+        self.assertEqual(sorted(CertSighting.objects.values_list('tbs_sha256', flat=True)), ['1' * 64, '3' * 64])
+
+    def test_page_is_capped(self):
+        with mock.patch.object(api, 'PAGE_MAX', 2):
+            self.poll(Resp(body=[issuance(i, str(i) * 64) for i in (1, 2, 3, 4)]))
+        self.assertEqual(self.cursor()['after'], '2')
+        self.assertEqual(CertSighting.objects.count(), 2)
+
+    def test_key_is_stripped(self):
+        with override_settings(CERTSPOTTER_API_KEY=f'  {KEY}\n'):
+            out, s = self.poll(Resp(body=[]))
+        self.assertEqual(s.calls[0][1]['headers']['Authorization'], f'Bearer {KEY}')
+
+    def test_card_reports_unpolled_roots(self):
+        Asset.objects.create(project=self.p, kind='root_domain', value='z.org', scope_tier='owned_root')
+        self.poll(Resp(body=[]))
+        c = api.card(self.p, self.now)
+        self.assertIsNone(c['oldest_poll_age'])
+        self.assertEqual(c['unpolled'], 1)
+
+    def test_transition_runs_outside_the_fetch_lock(self):
+        seen = []
+        with mock.patch('limes.ct.api.health.transition',
+                        side_effect=lambda now: seen.append(self.r.exists('limes:tick:poll_ct_api')) or None), \
+                mock.patch('limes.ct.api.poll_once', return_value=None):
+            api.poll_ct_api()
+        self.assertEqual(seen, [0])

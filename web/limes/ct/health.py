@@ -2,13 +2,14 @@
 alert, and the card data the dashboard shows. The heartbeat and everything in it are read as untrusted JSON."""
 import json
 import logging
+import math
 from datetime import datetime, timedelta, timezone as dt_tz
 
 from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django_redis import get_redis_connection
-from redis.exceptions import RedisError
+from redis.exceptions import LockError, RedisError
 
 from dashboard.models import Project
 from limes import event_queue
@@ -27,6 +28,7 @@ ERROR_WINDOW = watch.ERROR_WINDOW
 SPOOL_LIMIT = 1000
 RESTART_LIMIT = 3
 SAMPLE_MAX = 1000
+SKEW = 60  # seconds a heartbeat may claim to be from the future
 
 
 def mode():
@@ -47,37 +49,56 @@ def _when(v):
     return t
 
 
+def _count(v):
+    """A non-negative int, or None for anything else (a bool, a string, a float): callers fail closed on None."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
 def _int(v):
-    return v if isinstance(v, int) and not isinstance(v, bool) else 0
+    return _count(v) or 0
+
+
+class Unreadable(Exception):
+    """Redis could not be asked: the watch's state is unknown, which is not the same as the watch being down."""
 
 
 def _heartbeat():
-    """The heartbeat dict, or None when missing, unreadable or Redis is down (never a reason to look healthy)."""
+    """The heartbeat dict, or None when missing or malformed. Raises Unreadable when Redis is down."""
     try:
-        hb = json.loads(get_redis_connection('default').get(watch.HEARTBEAT) or b'')
-    except (RedisError, ValueError, RecursionError):
+        raw = get_redis_connection('default').get(watch.HEARTBEAT)
+    except RedisError as e:
+        raise Unreadable from e
+    try:
+        hb = json.loads(raw or b'')
+    except (ValueError, RecursionError):
         return None
     return hb if isinstance(hb, dict) else None
 
 
 def evaluate(now):
+    """Unreadable Redis shows as degraded (never healthy) with 'unreadable' set, so transition() can skip it."""
     if not (settings.CT_WATCH and settings.CONTINUOUS_SCANS):
         return {'state': 'off', 'reasons': [], 'heartbeat': None}
-    hb = _heartbeat()
+    try:
+        hb, unreadable = _heartbeat(), False
+    except Unreadable:
+        hb, unreadable = None, True
     at = _when(hb.get('at')) if hb else None
     if hb is None:
         reasons = ['no_heartbeat']
-    elif at is None or (now - at).total_seconds() > settings.CT_WATCH_STALE:
-        reasons = ['stale_heartbeat']
+    elif at is None or not -SKEW <= (now - at).total_seconds() <= settings.CT_WATCH_STALE:
+        reasons = ['stale_heartbeat']  # unparsable, too old, or from the future
     elif hb.get('state') == 'idle':  # an empty watchlist is nothing to watch, not a fault
-        return {'state': 'idle', 'reasons': [], 'heartbeat': hb}
+        return {'state': 'idle', 'reasons': [], 'heartbeat': hb, 'unreadable': False}
     else:
-        err = _when(hb.get('last_error_at'))
-        flags = {'process_down': not hb.get('pid_alive'), 'restart_storm': _int(hb.get('restarts_10m')) > RESTART_LIMIT,
-                 'watcher_error': err is not None and now - err <= ERROR_WINDOW,
-                 'spool_backlog': _int(hb.get('spool_depth')) > SPOOL_LIMIT}
+        err, raw_err = _when(hb.get('last_error_at')), hb.get('last_error_at')
+        restarts, spool = _count(hb.get('restarts_10m')), _count(hb.get('spool_depth'))
+        flags = {'process_down': hb.get('pid_alive') is not True,
+                 'restart_storm': restarts is None or restarts > RESTART_LIMIT,
+                 'watcher_error': (raw_err is not None and err is None) or (err is not None and now - err <= ERROR_WINDOW),
+                 'spool_backlog': spool is None or spool > SPOOL_LIMIT}
         reasons = [c for c in REASONS if flags.get(c)]
-    return {'state': 'degraded' if reasons else 'healthy', 'reasons': reasons, 'heartbeat': hb}
+    return {'state': 'degraded' if reasons else 'healthy', 'reasons': reasons, 'heartbeat': hb, 'unreadable': unreadable}
 
 
 def _fan_out(kind, title, immediate_delivery):
@@ -91,33 +112,55 @@ def _fan_out(kind, title, immediate_delivery):
 
 
 def transition(now):
-    """Store the current state; record one alert per project when the watch goes healthy/idle -> degraded and one
-    digest note when it recovers. Returns the kind recorded or None. Fails closed: with Redis down nothing is sent.
-    NOTE: callers hold the poll_ct_api tick lock, so the read-then-set is not racy. Upgrade path: GETSET."""
+    """Store the current state; record one alert per project when the watch goes healthy/idle -> degraded, or when it
+    has been degraded for CT_DEGRADED_GRACE_MIN without ever alerting (a watch that never came up, a restart that lost
+    the key), and one digest note when an alerted outage recovers. Returns the kind recorded or None. Fails closed:
+    with Redis down nothing is sent, and an unreadable heartbeat skips the evaluation altogether."""
     cur = evaluate(now)
+    if cur.get('unreadable'):
+        return None
     try:
         r = get_redis_connection('default')
-        try:
-            old = json.loads(r.get(STATE_KEY) or b'')
-            old = old if isinstance(old, dict) else {}
-        except (ValueError, RecursionError):
-            old = {}
-        prev = old.get('state')
-        if prev == cur['state'] and prev != 'degraded':
+        lock = r.lock('limes:ct:transition', timeout=60, blocking=False)
+        if not lock.acquire():
             return None
-        alert = prev in ('healthy', 'idle') and cur['state'] == 'degraded'
-        stored = {'state': cur['state'], 'reasons': cur['reasons'], 'since': now.isoformat(),
-                  'alerted': alert or (prev == 'degraded' and cur['state'] == 'degraded' and bool(old.get('alerted')))}
-        if prev == cur['state'] and old.get('since'):
-            stored['since'] = old['since']
-        r.set(STATE_KEY, json.dumps(stored))
     except RedisError as e:
         logger.warning('ct health: state not stored (%s)', type(e).__name__)
         return None
+    try:
+        return _transition(r, cur, now)
+    except RedisError as e:
+        logger.warning('ct health: state not stored (%s)', type(e).__name__)
+        return None
+    finally:
+        try:
+            lock.release()
+        except (LockError, RedisError):
+            pass
+
+
+def _transition(r, cur, now):
+    try:
+        old = json.loads(r.get(STATE_KEY) or b'')
+        old = old if isinstance(old, dict) else {}
+    except (ValueError, RecursionError):
+        old = {}
+    prev, state = old.get('state'), cur['state']
+    since = _when(old.get('since')) or now
+    if prev == state and state != 'degraded':
+        return None
+    if prev != state:
+        since = now
+    was_alerted = bool(old.get('alerted'))
+    grace = timedelta(minutes=settings.CT_DEGRADED_GRACE_MIN)
+    alert = state == 'degraded' and not was_alerted and (prev in ('healthy', 'idle') or now - since >= grace)
+    # the flag survives degraded <-> idle (an idle watcher is not a recovery) and ends on healthy or off
+    alerted = alert or (was_alerted and prev in ('degraded', 'idle') and state in ('degraded', 'idle'))
+    r.set(STATE_KEY, json.dumps({'state': state, 'reasons': cur['reasons'], 'since': since.isoformat(), 'alerted': alerted}))
     if alert:
         _fan_out('monitoring_degraded', 'Certificate watch degraded: ' + '; '.join(REASONS[c] for c in cur['reasons']), True)
         return 'monitoring_degraded'
-    if prev == 'degraded' and cur['state'] == 'healthy' and old.get('alerted'):
+    if state == 'healthy' and was_alerted and prev in ('degraded', 'idle'):
         _fan_out('monitoring_restored', 'Certificate watch restored', False)
         return 'monitoring_restored'
     return None
@@ -131,7 +174,7 @@ def _age(now, t):
 
 
 def _round(v):
-    return None if v is None else round(v)
+    return round(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
 
 
 def _samples(prefix, now):
@@ -139,7 +182,8 @@ def _samples(prefix, now):
     try:
         r = get_redis_connection('default')
         for day in (now, now - timedelta(days=1)):
-            out += [max(0.0, float(x)) for x in r.lrange(f'{prefix}:{day.astimezone(dt_tz.utc):%Y%m%d}', 0, -1)]
+            out += [max(0.0, v) for v in (float(x) for x in r.lrange(f'{prefix}:{day.astimezone(dt_tz.utc):%Y%m%d}', 0, -1))
+                    if math.isfinite(v)]
     except (RedisError, ValueError):
         pass
     return out
@@ -161,7 +205,7 @@ def card(project, now):
     t1, t1u = _pct(_samples('limes:ct:lat', now)), _pct(_samples('limes:ct:age', now))
     t2 = _pct(snap['latency'])
     t3_rows = (ChangeEvent.objects.filter(project=project, notified_at__gte=now - timedelta(hours=24))
-               .values_list('created_at', 'notified_at')[:SAMPLE_MAX])
+               .order_by('-notified_at').values_list('created_at', 'notified_at')[:SAMPLE_MAX])
     t3 = _pct([max(0.0, (n - c).total_seconds()) for c, n in t3_rows])
     dns_at = list(Asset.objects.filter(project=project, cadence_tier='crown_jewel', scope_tier__in=('owned_root', 'owned_host'),
                                        kind__in=('root_domain', 'hostname')).exclude(state='retired')

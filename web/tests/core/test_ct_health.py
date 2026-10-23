@@ -177,3 +177,82 @@ class CardTest(Base):
             c = health.card(self.p, self.now)
         self.assertEqual((c['api']['used_this_hour'], c['api']['budget']), (0, 7))
         self.assertEqual([x['code'] for x in c['reasons']], [])
+
+
+@override_settings(CT_WATCH=True, CONTINUOUS_SCANS=True, CERTSPOTTER_API_KEY='', CT_DEGRADED_GRACE_MIN=15)
+class HardeningTest(Base):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch('limes.ct.health.deliver_immediate')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_redis_blip_on_heartbeat_skips_the_transition(self):
+        from redis.exceptions import ConnectionError as RedisConnError
+        self.beat()
+        health.transition(self.now)
+        real = get_redis_connection('default')
+
+        class Blip:
+            def get(self, key):
+                if key == watch.HEARTBEAT:
+                    raise RedisConnError('blip')
+                return real.get(key)
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+        with mock.patch('limes.ct.health.get_redis_connection', return_value=Blip()):
+            self.assertIsNone(health.transition(self.now))
+        self.assertEqual(json.loads(real.get(health.STATE_KEY))['state'], 'healthy')
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    def test_future_heartbeat_is_stale(self):
+        self.beat(age=-3600)
+        self.assertEqual(self.reasons(), ['stale_heartbeat'])
+        self.beat(age=-30)
+        self.assertEqual(health.evaluate(self.now)['state'], 'healthy')
+
+    def test_bad_field_types_fail_closed(self):
+        for kw, code in (({'pid_alive': 'false'}, 'process_down'), ({'pid_alive': 1}, 'process_down'),
+                         ({'restarts_10m': '0'}, 'restart_storm'), ({'restarts_10m': None}, 'restart_storm'),
+                         ({'spool_depth': '0'}, 'spool_backlog'), ({'spool_depth': True}, 'spool_backlog'),
+                         ({'last_error_at': 'garbage'}, 'watcher_error')):
+            self.beat(**kw)
+            self.assertEqual(self.reasons(), [code], kw)
+
+    def test_alerted_survives_idle_so_restored_is_sent(self):
+        self.beat()
+        health.transition(self.now)
+        self.beat(age=999)
+        self.assertEqual(health.transition(self.now), 'monitoring_degraded')
+        self.beat(state='idle', pid_alive=False)
+        self.assertIsNone(health.transition(self.now))
+        self.beat()
+        self.assertEqual(health.transition(self.now), 'monitoring_restored')
+        self.assertIsNone(health.transition(self.now))
+
+    def test_never_healthy_watch_alerts_after_the_grace(self):
+        self.assertIsNone(health.transition(self.now))  # fresh install, no heartbeat: silent inside the grace
+        self.assertIsNone(health.transition(self.now + timedelta(minutes=14)))
+        later = self.now + timedelta(minutes=16)
+        self.assertEqual(health.transition(later), 'monitoring_degraded')
+        self.assertEqual(ChangeEvent.objects.filter(kind='monitoring_degraded', immediate=True).count(), 1)
+        self.assertIsNone(health.transition(later + timedelta(minutes=5)))
+        self.beat()
+        self.assertEqual(health.transition(self.now), 'monitoring_restored')
+
+    def test_off_to_degraded_gets_the_grace_too(self):
+        with override_settings(CT_WATCH=False):
+            health.transition(self.now)
+        self.assertIsNone(health.transition(self.now))
+        self.assertEqual(health.transition(self.now + timedelta(minutes=20)), 'monitoring_degraded')
+
+    def test_lost_state_key_while_degraded_still_alerts(self):
+        health.transition(self.now)
+        self.r.delete(health.STATE_KEY)
+        health.transition(self.now + timedelta(minutes=1))
+        self.assertEqual(health.transition(self.now + timedelta(minutes=17)), 'monitoring_degraded')
+
+    def test_nan_sample_and_unpolled_api_do_not_break_the_card(self):
+        self.r.lpush(f'limes:ct:lat:{self.now:%Y%m%d}', 'nan', 'inf', 3)
+        self.assertEqual(health.card(self.p, self.now)['latency']['t1_p50'], 3)

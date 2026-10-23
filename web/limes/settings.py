@@ -43,8 +43,9 @@ CT_WATCHLIST_MAX = env.int('LIMES_CT_WATCHLIST_MAX', default=5000)
 CT_INGEST_PER_MIN = env.int('LIMES_CT_INGEST_PER_MIN', default=600)  # spool files ingested per minute
 CT_STATE_DIR = env('LIMES_CT_STATE_DIR', default='/var/lib/ct-watch')
 # Cert Spotter API fallback (limes.ct.api): opt-in, key from the environment only. The free tier allows 10 requests/hour.
-CERTSPOTTER_API_KEY = env('LIMES_CERTSPOTTER_API_KEY', default='')
+CERTSPOTTER_API_KEY = env('LIMES_CERTSPOTTER_API_KEY', default='').strip()
 CERTSPOTTER_HOURLY_BUDGET = max(1, min(env.int('LIMES_CERTSPOTTER_HOURLY_BUDGET', default=7), 10))
+CT_DEGRADED_GRACE_MIN = env.int('LIMES_CT_DEGRADED_GRACE_MIN', default=15)  # minutes a never-alerted degraded watch waits before alerting
 CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before a silent watcher fails its healthcheck
 # Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
 # share of each monitor tick's budget the queue may take
