@@ -110,10 +110,6 @@ urlpatterns = [
         IPToDomain.as_view(),
         name='ip_to_domain'),
     path(
-        'tools/whois/',
-        Whois.as_view(),
-        name='whois'),
-    path(
         'tools/cve_details/',
         CVEDetails.as_view(),
         name='cve_details'),

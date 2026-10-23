@@ -20,7 +20,7 @@ TASK_PLAN = {
     # parsing, enrichment, notifications 15 min
     'send_notif': (IO, 15 * MIN), 'send_scan_notif': (IO, 15 * MIN), 'send_task_notif': (IO, 15 * MIN),
     'send_file_to_discord': (IO, 15 * MIN),
-    'parse_nmap_results': (IO, 15 * MIN), 'geo_localize': (IO, 15 * MIN), 'query_whois': (IO, 15 * MIN),
+    'parse_nmap_results': (IO, 15 * MIN), 'geo_localize': (IO, 15 * MIN),
     'enumerate_ranges': (IO, 15 * MIN),  # network-bound; a 60 s beat tick that holds its own Redis tick lock
     'poll_ct_api': (IO, 15 * MIN),  # one Cert Spotter request per slot, under its own tick lock
     'monitor_assets': (IO, 15 * MIN),  # likewise: contacts targets only through limes.safe_fetch

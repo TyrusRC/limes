@@ -162,7 +162,7 @@ $(document).ready(function(){
 				{
 					"render": function(data, type, row) {
 						var content = '';
-						content += `<b>${htmlEncode(data)}</b>&nbsp;&nbsp;<a href="#" onclick="get_target_whois('${jsEscape(data)}')">(view whois)</a>`;
+						content += `<b>${htmlEncode(data)}</b>`;
 						if (row.organization) {
 							content += '<br>';
 							for (var org in row.organization) {
