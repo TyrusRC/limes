@@ -5,19 +5,24 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.db import transaction
 from django.utils import timezone
 
+from limes import event_queue
 from limes.checks import network
 from startScan.models import ChangeEvent
 
 logger = logging.getLogger(__name__)
 KINDS = ('issue_new', 'issue_fixed', 'issue_regressed', 'score_dropped', 'score_changed',
-         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new')
+         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new',
+         'cert_new', 'dns_changed', 'monitoring_degraded', 'monitoring_restored')
 IMMEDIATE_SEVERITY = 3
-ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed')
+ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed', 'monitoring_degraded')
+NEW_ISSUER_KEY = 'cert.new_issuer'
 
 
 def is_immediate(kind, key, severity):
     if kind in ALWAYS_IMMEDIATE:
         return True
+    if kind == 'cert_new':  # only a certificate from an issuer never seen on the root interrupts
+        return key == NEW_ISSUER_KEY
     if kind == 'asset_new':  # only a new host that exposes a risky service interrupts
         return (key or '').startswith('net.exposed_')
     if kind == 'waiver_expired':  # the caller passes severity only while the issue is still open
@@ -47,10 +52,13 @@ def safe_record(*args, **kwargs):
         logger.exception('Could not record change event %s', args[1] if len(args) > 1 else kwargs.get('kind'))
 
 
-def record_asset_new(project, asset, ports=()):
+def record_asset_new(project, asset, ports=(), enqueue=True):
     """The one place an asset_new event is built. Callers stay silent on a first sweep."""
     ports = sorted(ports)
     key = network.risky_check(ports)
     title = f'New {asset.kind} {asset.value}' + (f' exposes {key[len("net.exposed_"):]}' if key else '')
     parent = asset.parent.value if asset.parent_id else None
-    return safe_record(project, 'asset_new', title, asset=asset, detail={'ports': ports, 'parent': parent}, key=key)
+    event = safe_record(project, 'asset_new', title, asset=asset, detail={'ports': ports, 'parent': parent}, key=key)
+    if enqueue:
+        event_queue.enqueue(asset, 'asset_new')
+    return event

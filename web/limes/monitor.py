@@ -63,6 +63,7 @@ def effective_interval(asset):
 
 # Assets-page labels for the raw source names in Asset.sources.
 FOUND_BY = {'manual': 'manual', 'discovery': 'scan', 'probe': 'scan', 'dns': 'scan', 'crtsh': 'CT',
+            'ct': 'CT', 'certspotter_api': 'CT',
             'internetdb': 'InternetDB', 'cidr': 'CIDR', 'asn': 'ASN', 'attribution': 'attribution'}
 ENUMERATION_OFF = 'Enumeration off (operator setting)'
 

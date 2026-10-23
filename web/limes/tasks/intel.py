@@ -49,6 +49,38 @@ def _store(asset, key, data, now):
     asset.enrichment = row.enrichment
 
 
+def cotenant_candidates(project, root, cert_ref, names, owned, known, allow, source, exclude=frozenset(), done=None):
+    """Registrable domains sharing one certificate with `root` become candidates (evidence only: never owned).
+    `allow()` is asked once per brand-new candidate and refuses past the caller's allowance; `done` (the caller's
+    run-wide set) keeps a domain to one upsert per run; `exclude` holds registrable domains never to suggest.
+    Returns (new, capped).
+    NOTE: evidence writes for known domains are bounded only by certificates x SHARED_CERT_LIMIT;
+    upgrade path: skip the write when that (source, evidence) pair is already recorded."""
+    done = set() if done is None else done
+    regs = {r for r in (domains.registrable(n) for n in names) if r}
+    if len(regs) > SHARED_CERT_LIMIT:
+        return 0, 0
+    in_root = next((n for n in names if n == root.value or n.endswith('.' + root.value)), None)
+    if not in_root:
+        return 0, 0
+    inventory.record_fact(root, 'cert', cert_ref, source)
+    new = capped = 0
+    for reg in sorted(regs - done - set(exclude)):
+        if _is_owned(reg, owned):
+            continue
+        done.add(reg)
+        is_new = reg not in known
+        if is_new and not allow():
+            capped += 1
+            continue
+        cand = inventory.upsert_candidate(project, 'root_domain', reg, source,
+                                          f'cert:{cert_ref} ({in_root}) shared with {root.value}')
+        if cand:
+            inventory.record_fact(cand, 'cert', cert_ref, source)
+        new += is_new
+    return new, capped
+
+
 def run_crtsh(project, root, get=http.get_json):
     status, rows = get(crtsh.build_url(root.value), provider='crtsh')
     certs = crtsh.parse(rows) if status == 200 else []
@@ -65,34 +97,22 @@ def run_crtsh(project, root, get=http.get_json):
     for name, cert_id in names.items():
         inventory.upsert_hostname_asset(project, name, parent=root, source='crtsh', evidence=f'cert:{cert_id}')
         hostnames += name not in existing
-    candidates = capped = 0
-    done = set()
     # Domains already in the inventory (candidate, rejected, ...) get evidence but never use up
     # the cap, so a large co-tenancy set surfaces over successive runs.
-    # NOTE: evidence writes for known domains are bounded only by certificates x SHARED_CERT_LIMIT;
-    # upgrade path: skip the write when that (source, evidence) pair is already recorded.
     known = set(Asset.objects.filter(project=project, kind='root_domain').values_list('value', flat=True))
+    used, done = [0], set()
+
+    def allow():
+        used[0] += 1
+        return used[0] <= MAX_CANDIDATES_PER_ROOT
+
+    candidates = capped = 0
     for cert in certs:
-        regs = {r for r in (domains.registrable(n) for n in cert['names']) if r}
-        if len(regs) > SHARED_CERT_LIMIT:
-            continue
-        in_root = next((n for n in cert['names'] if n == root.value or n.endswith('.' + root.value)), None)
-        if not in_root:
-            continue
-        inventory.record_fact(root, 'cert', str(cert['id']), 'crtsh')
-        for reg in sorted(regs - done):
-            if _is_owned(reg, owned):
-                continue
-            done.add(reg)
-            is_new = reg not in known
-            if is_new and candidates >= MAX_CANDIDATES_PER_ROOT:
-                capped += 1
-                continue
-            cand = inventory.upsert_candidate(project, 'root_domain', reg, 'crtsh',
-                                              f'cert:{cert["id"]} ({in_root}) shared with {root.value}')
-            if cand:
-                inventory.record_fact(cand, 'cert', str(cert['id']), 'crtsh')
-            candidates += is_new
+        n, c = cotenant_candidates(project, root, str(cert['id']), cert['names'], owned, known, allow, 'crtsh',
+                                   done=done)
+        candidates, capped = candidates + n, capped + c
+    from limes.ct import ingest  # lazy: ingest imports this module
+    ingest.seed_issuers(root, crtsh.issuers(rows) if status == 200 else set(), timezone.now())
     return {'hostnames': hostnames, 'candidates': candidates, 'candidates_capped': capped}
 
 

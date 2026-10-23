@@ -38,6 +38,11 @@ class ImmediacyTest(SimpleTestCase):
         self.assertFalse(events.is_immediate('asset_missing', None, None))
         self.assertTrue(events.is_immediate('asset_new', 'net.exposed_rdp', None))
         self.assertFalse(events.is_immediate('asset_new', None, None))
+        self.assertTrue(events.is_immediate('cert_new', 'cert.new_issuer', None))
+        self.assertFalse(events.is_immediate('cert_new', None, None))
+        self.assertTrue(events.is_immediate('monitoring_degraded', None, None))
+        self.assertFalse(events.is_immediate('dns_changed', None, None))
+        self.assertFalse(events.is_immediate('monitoring_restored', None, None))
 
 
 class RiskyCheckTest(SimpleTestCase):
@@ -64,6 +69,14 @@ class AssetNewTest(TestCase):
         ev = events.record_asset_new(self.p, self.a, ports=[80, 3389])
         self.assertEqual(ev.title, 'New ip 198.51.100.7 exposes rdp')
         self.assertTrue(ev.immediate)
+
+    def test_enqueues_a_check_unless_told_not_to(self):
+        with mock.patch('limes.alerts.events.event_queue.enqueue') as enq:
+            events.record_asset_new(self.p, self.a)
+            enq.assert_called_once_with(self.a, 'asset_new')
+            enq.reset_mock()
+            events.record_asset_new(self.p, self.a, enqueue=False)
+            enq.assert_not_called()
 
     def test_no_parent_and_failure_never_raises(self):
         self.parent.delete()
