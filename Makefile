@@ -33,7 +33,7 @@ certs:		    ## Generate certificates.
 setup:			## Generate certificates.
 	@make certs
 
-up:				## Build and start all services.
+up:				## Build and start all services (REALTIME=1 adds the certificate watch, LLM=1 the local LLM).
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} up -d --build ${SERVICES}
 
 build:			## Build all services.
@@ -56,7 +56,7 @@ pull:			## Pull Docker images.
 	docker login docker.pkg.github.com
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} pull
 
-down:			## Down all services.
+down:			## Down all services (add REALTIME=1 to include ct-watch, which a plain down leaves running).
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} down
 
 stop:			## Stop all services.

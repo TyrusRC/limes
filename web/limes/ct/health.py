@@ -3,6 +3,7 @@ alert, and the card data the dashboard shows. The heartbeat and everything in it
 import json
 import logging
 import math
+import re
 from datetime import timedelta, timezone as dt_tz
 
 from django.conf import settings
@@ -25,6 +26,18 @@ REASONS = {'no_heartbeat': 'The watcher has not reported', 'stale_heartbeat': 'T
            'process_down': 'certspotter is not running', 'restart_storm': 'certspotter keeps restarting',
            'watcher_error': 'certspotter reported an error', 'spool_backlog': 'Certificate backlog is growing'}
 ERROR_WINDOW = watch.ERROR_WINDOW
+# The watcher is instance-wide, so every project sees its last error. Certificate and log data are hostile and can name
+# other projects' hosts; the proxy URL may carry credentials. Show the shape of the error, never the names.
+_URL = re.compile(r'[a-z][a-z0-9+.-]*://\S+', re.I)
+_IPV4 = re.compile(r'\b\d{1,3}(?:\.\d{1,3}){3}\b')
+_IPV6 = re.compile(r'(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])', re.I)
+_HOST = re.compile(r'\b(?:[a-z0-9_-]+\.)+[a-z][a-z0-9-]*\b', re.I)
+
+
+def redact_error(text):
+    for rx, to in ((_URL, '<url>'), (_IPV4, '<ip>'), (_IPV6, '<ip>'), (_HOST, '<host>')):
+        text = rx.sub(to, text)
+    return text
 SPOOL_LIMIT = 1000
 RESTART_LIMIT = 3
 SAMPLE_MAX = 1000
@@ -217,7 +230,7 @@ def card(project, now):
         'watch': {'heartbeat_age': _age(now, hb.get('at')), 'last_match_age': _age(now, hb.get('last_match_at')),
                   'watchlist_size': _int(wl) if hb else None, 'watchlist_dropped': _int(hb.get('watchlist_dropped')),
                   'restarts_10m': _int(hb.get('restarts_10m')), 'spool_depth': _int(hb.get('spool_depth')),
-                  'last_error_summary': err[:300] if isinstance(err, str) and err else None, 'api_only_7d': api_only},
+                  'last_error_summary': redact_error(err)[:300] if isinstance(err, str) and err else None, 'api_only_7d': api_only},
         'queue': {'depth': snap['depth'], 'oldest_age': snap['oldest_age'], 'counts': snap['counts']},
         'latency': {'t1_p50': t1[0], 't1_p95': t1[1], 't1_upper_p50': t1u[0], 't2_p50': t2[0], 't2_p95': t2[1],
                     't3_p50': t3[0], 't3_p95': t3[1]},

@@ -38,6 +38,10 @@ ecosystem and need the owner's explicit go-ahead. The build and the tests do not
 - The watcher idles (state `idle`) while there is nothing to watch, that is, no owned root. It is not a fault.
 - The watchlist holds owned roots, owned hosts and lookalikes, capped at `LIMES_CT_WATCHLIST_MAX` with owned names
   winning. A change restarts certspotter at most every `LIMES_CT_WATCH_RESTART_MIN` seconds.
+- Keep `LIMES_SECRET_KEY` set in `.env` (the installer does this). The container's root filesystem is read-only, so
+  without it Django would try to create its secret file under `/usr/src/app` and fail. Log files go to `/tmp`
+  (`LIMES_LOG_DIR`, set by the compose service).
+- The hook exits non-zero when it cannot write the spool, so certspotter retries that certificate.
 - The compose service has no published ports, a read-only root filesystem and `mem_limit` 512m (`CT_WATCH_MEM`).
   The 512m figure is a guess until measured.
 
@@ -50,10 +54,14 @@ and is never logged.
 - The free plan allows 100 single-hostname and 10 full-domain queries per hour; Limes uses 7
   (`LIMES_CERTSPOTTER_HOURLY_BUDGET`, 1 to 10), one per owned root slot, so more than 7 roots share the hour.
   https://sslmate.com/ct_search_api/
-- Unauthenticated use is limited to "personal or evaluation" use. Check SSLMate's terms for your use before adding
-  a key. https://sslmate.com/help/reference/ct_search_api_v1
-- The first pass per project is a silent baseline: it pages through history without alerting, so turning it on does
-  not flood you.
+- SSLMate's API terms limit unauthenticated use to "personal or evaluation" use. Limes only calls it with a key, but
+  check SSLMate's terms for your use of the free plan before adding one. https://sslmate.com/help/reference/ct_search_api_v1
+- The first pass per project is a silent baseline: it pages through each root's history until an empty page. While a
+  project is baselining, exactly this is silent: no `cert_new` event, no `asset_new` for the names it finds, no
+  event-queue item or recheck chain for them, and no charge against `LIMES_CT_NEW_HOSTS_PER_HOUR`. Still done: the
+  sighting is stored, new hostnames under an owned root are created as owned (from a separate allowance of 10 times
+  `LIMES_CT_NEW_HOSTS_PER_HOUR` an hour), co-tenant candidates are suggested as usual, and the issuer history is
+  learned. Names past the allowance become candidates, and a later sighting promotes one once allowance exists.
 - While the watch is healthy, the API also cross-checks it: a certificate the API saw but the watch did not shows
   as "api-only" on the card.
 
@@ -92,6 +100,11 @@ it never came up) and one "restored" entry in the digest.
 | `LIMES_DNS_WATCH_PER_TICK` | `30` | Most names the DNS watch resolves per tick |
 | `LIMES_LIVE_POLL_SECONDS` | `30` | Overview refresh; `0` turns it off |
 | `LIMES_CT_INGEST_PER_MIN` | `600` | Spool files ingested per minute |
+| `LIMES_CT_WATCH_STALE` | `180` s | Heartbeat age that makes the watch degraded and fails the container healthcheck |
+| `LIMES_CT_DEGRADED_GRACE_MIN` | `15` | Minutes a watch that never came up waits before its one degraded alert |
+| `LIMES_CT_WATCHLIST_MAX` | `5000` | Names on the watchlist; owned names win |
+| `LIMES_CT_WATCH_RESTART_MIN` | `300` s | Minimum gap between watchlist-driven certspotter restarts |
+| `LIMES_CT_STATE_DIR` | `/var/lib/ct-watch` | Where the watcher keeps state, spool and watchlist; match the `ct_state` mount |
 
 The queue is drained by the `drain-events` beat tick every 15 s (alongside the 60 s `monitor-assets` tick). A drain
 steps aside when the next full tick is due, so the cadence is not starved.
@@ -106,3 +119,10 @@ certificates.
 - SSLMate (Cert Spotter) sees your owned roots, and only when `LIMES_CERTSPOTTER_API_KEY` is set. Without a key
   nothing is sent to it.
 - crt.sh, InternetDB and RIPEstat are used as before by scans; the event queue adds no new third party.
+
+## Turning it off
+
+Set `LIMES_CT_WATCH=false` (the supervisor idles and the card reads `off`) and stop the container:
+`docker compose --profile realtime stop ct-watch`, or `make down REALTIME=1`. A plain `make down` does not include
+the `realtime` profile and leaves `ct-watch` running. The `ct_state` volume is kept; remove it to start from the
+logs' current ends.

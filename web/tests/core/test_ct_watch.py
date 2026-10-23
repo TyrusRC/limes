@@ -88,6 +88,12 @@ class HookTest(SimpleTestCase):
         self.assertEqual(len(rec['summary']), 2048)
         self.assertEqual(rec['event'], 'error')
 
+    def test_hook_fails_when_the_spool_is_unwritable(self):
+        env = self.cert()
+        with mock.patch.object(hook.os, 'makedirs', side_effect=OSError('read-only')):
+            self.assertEqual(hook.main(env, self.spool), 1)
+            self.assertEqual(hook.main({'EVENT': 'error', 'SUMMARY': 'x'}, self.spool), 1)
+
     def test_hook_names_total_reaches_ingest(self):
         env = self.cert([f'h{i}.x.com' for i in range(1500)])
         hook.main(env, self.spool)

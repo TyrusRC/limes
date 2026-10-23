@@ -4,7 +4,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.urls import reverse
 
 from dashboard import activity, posture
@@ -193,6 +193,10 @@ class OverviewBudgetTest(OverviewPageBase):
         large = self.queries(40)
         self.assertEqual(small, large)
         self.assertEqual(large, OVERVIEW_QUERIES)
+
+    @override_settings(CERTSPOTTER_API_KEY='k' * 8)
+    def test_page_queries_with_an_api_key(self):
+        self.assertEqual(self.queries(3), OVERVIEW_QUERIES + 1)  # api.card: one query for the roots' poll times
 
     def test_warm_page_query_count(self):
         self.seed(self.p, 5)

@@ -2,8 +2,9 @@
 """certspotter hook: copies one discovered certificate into the spool directory, then exits 0.
 Stdlib only, run isolated (-I). Everything it reads comes from the public CT log, so it is hostile: the hash is
 validated before it becomes a file name, the JSON is opened without following links and size-capped, and the
-record is written to a temp file and renamed so the supervisor never sees a partial file. It never exits non-zero
-(certspotter would treat that as a failure to record) and prints only a fixed one-line reason to stderr."""
+record is written to a temp file and renamed so the supervisor never sees a partial file. It exits 0 for anything wrong
+with the certificate itself (retrying cannot help), but non-zero when the spool cannot be written, so certspotter
+keeps the certificate and tries again. It prints only a fixed one-line reason to stderr."""
 import json
 import os
 import re
@@ -110,6 +111,9 @@ def main(env, spool):
             return _discovered(env, spool)
         if event in ('error', 'malformed_cert'):
             return _health(env, spool)
+    except OSError:  # the spool is unwritable (full disk, bad mount): fail so certspotter retries the certificate
+        sys.stderr.write('ct-hook: could not write the spool\n')
+        return 1
     except Exception:
         sys.stderr.write('ct-hook: failed\n')
     return 0

@@ -14,6 +14,7 @@ from tests.core.test_ct_health import Base as HealthBase
 X = '<img src=x onerror=alert(1)>'
 ESCAPED = '&lt;img src=x onerror=alert(1)&gt;'
 LIVE_QUERIES = 7  # session, user, project, events and the card's three; measured on the finished branch; a rise must be justified in review
+API_QUERIES = 1  # api.card reads the owned roots' poll times once; measured with a key set
 
 
 def section(html, id_):
@@ -100,6 +101,13 @@ class LiveEndpointTest(LiveBase):
             counts.append(len(q))
         self.assertEqual(counts[0], counts[1])
         self.assertEqual(counts[0], LIVE_QUERIES)
+
+    @override_settings(CERTSPOTTER_API_KEY='k' * 8)
+    def test_live_queries_with_an_api_key(self):
+        self.get()  # warm-up: session, prefs
+        with CaptureQueriesContext(connection) as q:
+            self.get()
+        self.assertEqual(len(q), LIVE_QUERIES + API_QUERIES)
 
     @override_settings(CT_WATCH=True, CONTINUOUS_SCANS=True)
     def test_card_is_honest_in_json(self):

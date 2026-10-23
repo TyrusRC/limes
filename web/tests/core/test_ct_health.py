@@ -132,6 +132,14 @@ class TransitionTest(Base):
 
 @override_settings(CT_WATCH=True, CONTINUOUS_SCANS=True, CERTSPOTTER_API_KEY='')
 class CardTest(Base):
+    def test_error_summary_hides_hosts_ips_and_proxy_urls(self):
+        self.beat(last_error_summary='dial tcp 203.0.113.9:443: via http://user:pw@proxy.corp.net:3128 for secret.other.com '
+                                     'and [2001:db8::1]:443 failed')
+        shown = health.card(self.p, self.now)['watch']['last_error_summary']
+        for leak in ('203.0.113.9', 'user:pw', 'proxy.corp', 'secret.other', '2001:db8'):
+            self.assertNotIn(leak, shown)
+        self.assertIn('failed', shown)
+
     def test_card_project_scoped_and_escaped(self):
         o = Project.objects.create(name='o', slug='o', insert_date=self.now)
         self.beat(last_error_summary='<img src=x onerror=alert(1)>' * 50)
