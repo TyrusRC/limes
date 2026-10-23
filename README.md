@@ -110,11 +110,11 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 
 Built and merged: inventory and discovery, continuous tracking of added assets, the risk score and
 checks, change alerts, waivers, notes and the fix forecast, and the portal in light and dark themes.
+The Overview shows the score by category, exposure, certificates, technologies, remediation, discovery,
+coverage, top risks and what changed.
 
-Designed, not built yet (specs in [`docs/superpowers/specs`](docs/superpowers/specs)):
+Designed, not built yet (spec in [`docs/superpowers/specs`](docs/superpowers/specs)):
 
-- a richer Overview with score by category, exposure, certificates, technologies and coverage
-  (`2026-10-23-rich-dashboard-design.md`);
 - a native MCP server so AI agents can query and analyze Limes data (`2026-10-17-mcp-server-design.md`).
 
 ## Security

@@ -1,13 +1,19 @@
 from datetime import timedelta
+from unittest import mock
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from dashboard import activity, posture
+from dashboard.stats import asm_stats, invalidate
 from dashboard.models import Project
 from limes.alerts.issues import sync_issues
 from limes.checks.catalogue import CHECKS
-from startScan.models import Asset, RiskCheck, Technology, Vulnerability
+from startScan.models import (Asset, ChangeEvent, IssueWaiver, RiskCheck, ScoreSnapshot, Technology, TrackedIssue,
+                              Vulnerability)
 from tests.core.test_dashboard_stats import Base
 
 X = '<img src=x onerror=alert(1)>'
@@ -40,8 +46,8 @@ class OverviewPageTest(Base):
         return RiskCheck.objects.create(asset=asset, check_id=check_id, status=status, severity=CHECKS[check_id].severity,
                                         last_checked=self.now, **kw)
 
-    def ip(self, value, ports):
-        return self.asset(value, kind='ip', last_resolved_at=self.now,
+    def ip(self, value, ports, project=None):
+        return self.asset(value, kind='ip', project=project, last_resolved_at=self.now,
                           enrichment={'internetdb': {'ports': ports, 'fetched_at': self.now.isoformat()}})
 
     def issues_url(self, slug='p'):
@@ -149,3 +155,80 @@ class OverviewPageTest(Base):
         html = self.page('p')
         self.assertIn('?technology=Apache%20HTTP%20Server%202.4%20%26%20co&amp;scope_tier=owned', html)
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
+
+
+OVERVIEW_QUERIES = 85  # a rise must be justified in review
+WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome; none from the cards
+
+
+class OverviewPageBase(OverviewPageTest):
+    def seed(self, project, n, tag='', domain='x.com'):
+        """n hosts with a finding, a fresh check, a technology, sources and a tracked issue, plus n IPs with ports."""
+        scan = self.scan(domain=domain)
+        for i in range(n):
+            h = self.asset(f'h{i}{tag}.x.com', project=project, sources=[{'source': 'crtsh'}, {'source': 'manual'}],
+                           last_resolved_at=self.now)
+            Vulnerability.objects.create(scan_history=scan, asset=h, name=f'v{i}{tag}', template_id=f't{i}{tag}', severity=3,
+                                         open_status=True)
+            self.check(h, 'web.hsts_missing', 'fail')
+            h.technologies.add(Technology.objects.get_or_create(name=f'tech{i}{tag}')[0])
+            self.ip(f'203.0.113.{i + 1}', [22, 443, 3389], project=project)
+
+
+class OverviewBudgetTest(OverviewPageBase):
+    def queries(self, n):
+        self.seed(self.p, n)
+        sync_issues(self.p, now=self.now)
+        self.client.get('/p/dashboard/')  # warm-up (lazy prefs creation)
+        cache.clear()
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertEqual(self.client.get('/p/dashboard/').status_code, 200)
+        return len(ctx)
+
+    def test_page_queries_bounded(self):
+        Asset.objects.filter(pk=self.root.pk).update(last_resolved_at=self.now)
+        small = self.queries(3)
+        for a in Asset.objects.filter(project=self.p).exclude(pk=self.root.pk):
+            a.delete()  # same project, fresh seed at N=40 (the IP values are reused, so the first batch must go)
+        large = self.queries(40)
+        self.assertEqual(small, large)
+        self.assertEqual(large, OVERVIEW_QUERIES)
+
+    def test_warm_page_query_count(self):
+        self.seed(self.p, 5)
+        self.page('p')  # the second GET leaves the stats cache populated
+        with self.assertNumQueries(WARM_QUERIES):
+            self.client.get('/p/dashboard/')
+
+    def test_second_load_is_cached(self):
+        self.page('p')
+        with mock.patch('dashboard.stats.asm_stats', wraps=asm_stats) as m:
+            self.client.get('/p/dashboard/')
+            self.assertEqual(m.call_count, 0)
+            invalidate(self.p.id)
+            self.client.get('/p/dashboard/')
+            self.assertEqual(m.call_count, 1)
+
+
+class OverviewScopeTest(OverviewPageBase):
+    def test_no_cross_project_data(self):
+        before = asm_stats(self.p)
+        o = self.other
+        ox = Asset.objects.get(project=o, kind='root_domain')
+        self.seed(o, 4, tag='-ONLY-IN-O', domain='y.com')
+        for t in Technology.objects.filter(name__startswith='tech'):
+            t.name = 'ONLY-IN-O ' + t.name
+            t.save()
+        sync_issues(o, now=self.now)
+        for i in TrackedIssue.objects.filter(project=o)[:2]:
+            IssueWaiver.objects.create(issue=i, kind='accepted_risk', reason='r')
+        TrackedIssue.objects.filter(project=o).update(reopened=1, reopened_at=self.now - timedelta(days=2))
+        self.check(ox, 'tls.cert_expiring', 'fail', evidence={'not_after': (self.now + timedelta(days=5)).isoformat()})
+        ChangeEvent.objects.create(project=o, kind='issue_new', title='ONLY-IN-O event', asset=ox, severity=4)
+        for d in (1, 40):
+            ScoreSnapshot.objects.create(project=o, date=(self.now - timedelta(days=d)).date(), version='v', grade='B',
+                                         score=700, categories={'web': 600})
+        Asset.objects.filter(project=o).update(last_resolved_at=self.now)
+        cache.clear()
+        self.assertEqual(asm_stats(self.p), before)
+        self.assertNotIn('ONLY-IN-O', self.page('p'))
