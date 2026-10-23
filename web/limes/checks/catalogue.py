@@ -14,6 +14,12 @@ RISKY_PORTS = {
     2375: ('docker', 3), 5900: ('vnc', 3),
 }
 
+# AI/ML service ports -> the services that may answer there; each service yields a net.exposed_<service> check
+# (provisional, see below). 4000 is LiteLLM and 1234 LM Studio: both documented OpenAI-compatible defaults.
+AI_PORTS = {11434: ('ollama',), 8000: ('openai_api', 'triton'), 7860: ('gradio',), 8888: ('jupyter',),
+            8265: ('ray',), 4000: ('openai_api',), 1234: ('openai_api',)}
+MAX_AI_PORTS = 6  # per IP: the lowest ones
+
 _STATIC = [
     ('web.https_missing', 'web', 3, 'The site answers over HTTP but not over HTTPS.',
      'Serve the site over HTTPS with a valid certificate.'),

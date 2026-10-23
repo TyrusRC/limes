@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from dashboard.stats import OWNED
 from limes import scoring
-from limes.checks.catalogue import RISKY_PORTS
+from limes.checks.catalogue import AI_PORTS, RISKY_PORTS
 from limes.checks.collect import _fresh_internetdb
 
 EXPOSURE_LIMIT = 15
@@ -70,7 +70,9 @@ def exposure(project, now=None):
     rows = []
     for port, n in hosts_by_port.items():
         risky = RISKY_PORTS.get(port)
-        rows.append({'port': port, 'service': _service(port), 'hosts': n, 'risky': bool(risky),
+        ai = AI_PORTS.get(port)
+        rows.append({'port': port, 'service': ', '.join(ai) if ai else _service(port), 'ai': bool(ai), 'hosts': n,
+                     'risky': bool(risky),
                      'severity': scoring.SEVERITY_NAMES[risky[1]] if risky else None,
                      'check': f'net.exposed_{risky[0]}' if risky else None})
     rows.sort(key=lambda r: (not r['risky'], -(RISKY_PORTS[r['port']][1] if r['risky'] else 0), -r['hosts'], r['port']))

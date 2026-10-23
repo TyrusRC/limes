@@ -564,7 +564,7 @@ class RunTest(TestCase):
         run.run_checks(self.project, second, observers=self.observers())
         self.assertEqual(ip.risk_checks.count(), 0)
         run.run_checks(self.project, self.root, observers=self.observers())
-        self.assertEqual(ip.risk_checks.count(), 14)
+        self.assertEqual(ip.risk_checks.count(), 14 + 6)
         self.assertEqual({r.status for r in ip.risk_checks.all()}, {'error'})
 
 

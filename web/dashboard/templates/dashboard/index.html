@@ -165,7 +165,7 @@ Overview
         {% for r in exposure.rows %}
           <tr>
             <td class="mono">{{ r.port }}</td>
-            <td>{{ r.service|default:"—" }}</td>
+            <td>{{ r.service|default:"—" }}{% if r.ai %} <span class="ov-tag">AI</span>{% endif %}</td>
             <td class="ov-num">{{ r.hosts|intcomma }}</td>
             <td>{% if r.risky %}<a class="sev-{{ r.severity }}" href="{{ issues_url }}?category=network" title="Network issues">{{ r.severity|capfirst }}</a>{% else %}<span class="ov-muted">—</span>{% endif %}</td>
           </tr>

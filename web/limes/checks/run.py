@@ -9,9 +9,9 @@ from django.db.models import Max, Q
 from django.utils import timezone
 
 from limes import reputation, safe_fetch, scope
-from limes.checks import collect, dns, email, network, tls, web
-from limes.checks.catalogue import CHECKS
-from limes.identity import ScanIdentity
+from limes.checks import ai, collect, dns, email, network, tls, web
+from limes.checks.catalogue import AI_PORTS, CHECKS, Result
+from limes.identity import DEFAULT_UA, ScanIdentity
 from limes.scoring import _root_of
 from startScan.models import Asset, RiskCheck
 
@@ -110,6 +110,26 @@ def _reputation(ip, now, idx=None):
         return []
 
 
+def _ai(ip, ports, complete, observe):
+    """AI-service rows for an owned IP. Probes only AI ports already seen open, through safe_fetch's vetted,
+    pinned get (an IP literal: no DNS); a refused address is not contacted and its rows are 'error'."""
+    if not any(p in AI_PORTS for p in ports):
+        return ai.evaluate({}, complete)
+    vetted, reason = safe_fetch.resolve_vetted(ip.value)
+    if reason:
+        log.info('ai checks: %s not contacted: %s', ip.value, reason)
+        return [Result(i, 'error', {'reason': reason}) for i in ai.IDS]
+    get = safe_fetch.pinned_get(vetted, vetted, deadline=safe_fetch.Deadline())
+    return ai.evaluate(observe(vetted, ports, get, DEFAULT_UA), complete)
+
+
+def _ip_checks(asset, now, obs, observers, idx=None):
+    """network + reputation + AI results for one owned IP."""
+    obs = {'ai': collect.observe_ai, **obs, **(observers or {})}
+    ports, complete = obs['ports'](asset, now)
+    return network.evaluate(ports, complete) + _reputation(asset, now, idx) + _ai(asset, ports, complete, obs['ai'])
+
+
 def _owned(project):
     return Asset.objects.filter(project=project, scope_tier__in=OWNED).exclude(state='retired')
 
@@ -157,7 +177,7 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
         idx = None
         for ip in _owned(project).filter(kind='ip'):
             idx = idx or _index(now)  # feeds only, no network; built once per run
-            step(ip, lambda ip=ip: network.evaluate(*obs['ports'](ip, now)) + _reputation(ip, now, idx))
+            step(ip, lambda ip=ip: _ip_checks(ip, now, obs, observers, idx))
     return done
 
 
@@ -184,5 +204,5 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
         step(asset, root_checks)
     if asset.kind == 'ip':
         # reputation reads the stored feeds only: no DNS, no DQS lookup here
-        step(asset, lambda: network.evaluate(*obs['ports'](asset, now)) + _reputation(asset, now))
+        step(asset, lambda: _ip_checks(asset, now, obs, observers))
     return done
