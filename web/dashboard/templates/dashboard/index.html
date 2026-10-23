@@ -77,6 +77,56 @@ Overview
     </div>
   </section>
 
+  <section class="card ov-changed" id="dash_what_changed" aria-labelledby="h-changed">
+    <div class="ov-card-head">
+      <h2 id="h-changed">What changed</h2>
+      <div class="ov-toggle" role="group" aria-label="Period">
+        {% for w in what_changed %}<button type="button" id="wc_{{ w.days }}" aria-controls="wc_panel_{{ w.days }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Last {{ w.days }} days">{{ w.days }}d</button>{% endfor %}
+      </div>
+    </div>
+    {% for w in what_changed %}
+    <div class="ov-card-body ov-wc" id="wc_panel_{{ w.days }}" role="region" aria-labelledby="wc_{{ w.days }}"{% if not forloop.first %} hidden{% endif %}>
+      <div class="ov-wc-score">
+        {% if w.score_delta is not None %}
+        <span class="ov-delta{% if w.score_delta > 0 %} ov-delta-up{% elif w.score_delta < 0 %} ov-delta-down{% endif %}">{% if w.score_delta > 0 %}+{% endif %}{{ w.score_delta }}</span>
+        <span>Score {{ w.score_from }} → {{ w.score_to }}<span class="ov-muted"> since the <time datetime="{{ w.score_from_date|date:'c' }}">{{ w.score_from_date|date:'M j' }}</time> snapshot</span></span>
+        {% elif w.score_to is None %}
+        <span class="ov-muted">No score yet</span>
+        {% else %}
+        <span class="ov-muted">No trend yet: no score snapshot {{ w.days }} days back</span>
+        {% endif %}
+      </div>
+      <dl class="ov-wc-list">
+        <div><dt>New assets</dt><dd>{{ w.new_assets|intcomma }}</dd>
+          {% if w.new_sample %}<dd class="ov-sample">{% for v in w.new_sample %}<span>{{ v }}</span>{% endfor %}{% if w.new_assets > w.new_sample|length %}<span class="ov-muted">…</span>{% endif %}</dd>{% endif %}</div>
+        <div><dt>Missing or stale</dt><dd>{{ w.removed_assets|intcomma }}</dd>
+          {% if w.removed_sample %}<dd class="ov-sample">{% for v in w.removed_sample %}<span>{{ v }}</span>{% endfor %}{% if w.removed_assets > w.removed_sample|length %}<span class="ov-muted">…</span>{% endif %}</dd>{% endif %}</div>
+        <div><dt>Issues introduced</dt><dd>{{ w.introduced|intcomma }}</dd></div>
+        <div><dt>Issues resolved</dt><dd>{{ w.resolved|intcomma }}</dd></div>
+      </dl>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="card ov-cats" id="dash_categories" aria-labelledby="h-cats">
+    <div class="ov-card-head"><h2 id="h-cats">Score by category</h2><span class="ov-meta">Explains the headline, not added into it · change against 30 days ago</span></div>
+    <div class="ov-cat-grid">
+      {% for c in categories %}
+      <a class="ov-cat" id="cat_{{ c.key }}" href="{{ issues_url }}?category={{ c.key }}">
+        <span class="ov-cat-label">{{ c.label }}</span>
+        <span class="ov-cat-main">
+          {% if c.assessed %}<span class="ov-grade ov-grade-{{ c.grade|lower }}">{{ c.grade }}</span><span class="ov-cat-score">{{ c.score }}</span>{% if c.raw_score != c.score %}<span class="ov-muted ov-cat-raw">raw {{ c.raw_score }}</span>{% endif %}
+          {% else %}<span class="ov-cat-na">Not assessed</span>{% endif %}
+        </span>
+        <span class="ov-cat-foot">
+          <span>{{ c.open|intcomma }} open{% if c.waived %} · {{ c.waived }} waived{% endif %}</span>
+          {% if c.delta_30 is None %}<span class="ov-muted">No trend yet</span>{% else %}<span class="ov-delta{% if c.delta_30 > 0 %} ov-delta-up{% elif c.delta_30 < 0 %} ov-delta-down{% endif %}">{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}</span>{% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="card ov-surface" id="dash_inventory" aria-labelledby="h-surface">
     <div class="ov-card-head"><h2 id="h-surface">Attack surface</h2><a class="ov-meta" href="{{ assets_url }}">View all</a></div>
     <div class="ov-stats">
@@ -104,11 +154,170 @@ Overview
     {% endwith %}
   </section>
 
+  <section class="card ov-half" id="dash_exposure" aria-labelledby="h-exposure">
+    <div class="ov-card-head"><h2 id="h-exposure">Exposed services</h2><span class="ov-meta">{{ exposure.ports }} port{{ exposure.ports|pluralize }} on {{ exposure.hosts }} owned IP{{ exposure.hosts|pluralize }} · InternetDB</span></div>
+    {% if exposure.rows %}
+    <div class="table-responsive ov-flush">
+      <table class="table mb-0 ov-table">
+        <thead><tr><th scope="col">Port</th><th scope="col">Service</th><th scope="col">IPs</th><th scope="col">Risk</th></tr></thead>
+        <tbody>
+        {% for r in exposure.rows %}
+          <tr>
+            <td class="mono">{{ r.port }}</td>
+            <td>{{ r.service|default:"—" }}</td>
+            <td class="ov-num">{{ r.hosts|intcomma }}</td>
+            <td>{% if r.risky %}<a class="sev-{{ r.severity }}" href="{{ issues_url }}?category=network" title="Network issues">{{ r.severity|capfirst }}</a>{% else %}<span class="ov-muted">—</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if exposure.ports > exposure.rows|length %}<div class="ov-card-foot"><span>Showing {{ exposure.rows|length }} of {{ exposure.ports }} ports, risky first</span></div>{% endif %}
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No open ports seen on owned IPs in a fresh InternetDB lookup.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-half" id="dash_certs" aria-labelledby="h-certs">
+    <div class="ov-card-head"><h2 id="h-certs">Certificates</h2><span class="ov-meta">Expired or expiring in 30 days</span></div>
+    {% if certificates.rows %}
+    <div class="table-responsive ov-flush">
+      <table class="table mb-0 ov-table">
+        <thead><tr><th scope="col">Host</th><th scope="col" class="ov-hide-sm ov-hide-md">Expires</th><th scope="col">Days left</th><th scope="col">Severity</th></tr></thead>
+        <tbody>
+        {% for r in certificates.rows %}
+          <tr>
+            <td class="ov-asset">{{ r.host }}</td>
+            <td class="text-nowrap ov-hide-sm ov-hide-md"><time datetime="{{ r.not_after|date:'c' }}">{{ r.not_after|date:'Y-m-d' }}</time></td>
+            <td class="ov-num" title="{{ r.not_after|date:'Y-m-d' }}">{% if r.expired %}<span class="ov-tag">Expired</span>{% else %}{{ r.days_left }}{% endif %}</td>
+            <td>{% if r.severity %}<span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span>{% else %}<span class="ov-muted" title="The check passed">—</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if certificates.total > certificates.rows|length %}<div class="ov-card-foot"><span>Showing {{ certificates.rows|length }} of {{ certificates.total }}, soonest first</span></div>{% endif %}
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No certificates expire in the next 30 days.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-third" id="dash_tech" aria-labelledby="h-tech">
+    <div class="ov-card-head"><h2 id="h-tech">Technologies</h2><span class="ov-meta">Owned assets running each</span></div>
+    {% if technologies %}
+    {% with top=technologies.0.count %}
+    <ul class="ov-bars">
+      {% for t in technologies %}
+      <li>
+        <a class="ov-bar-name" href="{{ assets_url }}?technology={{ t.name|urlencode:'' }}&amp;scope_tier=owned">{{ t.name }}</a>
+        <span class="ov-bar-count">{{ t.count|intcomma }}</span>
+        <span class="ov-bar"><span style="width:{% widthratio t.count top 100 %}%"></span></span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endwith %}
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No technologies detected on owned assets yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-third" id="dash_remediation" aria-labelledby="h-remediation">
+    <div class="ov-card-head"><h2 id="h-remediation">Remediation</h2><a class="ov-meta" href="{{ issues_url }}">All issues</a></div>
+    {% if remediation.fixed_30 or remediation.opened_30 %}
+    <div class="ov-mini">
+      {% for label, value in remediation.tiles %}<div><span class="ov-mini-label">{{ label }}</span><span class="ov-mini-value">{{ value|intcomma }}</span></div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">Nothing fixed or opened yet in the last 30 days.</p>
+    {% endif %}
+    <h3 class="ov-subhead">Oldest open critical and high</h3>
+    {% if remediation.oldest %}
+    <ul class="ov-list">
+      {% for i in remediation.oldest %}
+      <li>
+        <div class="ov-list-main"><a class="ov-list-title" href="{{ issues_url }}?category={{ i.category }}">{{ i.title }}</a><span class="ov-list-sub">{{ i.asset }}</span></div>
+        <div class="ov-list-side"><span class="sev-{{ i.severity }}">{{ i.severity|capfirst }}</span>
+          <time datetime="{{ i.detected_at|date:'c' }}" title="First detected {{ i.detected_at|date:'Y-m-d' }}{% if i.reopened %}, after it came back{% endif %}">{{ i.age_days }} day{{ i.age_days|pluralize }}{% if i.reopened %} · back{% endif %}</time></div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ov-note ov-pad">No open critical or high issues without a waiver.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-third" id="dash_discovery" aria-labelledby="h-discovery">
+    <div class="ov-card-head"><h2 id="h-discovery">How assets were found</h2><span class="ov-meta">{{ discovery.total|intcomma }} owned</span></div>
+    {% if discovery.rows %}
+    <ul class="ov-bars">
+      {% for r in discovery.rows %}
+      <li>
+        {% if r.filter %}<a class="ov-bar-name" href="{{ assets_url }}?source={{ r.filter|urlencode:'' }}&amp;scope_tier=owned">{{ r.name }}</a>{% else %}<span class="ov-bar-name">{{ r.name }}</span>{% endif %}
+        <span class="ov-bar-count">{{ r.count|intcomma }}</span>
+        <span class="ov-bar"><span style="width:{% widthratio r.count discovery.total 100 %}%"></span></span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="ov-card-foot"><span>Owned assets that are not retired. An asset found several ways counts under each.</span></div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No owned assets yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card ov-third ov-start" id="dash_coverage" aria-labelledby="h-coverage">
+    <div class="ov-card-head"><h2 id="h-coverage">Monitoring coverage</h2><span class="ov-meta">{{ coverage.total|intcomma }} watched</span></div>
+    {% if coverage.total %}
+    <div class="ov-card-body">
+      <div class="ov-stack" role="img" aria-label="{{ coverage.on_time }} on time, {{ coverage.overdue }} overdue, {{ coverage.never }} never checked, {{ coverage.stopped }} stopped, {{ coverage.range_swept }} covered by a range sweep">
+        <span class="ov-stack-ok" style="width:{% widthratio coverage.on_time coverage.total 100 %}%"></span><span class="ov-stack-late" style="width:{% widthratio coverage.overdue coverage.total 100 %}%"></span><span class="ov-stack-never" style="width:{% widthratio coverage.never coverage.total 100 %}%"></span><span class="ov-stack-off" style="width:{% widthratio coverage.stopped coverage.total 100 %}%"></span><span class="ov-stack-sweep" style="width:{% widthratio coverage.range_swept coverage.total 100 %}%"></span>
+      </div>
+      <dl class="ov-keys">
+        <div><dt><i class="ov-key ov-stack-ok"></i>On time</dt><dd>{{ coverage.on_time|intcomma }}</dd></div>
+        <div><dt><i class="ov-key ov-stack-late"></i>Overdue</dt><dd>{{ coverage.overdue|intcomma }}</dd></div>
+        <div><dt><i class="ov-key ov-stack-never"></i>Never checked</dt><dd>{{ coverage.never|intcomma }}</dd></div>
+        <div><dt><i class="ov-key ov-stack-off"></i>Stopped (cadence off)</dt><dd>{{ coverage.stopped|intcomma }}</dd></div>
+        {% if coverage.range_swept %}<div><dt><i class="ov-key ov-stack-sweep"></i>Range sweep</dt><dd>{{ coverage.range_swept|intcomma }}</dd></div>{% endif %}
+      </dl>
+      {% if coverage.oldest %}
+      <p class="ov-oldest">{% if coverage.oldest.why == 'never' %}Waiting longest for a first check{% else %}Most overdue, last checked <time datetime="{{ coverage.oldest.last_checked|date:'c' }}">{{ coverage.oldest.last_checked|naturaltime }}</time>{% endif %}: <strong>{{ coverage.oldest.value }}</strong></p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No owned assets yet.</p>
+    {% endif %}
+    <div class="ov-card-foot"><span>Owned hosts, IPs and domains that are not retired. CIDR ranges and ASNs are not counted.</span></div>
+  </section>
+
+  <section class="card ov-wide" id="dash_top_risks" aria-labelledby="h-top">
+    <div class="ov-card-head"><h2 id="h-top">Top risks</h2><span class="ov-meta">Open issues costing the most points, waived ones left out</span></div>
+    {% if top_risks %}
+    <div class="table-responsive ov-flush">
+      <table class="table mb-0 ov-table">
+        <thead><tr><th scope="col">Issue</th><th scope="col" class="ov-hide-sm">Category</th><th scope="col">Severity</th><th scope="col" class="ov-num">Points</th><th scope="col" class="ov-hide-sm">First detected</th></tr></thead>
+        <tbody>
+        {% for r in top_risks %}
+          <tr>
+            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span></td>
+            <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
+            <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
+            <td class="ov-num">−{{ r.points }}</td>
+            <td class="ov-muted text-nowrap ov-hide-sm">{% if r.detected_at %}<time datetime="{{ r.detected_at|date:'c' }}">{{ r.detected_at|date:'Y-m-d' }}</time> · {{ r.age_days }} d{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="ov-note ov-empty-note ov-pad">No open issues on assessed assets.</p>
+    {% endif %}
+  </section>
+
   <section class="card ov-risky" id="dash_risky" aria-labelledby="h-risky">
     <div class="ov-card-head"><h2 id="h-risky">Riskiest assets</h2><a class="ov-meta" href="{{ assets_url }}">All assets</a></div>
     {% if risky_assets %}
     <div class="table-responsive ov-flush">
-      <table class="table mb-0">
+      <table class="table mb-0 ov-table">
         <thead><tr><th scope="col">Asset</th><th scope="col" class="ov-hide-sm">Type</th><th scope="col">Score</th><th scope="col">Open issues <span class="ov-muted">(C · H · M · L)</span></th><th scope="col" class="ov-hide-sm">Last seen</th></tr></thead>
         <tbody>
         {% for a in risky_assets %}

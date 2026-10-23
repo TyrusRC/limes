@@ -67,7 +67,7 @@ def sync_issues(project, now=None):
                 kind = None
                 if row.status == 'fixed':
                     kind = 'issue_regressed'
-                    row.status, row.fixed_at, row.reopened = 'open', None, row.reopened + 1
+                    row.status, row.fixed_at, row.reopened, row.reopened_at = 'open', None, row.reopened + 1, now
                 elif sev > row.severity:
                     kind = 'issue_new'
                 row.severity, row.last_seen = sev, now

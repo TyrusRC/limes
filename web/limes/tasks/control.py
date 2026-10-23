@@ -403,3 +403,4 @@ def report(ctx={}, description=None):
 				break
 			except Exception:
 				logger.exception('Change alert step %s failed for project %s', name, alert_project.pk)
+		invalidate(alert_project.pk)  # the issue cards changed after the early clear above

@@ -102,9 +102,14 @@ class SyncTest(TestCase):
         (fixed,) = self.sync({self.a.id: {'t1': 1}})
         self.assertEqual((fixed.kind, fixed.immediate), ('issue_fixed', False))
         self.assertEqual(TrackedIssue.objects.get(key='t2').status, 'fixed')
+        self.assertIsNone(TrackedIssue.objects.get(key='t2').reopened_at)
+        before = timezone.now()
         (back,) = self.sync({self.a.id: {'t1': 1, 't2': 3}})
         self.assertEqual((back.kind, back.immediate), ('issue_regressed', True))
-        self.assertEqual(TrackedIssue.objects.get(key='t2').reopened, 1)
+        row = TrackedIssue.objects.get(key='t2')
+        self.assertEqual(row.reopened, 1)
+        self.assertGreaterEqual(row.reopened_at, before)
+        self.assertEqual(row.reopened_at, row.last_seen)  # both are the regressing sync's now
 
     def test_severity_rise_is_new(self):
         self.sync({self.a.id: {'t1': 1}})
@@ -649,7 +654,7 @@ class WiringTest(TestCase):
             control.start_scan_run(self.domain, self.scan, 'full', ctx)
             with self.assertLogs('limes.tasks', level='WARNING'):
                 control.report.run(ctx=ctx)  # must not raise: a re-raise re-runs report via link_error
-        inv.assert_called_once()
+        self.assertEqual(inv.call_count, 2)  # early clear, then again after the alert steps (even on a time limit)
         notif.delay.assert_called_once()
 
     def test_sync_error_still_delivers(self):

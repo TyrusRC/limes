@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from unittest import mock
 from django.test import TestCase
@@ -45,6 +46,24 @@ class IssueApiTest(TestCase):
     def list(self, **params):
         params.setdefault('project', 'p1')
         return self.as_user(self.admin).get('/api/issues/', params).json()
+
+    def test_category_filter(self):
+        ids = lambda **kw: [r['id'] for r in self.list(**kw)]
+        self.assertEqual(ids(category='web'), [self.i1.id])
+        self.assertEqual(ids(category='vulnerabilities'), [self.i2.id])
+        self.assertEqual(ids(category='tls'), [])
+        for bad in ('bogus', 'WEB', ''):
+            self.assertEqual(ids(category=bad), [self.i2.id, self.i1.id], bad)
+        self.assertNotIn(self.other.id, ids(category='web'))
+
+    def test_category_filter_matches_counts(self):
+        from limes import scoring
+        gone = Asset.objects.create(project=self.p, kind='hostname', value='old.x.com', scope_tier='owned_host', state='retired')
+        TrackedIssue.objects.create(project=self.p, asset=gone, key='cve-9', source='finding', severity=3)
+        counts = scoring.category_issue_counts(self.p)
+        for key in scoring.CATEGORIES:
+            self.assertEqual(len(self.list(category=key)), counts[key]['open'], key)
+        self.assertEqual(sum(c['open'] for c in counts.values()), len(self.list()))
 
     def test_list_filters_and_shape(self):
         rows = self.list()
@@ -233,6 +252,14 @@ class IssuePageTest(TestCase):
         r = self.client.get('/scan/p1/issues')
         self.assertEqual(r.status_code, 200)
         return r.content.decode()
+
+    def test_category_select_rendered(self):
+        html = self.page('sys_admin')
+        self.assertIn('id="f_category"', html)
+        from limes import scoring  # the hand-written options must not drift from the category model
+        block = re.search(r'<select[^>]*id="f_category".*?</select>', html, re.S).group(0)
+        options = re.findall(r'<option value="([^"]*)">([^<]*)</option>', block)
+        self.assertEqual(options, [('', 'All categories')] + [(k, scoring.CATEGORY_LABELS[k]) for k in scoring.CATEGORIES])
 
     def test_forms_follow_write_permission(self):
         html = self.page('sys_admin')

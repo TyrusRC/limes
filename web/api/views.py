@@ -864,6 +864,8 @@ class SetAssetCadence(APIView):
 			row.cadence_tier = tier
 			row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
 			row.save(update_fields=['cadence_tier', 'enrichment'])
+		from dashboard.stats import invalidate
+		invalidate(asset.project_id)
 		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 
@@ -915,6 +917,10 @@ class IssueList(APIView):
 			issues = issues.filter(severity=int(q['severity']))
 		if q.get('source') in ('check', 'finding'):
 			issues = issues.filter(source=q['source'])
+		from limes import scoring
+		category = scoring.category_q(q.get('category') or '')
+		if category is not None:
+			issues = issues.filter(category)
 		now = timezone.now()
 		if q.get('waived') in ('true', 'false'):
 			ids = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
@@ -2906,11 +2912,16 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			qs = qs.filter(cond)
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
-			if value:
+			if field == 'scope_tier' and value == 'owned':  # the rows the Overview counts: owned, not retired
+				qs = qs.filter(scope_tier__in=('owned_root', 'owned_host')).exclude(state='retired')
+			elif value:
 				qs = qs.filter(**{field: value})
 		tag = params.get('tag')
 		if tag:
 			qs = qs.filter(tags__name=tag)
+		tech = params.get('technology')
+		if tech:  # a subquery, so the annotated counts do not fan out over the join
+			qs = qs.filter(id__in=Asset.objects.filter(project__slug=project, technologies__name=tech).values('id'))
 		if self.action == 'list' and not params.get('show_low'):
 			from limes.tasks.attribution import REVIEW
 			qs = qs.exclude(scope_tier='candidate', confidence__lt=REVIEW)  # unscored (null) stay visible

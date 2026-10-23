@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 
 from limes.celery import app
@@ -33,6 +33,9 @@ CHECK_FRESH = timedelta(days=30)
 TOP_PENALTIES = 5
 KEY_MAX = 255  # TrackedIssue.key max_length
 SEVERITY_NAMES = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
+CATEGORIES = ('web', 'tls', 'email', 'dns', 'network', 'vulnerabilities')
+CATEGORY_LABELS = {'web': 'Website', 'tls': 'Encryption', 'email': 'Email', 'dns': 'DNS', 'network': 'Network',
+                   'vulnerabilities': 'Vulnerabilities'}
 
 
 def issue_key(key):
@@ -217,6 +220,62 @@ def project_score(project, now=None, exclude=frozenset()):
             'top_penalties': rows[:TOP_PENALTIES]}
 
 
+def category_of(key):
+    """The category an issue key belongs to: its check group, else vulnerabilities (findings, hashed and unknown keys)."""
+    return CHECKS[key].group if key in CHECKS else 'vulnerabilities'
+
+
+def category_q(category):
+    """TrackedIssue filter for one category, or None for an unknown value."""
+    if category == 'vulnerabilities':  # a check key no longer in the catalogue falls here too, as in category_of
+        return Q(source='finding') | Q(source='check') & ~Q(key__in=list(CHECKS))
+    if category in CATEGORIES:
+        return Q(source='check', key__in=[c.id for c in CHECKS.values() if c.group == category])
+    return None
+
+
+def category_scores(project, now=None):
+    """{category: {label, score, grade, raw_score, raw_grade, assessed}}, each the headline's model (p10 of _score)
+    over that category's issues on its assessed assets. score leaves out waivers, raw_score keeps them; a category
+    with no assessed asset is None, never 950.
+    # NOTE: recomputes baselines (a few queries per owned root) that project_score also builds; cached for STATS_TTL by the Overview. Upgrade path: one shared inputs object."""
+    base = baselines(project)
+    assets = assessed_assets(project, base, now)
+    penalties = {a: c for a, c in _penalties(project, base=base, now=now).items() if a in assets}
+    waived = waived_keys(project, now)
+    checked = {c: set() for c in CATEGORIES}
+    for asset_id, check_id in (_fresh_checks(project, now).filter(status__in=('pass', 'fail'))
+                               .values_list('asset_id', 'check_id').distinct()):
+        if asset_id in assets and check_id in CHECKS:
+            checked[CHECKS[check_id].group].add(asset_id)
+    checked['vulnerabilities'] = {a for a, v in assets.items() if _root_of(v, base)}
+    split = {c: {} for c in CATEGORIES}
+    for asset_id, issues in penalties.items():
+        for key, severity in issues.items():
+            split[category_of(key)].setdefault(asset_id, {})[key] = severity
+    out = {}
+    for c in CATEGORIES:
+        ids = checked[c] | split[c].keys()  # never ignore an asset the headline counts
+        live = p10([_score(_live(a, split[c].get(a, {}), waived)) for a in ids])
+        raw = p10([_score(split[c].get(a, {})) for a in ids])
+        out[c] = {'label': CATEGORY_LABELS[c], 'score': live, 'grade': grade(live), 'raw_score': raw,
+                  'raw_grade': grade(raw), 'assessed': len(ids)}
+    return out
+
+
+def category_issue_counts(project, now=None):
+    """{category: {open, waived}} from the project's open TrackedIssue rows (what the Issues page lists)."""
+    now = now or timezone.now()
+    active = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
+    agg = {}
+    for c in CATEGORIES:
+        q = category_q(c)
+        agg[f'{c}_open'] = Count('id', filter=q)
+        agg[f'{c}_waived'] = Count('id', filter=q & Q(Exists(active)))
+    row = TrackedIssue.objects.filter(project=project, status='open').aggregate(**agg)
+    return {c: {'open': row[f'{c}_open'], 'waived': row[f'{c}_waived']} for c in CATEGORIES}
+
+
 def forecast(project, issue_ids, now=None):
     """Adjusted score if the given TrackedIssues (of this project) were fixed. Ids from elsewhere are ignored."""
     now = now or timezone.now()
@@ -250,12 +309,21 @@ def snapshot_scores():
     today = timezone.localdate()
     for project in Project.objects.all():
         try:
-            s = project_score(project)
+            now = timezone.now()
+            s = project_score(project, now)
+            try:  # the category split is secondary: its failure must not cost the headline snapshot, event or alert
+                categories = {c: v['score'] for c, v in category_scores(project, now).items()}
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception:
+                logger.exception('Category scores failed for project %s', project.pk)
+                categories = None
             # snapshot and event commit together: a failed event leaves no row, so the next run retries it
             with transaction.atomic():
                 snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
                     'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'raw_score': s['raw_score'],
                     'coverage': s['coverage'],
+                    'categories': categories,
                     'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
                 if created:  # a same-day rerun updates the row and must not alert twice
                     prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()

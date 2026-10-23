@@ -1,3 +1,18 @@
+/* Overview "What changed": the 30 / 90 day toggle only flips hidden and aria-pressed; it touches no text. */
+(function () {
+  var buttons = document.querySelectorAll('#dash_what_changed .ov-toggle button');
+  Array.prototype.forEach.call(buttons, function (btn) {
+    btn.addEventListener('click', function () {
+      Array.prototype.forEach.call(buttons, function (b) {
+        var on = b === btn;
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        var panel = document.getElementById(b.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !on;
+      });
+    });
+  });
+})();
+
 /* Overview score trend: ApexCharts area from the ScoreSnapshot series (json_script), coloured from the theme tokens.
    Only numbers and dates reach the DOM, and only through textContent. */
 (function () {

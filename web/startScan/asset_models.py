@@ -156,6 +156,7 @@ class ScoreSnapshot(models.Model):
     asset_count = models.IntegerField(default=0)
     top_penalties = models.JSONField(default=list)
     raw_score = models.IntegerField(null=True, blank=True)  # score ignoring waivers
+    categories = models.JSONField(null=True, blank=True)  # {category: adjusted score | None}; null on older rows
 
     class Meta:
         unique_together = ('project', 'date')
@@ -187,6 +188,7 @@ class TrackedIssue(models.Model):
     last_seen = models.DateTimeField(default=timezone.now)
     fixed_at = models.DateTimeField(null=True, blank=True)
     reopened = models.IntegerField(default=0)
+    reopened_at = models.DateTimeField(null=True, blank=True)  # when it last came back; first_seen is the first detection
 
     class Meta:
         unique_together = ('asset', 'key')

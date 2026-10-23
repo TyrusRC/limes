@@ -530,6 +530,17 @@ class AssetCadenceApiTest(TestCase):
             self.assertEqual(r, {'status': True, 'message': f'cadence set to {tier}'})
             self.assertEqual(self.tier(self.root), tier)
 
+    def test_cadence_change_clears_the_dashboard_cache(self):
+        from unittest import mock
+        from dashboard.stats import asm_stats, project_stats
+        project_stats(self.p)
+        with mock.patch('dashboard.stats.asm_stats', wraps=asm_stats) as m:
+            project_stats(self.p)
+            self.assertEqual(m.call_count, 0)
+            self._post(self.admin, asset_id=self.root.id, cadence_tier='off')
+            project_stats(self.p)
+            self.assertEqual(m.call_count, 1)
+
     def test_rejects_unknown_tier_and_non_roots(self):
         cand = Asset.objects.create(project=self.p, kind='hostname', value='c.y.com', scope_tier='candidate')
         cidr = Asset.objects.create(project=self.p, kind='cidr', value='93.184.216.0/28', scope_tier='owned_host')

@@ -35,6 +35,7 @@ Assets
       <label for="f_scope_tier">Scope tier</label>
       <select id="f_scope_tier" class="form-select">
         <option value="">All scope tiers</option>
+        <option value="owned">Owned, not retired</option>
         <option value="owned_root">Owned root</option><option value="owned_host">Owned host</option><option value="co_brand">Co-brand</option><option value="candidate">Candidate</option><option value="rejected">Rejected</option><option value="dependency">Dependency</option>
       </select>
     </div>
@@ -55,6 +56,10 @@ Assets
     <div class="l-field">
       <label for="f_tag">Tag</label>
       <input type="text" id="f_tag" class="form-control" placeholder="Any tag">
+    </div>
+    <div class="l-field">
+      <label for="f_technology">Technology</label>
+      <input type="text" id="f_technology" class="form-control" placeholder="Any technology">
     </div>
     <div class="l-field l-field-check">
       <div class="form-check">
@@ -83,16 +88,21 @@ Assets
 <script type="text/javascript">
 $(document).ready(function() {
   load_asset_score();
-  // ?scope_tier= (e.g. the dashboard's review-queue link) preselects a known filter value
-  var qTier = new URLSearchParams(location.search).get('scope_tier');
-  var tierSel = document.getElementById('f_scope_tier');
-  if (qTier && Array.prototype.some.call(tierSel.options, function(o) { return o.value === qTier; })) tierSel.value = qTier;
+  // ?scope_tier=, ?source=, ?technology= ... (e.g. the dashboard's links) preselect a filter: a select takes the
+  // URL value only when it is one of its options, a text input takes it as typed
+  var query = new URLSearchParams(location.search);
+  var filterKeys = ['kind', 'scope_tier', 'state', 'source', 'tag', 'technology'];
+  filterKeys.forEach(function(k) {
+    var el = document.getElementById('f_' + k), v = query.get(k);
+    if (!v || !el) return;
+    if (el.tagName !== 'SELECT' || Array.prototype.some.call(el.options, function(o) { return o.value === v; })) el.value = v;
+  });
   var project = "{{ current_project.slug }}";
   var esc = $.fn.dataTable.render.text().display;
   var join = function(d) { return esc((d || []).join(', ')); };
   function assetUrl() {
     var u = '/api/listDatatableAsset/?project=' + encodeURIComponent(project) + '&format=datatables';
-    ['kind', 'scope_tier', 'state', 'source', 'tag'].forEach(function(k) {
+    filterKeys.forEach(function(k) {
       var v = document.getElementById('f_' + k).value;
       if (v) u += '&' + k + '=' + encodeURIComponent(v);
     });
@@ -132,7 +142,7 @@ $(document).ready(function() {
   $('#asset_results_filter input').attr('aria-label', 'Filter this list');
   $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });
-  ['kind', 'scope_tier', 'state', 'source', 'tag'].forEach(function(k) {
+  filterKeys.forEach(function(k) {
     document.getElementById('f_' + k).addEventListener('change', function() {
       table.ajax.url(assetUrl()).load();
     });
