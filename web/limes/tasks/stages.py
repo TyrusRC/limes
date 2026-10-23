@@ -828,9 +828,12 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 	ident = identity.ScanIdentity.for_domain(self.domain)
 	cfg_tmps = identity.write_assay_config(ident, prof.assay_profile, config_path)
 	try:
+		assay_bin, assay_env = assay.prepare()  # raises AssayError if assay can see a non-allowlisted tool
 		argv = assay.build_argv(targets_file, prof.assay_profile, config_path, out_dir, extra_no_flags=[])
+		argv[0] = assay_bin
 		rc_output = commands.run(
 			argv,
+			env=assay_env,
 			timeout=prof.timeouts.get('dast', 6 * 3600),
 			secrets=identity.redaction_secrets(ident))
 		if not assay.is_success(rc_output.return_code):

@@ -81,6 +81,11 @@ WORKDIR /usr/src/app
 
 COPY --from=gotools /go/bin/ /go/bin/
 
+# assay only gets this dir on PATH (see limes/integrations/assay.py): symlink ONLY approved tools here,
+# in step with ASSAY_TOOL_ALLOWLIST. Never add exploit-class tools; Limes runs katana/gau itself.
+RUN mkdir -p /opt/limes/assay-bin \
+    && ln -s /go/bin/nuclei /opt/limes/assay-bin/nuclei
+
 # opengrep (needed by mantis)
 RUN ARCH=$(dpkg --print-architecture) \
     && if [ "${ARCH}" = "arm64" ]; then OG=opengrep_manylinux_aarch64; else OG=opengrep_manylinux_x86; fi \

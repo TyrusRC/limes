@@ -107,14 +107,14 @@ def _check_argv(argv):
         raise ShellCommandError('argv must be a non-empty list of strings')
 
 
-def stream(argv, *, timeout=None, cwd=None, output_path=None, secrets=(), recorder=None,
+def stream(argv, *, timeout=None, cwd=None, env=None, output_path=None, secrets=(), recorder=None,
            flush_interval=FLUSH_INTERVAL, clock=time.monotonic, _capture=None):
     _check_argv(argv)
     recorder = recorder or _NullRecorder()
     tail = _Tail()
     start = last_flush = clock()
     timed_out = threading.Event()
-    proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, errors='replace', start_new_session=True)
     timer = None
     if timeout:
