@@ -273,7 +273,7 @@ function asset_parent_chain(asset) {
 	return step(asset);
 }
 
-function asset_intel_html(e) {
+function asset_intel_html(e, breaches) {
 	e = e || {};
 	var rows = [], idb = e.internetdb, ripe = e.ripestat;
 	if (idb) {
@@ -291,8 +291,22 @@ function asset_intel_html(e) {
 			'</td><td>' + asset_esc(ripe.fetched_at) + '</td></tr>');
 		rows.push('<tr><td>Holder</td><td>' + asset_esc(ripe.holder) + '</td><td></td></tr>');
 	}
-	if (!rows.length) return '';
-	return asset_section('Intel', asset_table(['<span class="visually-hidden">Field</span>', 'Value', 'Fetched'], rows.join('')));
+	var html = '';
+	if (rows.length) html += asset_section('Intel', asset_table(['<span class="visually-hidden">Field</span>', 'Value', 'Fetched'], rows.join('')));
+	var items = (e.backends && e.backends.items) || [];
+	if (items.length) {
+		html += asset_section('Backends referenced by client code, informational', asset_table(['Kind', 'Reference'],
+			items.map(function(b) { return '<tr><td>' + asset_esc(b.kind) + '</td><td>' + asset_esc(b.ref) + '</td></tr>'; }).join('')));
+	}
+	if (breaches && breaches.length) {
+		html += asset_section('Data breaches', asset_table(['Breach', 'Addresses', 'Breach date', 'Published'],
+			breaches.map(function(b) {
+				return '<tr><td>' + asset_esc(b.name) + '</td><td>' + asset_esc(b.addresses) + '</td><td>' + asset_esc(b.breach_date) +
+					'</td><td>' + asset_esc(b.published) + '</td></tr>';
+			}).join('')) +
+			'<p class="l-muted">Breach data: <a href="https://haveibeenpwned.com/" target="_blank" rel="noopener noreferrer">Have I Been Pwned</a> (CC BY 4.0)</p>');
+	}
+	return html;
 }
 
 function get_asset_modal(id) {
@@ -316,7 +330,7 @@ function get_asset_modal(id) {
 			asset_cadence_html(a) +
 			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
-			asset_intel_html(a.enrichment) + '</div>'
+			asset_intel_html(a.enrichment, a.breaches) + '</div>'
 		);
 		$('#modal-footer').html(asset_actions(a));
 		asset_modal_wide(true);

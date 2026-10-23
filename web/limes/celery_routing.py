@@ -24,6 +24,7 @@ TASK_PLAN = {
     'enumerate_ranges': (IO, 15 * MIN),  # network-bound; a 60 s beat tick that holds its own Redis tick lock
     'monitor_assets': (IO, 15 * MIN),  # likewise: contacts targets only through limes.safe_fetch
     'refresh_feeds': (IO, 15 * MIN),  # downloads third-party feeds only (limes.feeds); holds its own Redis tick lock
+    'hibp_sync': (IO, 15 * MIN),  # Have I Been Pwned only (limes.hibp); holds its own Redis tick lock
     'remove_duplicate_endpoints': (IO, 15 * MIN),
     'llm_vulnerability_description': (IO, 15 * MIN),
     # orchestration 15 min

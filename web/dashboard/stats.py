@@ -16,7 +16,7 @@ SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 CHANGE_LABELS = {'issue_new': 'New issue', 'issue_fixed': 'Fixed', 'issue_regressed': 'Came back',
                  'score_dropped': 'Score dropped', 'score_changed': 'Score changed', 'waiver_expired': 'Waiver expired',
                  'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed',
-                 'asset_new': 'New asset'}
+                 'asset_new': 'New asset', 'breach_new': 'New breach'}
 
 
 def _key(project_id):

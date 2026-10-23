@@ -3,7 +3,7 @@ from limes.tasks.base import *
 from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
 from limes.definitions import NOTHING_ASSESSED
-from limes.checks import run as checks_run
+from limes.checks import leak, run as checks_run
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
 from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
@@ -890,6 +890,10 @@ def code_audit(self, urls=[], ctx={}, description=None):
 		mapping = json.load(f)
 	if not mapping:
 		return 0
+	try:
+		leak.scan_artifacts(f'{self.results_dir}/code_artifacts', mapping, self.domain.project, timezone.now())
+	except Exception as e:  # never raised: the leak scan must not cost the code audit; log the type only
+		logger.warning(f'Leak scan failed: {type(e).__name__}')
 	try:
 		findings = mantis.audit_dir(f'{self.results_dir}/code_artifacts', packs=['secrets', 'web'])
 	except mantis.MantisError as e:

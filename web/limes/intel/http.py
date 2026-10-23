@@ -14,21 +14,26 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 30
 RETRIES = 2
-MIN_INTERVAL = {'crtsh': 5.0, 'internetdb': 1.0, 'ripestat': 0.25}
+MIN_INTERVAL = {'crtsh': 5.0, 'internetdb': 1.0, 'ripestat': 0.25, 'hibp': 7.0}
 HEADERS = {'User-Agent': 'Limes-ASM'}
 
 
-def get_json(url, *, provider, session=requests, clock=time.time, sleep=time.sleep):
-    """(status, parsed JSON | None); (None, None) after retries or when the provider is saturated. Never raises."""
+def get_json(url, *, provider, session=requests, clock=time.time, sleep=time.sleep, headers=None, max_wait=None):
+    """(status, parsed JSON | None); (None, None) after retries or when the provider is saturated, or when the
+    reserved slot is further away than `max_wait` seconds (no sleep). `headers` are merged over HEADERS. Never raises."""
+    headers = {**HEADERS, **(headers or {})}
     for attempt in range(RETRIES + 1):
         wait = ratelimit.reserve(provider, MIN_INTERVAL.get(provider, 1.0), clock())
         if wait is None:  # provider saturated: same outcome as exhausted retries, without a long sleep
             logger.warning(f'{provider}: rate-limit slots exhausted, skipping')
             return None, None
+        if max_wait is not None and wait > max_wait:
+            logger.warning(f'{provider}: next slot {wait:.0f}s away, skipping')
+            return None, None
         if wait > 0:
             sleep(wait)
         try:
-            resp = session.get(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=False)
+            resp = session.get(url, timeout=TIMEOUT, headers=headers, allow_redirects=False)
         except requests.RequestException as e:
             logger.warning(f'{provider}: request failed: {e}')
         else:

@@ -10,7 +10,7 @@ from startScan.models import ChangeEvent
 
 logger = logging.getLogger(__name__)
 KINDS = ('issue_new', 'issue_fixed', 'issue_regressed', 'score_dropped', 'score_changed',
-         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new')
+         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new', 'breach_new')
 IMMEDIATE_SEVERITY = 3
 ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed')
 

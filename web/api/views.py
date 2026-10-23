@@ -2974,6 +2974,9 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		if asset.kind == 'ip':
 			from limes import exploit
 			data['unverified_cves'] = exploit.unverified(asset)
+		if asset.kind == 'root_domain':
+			data['breaches'] = list(asset.domainbreach_set.order_by('-published', 'breach_name').annotate(name=F('breach_name'))
+									.values('name', 'addresses', 'breach_date', 'published'))
 		return Response(data)
 
 	def paginate_queryset(self, queryset, view=None):
