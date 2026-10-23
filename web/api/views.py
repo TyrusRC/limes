@@ -915,6 +915,10 @@ class IssueList(APIView):
 			issues = issues.filter(severity=int(q['severity']))
 		if q.get('source') in ('check', 'finding'):
 			issues = issues.filter(source=q['source'])
+		from limes import scoring
+		category = scoring.category_q(q.get('category') or '')
+		if category is not None:
+			issues = issues.filter(category)
 		now = timezone.now()
 		if q.get('waived') in ('true', 'false'):
 			ids = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
