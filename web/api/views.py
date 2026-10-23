@@ -615,6 +615,51 @@ class AssetScore(APIView):
 		return Response(data)
 
 
+class AssetTags(APIView):
+	"""Add and remove tags on up to 200 assets of one project in one call (limes.tags holds the rules). An asset id from
+	another project is a 404 for the whole call; a bad name or a limit breach is a 400. Nothing changes on an error."""
+	permission_classes = [HasPermission]
+	permission_required = PERM_MODIFY_TARGETS
+
+	def post(self, request):
+		from limes import tags
+		data = request.data
+		if not isinstance(data, dict):
+			return Response({'status': False, 'message': 'expected a JSON object'}, status=400)
+		project = Project.objects.filter(slug=data['project']).first() if isinstance(data.get('project'), str) else None
+		if not project:
+			return Response({'status': False, 'message': 'project not found'}, status=404)
+		try:
+			done = tags.change_tags(project, data.get('assets'), data.get('add'), data.get('remove'))
+		except tags.AssetNotFound as e:
+			return Response({'status': False, 'message': str(e)}, status=404)
+		except tags.TagError as e:
+			return Response({'status': False, 'message': str(e)}, status=400)
+		return Response({'status': True, 'message': 'tags updated', **done})
+
+
+class TagList(APIView):
+	"""The project's tags with their asset counts."""
+
+	def get(self, request):
+		from limes import tags
+		project = Project.objects.filter(slug=request.query_params.get('project') or '').first()
+		if not project:
+			return Response({'status': False, 'message': 'project not found'}, status=404)
+		return Response(tags.tag_counts(project))
+
+
+class TagScores(APIView):
+	"""Score, grade and open issues for the project's ten most used tags (limes.scoring.tag_scores)."""
+
+	def get(self, request):
+		from limes import scoring
+		project = Project.objects.filter(slug=request.query_params.get('project') or '').first()
+		if not project:
+			return Response({'status': False, 'message': 'project not found'}, status=404)
+		return Response(scoring.tag_scores(project))
+
+
 def _parse_id(value):
 	"""A row id from JSON or a query string: an int or a string of digits, within the DB range. Otherwise None."""
 	if isinstance(value, str) and value.isascii() and value.isdigit():
@@ -649,10 +694,13 @@ class IssueList(APIView):
 			issues = issues.filter(severity=int(q['severity']))
 		if q.get('source') in ('check', 'finding'):
 			issues = issues.filter(source=q['source'])
-		from limes import scoring
+		from limes import scoring, tags
 		category = scoring.category_q(q.get('category') or '')
 		if category is not None:
 			issues = issues.filter(category)
+		if q.get('tag'):  # the tag is on the issue's asset; the project filter above already scopes it
+			name = tags.lookup(q['tag'])
+			issues = issues.filter(asset__tags__name=name) if name else issues.none()
 		now = timezone.now()
 		kev_only = q.get('kev') == 'true'
 		if q.get('waived') in ('true', 'false'):
@@ -2604,7 +2652,8 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 				qs = qs.filter(**{field: value})
 		tag = params.get('tag')
 		if tag:
-			qs = qs.filter(tags__name=tag)
+			from limes import tags
+			qs = qs.filter(tags__name=tags.lookup(tag)) if tags.lookup(tag) else qs.none()
 		tech = params.get('technology')
 		if tech:  # a subquery, so the annotated counts do not fan out over the join
 			qs = qs.filter(id__in=Asset.objects.filter(project__slug=project, technologies__name=tech).values('id'))
