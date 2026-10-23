@@ -1,4 +1,6 @@
 """Per-call authority. Nothing here is cached across calls: token, user and role are re-read every time."""
+import logging
+import time
 from dataclasses import dataclass
 from django.conf import settings
 from django.utils import timezone
@@ -7,6 +9,9 @@ from redis.exceptions import RedisError
 from rolepermissions.checkers import has_permission
 from dashboard.models import ApiToken, Project
 from limes.mcp import ratelimit, results
+
+logger = logging.getLogger(__name__)
+_last_warn = 0.0
 
 
 class McpError(Exception):
@@ -54,6 +59,8 @@ def require_write(caller, perm):
 
 
 def check_rate(caller, write):
+    # NOTE: buckets are per token, so a user with N tokens gets N times the limit. Upgrade path: key the bucket by user id.
+    global _last_warn
     tid = caller.token.token_id
     buckets = [('call', settings.MCP_RATE_PER_MIN)] + ([('write', settings.MCP_WRITE_RATE_PER_MIN)] if write else [])
     try:
@@ -62,5 +69,8 @@ def check_rate(caller, write):
             wait = ratelimit.take(f'limes:mcp:rate:{tid}:{name}', cap, 60, conn=conn)
             if wait:
                 raise McpError('rate_limited', 'too many calls', retry_after_seconds=wait)
-    except RedisError:  # fail closed: no limiter, no calls
+    except RedisError as e:  # fail closed: no limiter, no calls
+        if time.monotonic() - _last_warn > 60 or _last_warn == 0.0:  # NOTE: throttled per process, once a minute
+            _last_warn = time.monotonic()
+            logger.warning('MCP rate limiter unavailable (%s); refusing calls', type(e).__name__)
         raise McpError('unavailable', 'rate limiter unavailable; try again shortly') from None

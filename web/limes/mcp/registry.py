@@ -1,5 +1,6 @@
 """Tool registry and the one call path. Every tool is registered here and runs only through call_tool."""
 import importlib
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -21,28 +22,33 @@ class ToolSpec:
     destructive: bool
     title: str
     description: str
+    open_world: bool = False
     raw: Callable = None  # the undecorated function, for signature inspection (FastMCP schema, scoping sweeps)
 
 
 REGISTRY: dict[str, ToolSpec] = {}
 
 
-def tool(*, title, write=False, perm=None, destructive=False):
+def tool(*, title, write=False, perm=None, destructive=False, open_world=False):
+    # NOTE: tool() returns the bare function and ToolSpec.raw exposes it for signature inspection (Task 5 sweep).
+    # The transport must call tools only through call_tool, never raw: raw skips authorization.
     def deco(fn):
         if fn.__name__ in REGISTRY:
             raise ValueError(f'duplicate MCP tool {fn.__name__}')
         if write and not perm:
             raise ValueError(f'write tool {fn.__name__} needs a permission')
+        if any(p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in inspect.signature(fn).parameters.values()):
+            raise ValueError(f'tool {fn.__name__} must not take *args or **kwargs')
         REGISTRY[fn.__name__] = ToolSpec(
             fn.__name__, validate_call(config={'arbitrary_types_allowed': True})(fn), write, perm, destructive, title,
-            (fn.__doc__ or '').strip(), fn)
+            (fn.__doc__ or '').strip(), open_world, fn)
         return fn
     return deco
 
 
 def annotations(spec):
     return {'title': spec.title, 'readOnlyHint': not spec.write,
-            'destructiveHint': spec.destructive if spec.write else None, 'openWorldHint': False}
+            'destructiveHint': spec.destructive if spec.write else None, 'openWorldHint': spec.open_world}
 
 
 def load_tools():
@@ -57,9 +63,12 @@ def _invalid(e):
     return McpError('invalid', 'invalid arguments: ' + '; '.join(parts))
 
 
-def _run(spec, name, token_pk, args, now, state):
+def _run(name, token_pk, args, now, state):
     state['caller'] = caller = access.resolve_caller(token_pk, now)
-    access.check_rate(caller, spec.write)
+    spec = REGISTRY.get(name)  # only after authentication: a stranger learns nothing about tool names
+    access.check_rate(caller, bool(spec and spec.write))
+    if spec is None:
+        raise McpError('invalid', 'unknown tool')
     if spec.write:
         access.require_write(caller, spec.perm)
     elif spec.perm:
@@ -79,9 +88,7 @@ def call_tool(name, token_pk, args, now=None):
     spec = REGISTRY.get(name)
     args = args if isinstance(args, dict) else {}
     try:
-        if spec is None:
-            raise McpError('invalid', 'unknown tool')
-        env = _run(spec, name, token_pk, args, now, state)
+        env = _run(name, token_pk, args, now, state)
         outcome = 'ok'
         return env
     except McpError as e:
@@ -97,12 +104,16 @@ def call_tool(name, token_pk, args, now=None):
 def _finish(name, spec, token_pk, args, caller, outcome, started):
     try:
         tok_id, user_id, pk = '', None, None
+        if token_pk is None:
+            return  # nothing to attribute: no audit row for an unauthenticated caller
         if caller:
             tok_id, user_id, pk = caller.token.token_id, caller.user.id, caller.token.pk
         elif token_pk is not None:
             row = ApiToken.objects.filter(pk=token_pk).values_list('token_id', 'user_id').first()
             if row:
                 (tok_id, user_id), pk = row, token_pk
+        if pk is None:
+            return
         project = args.get('project')
         audit.log_call(token_pk=pk, token_public_id=tok_id, user_id=user_id, tool=name,
                        project=project if isinstance(project, str) else '', args=args, outcome=outcome,

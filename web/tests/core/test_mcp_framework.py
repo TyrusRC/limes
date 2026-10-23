@@ -188,3 +188,97 @@ class FrameworkTests(McpBase):
             with self.assertRaises(McpError) as cm:
                 results.page(small, bad, 50, lambda r: r)
             self.assertEqual(cm.exception.code, 'invalid')
+
+
+class HardeningTests(McpBase):
+    def reg(self, fn, **kw):
+        registry.tool(title=fn.__name__, **kw)(fn)
+        self.addCleanup(REGISTRY.pop, fn.__name__)
+
+    def test_forged_cursors_are_invalid(self):
+        import base64
+        def enc(v):
+            return 'c1.' + base64.urlsafe_b64encode(v.encode()).decode()
+        for bad in (enc('9' * 20), enc('9' * 70), enc('-1'), enc('abc'), enc(str(10 ** 7 + 1)), 'x1.' + enc('1')[3:], 'c1.', 'c2.MQ=='):
+            with self.assertRaises(McpError, msg=bad) as cm:
+                results.page([1, 2, 3], bad, 5, lambda r: r)
+            self.assertEqual((cm.exception.code, cm.exception.message), ('invalid', 'bad cursor'))
+        self.assertEqual(results.page([1, 2, 3], enc('1'), 5, lambda r: r)['items'], [2, 3])
+
+    def test_clean_strips_surrogates_and_separators(self):
+        import pydantic_core
+        hostile = 'a\ud800b\udfffc\u2028d\u2029e'
+        self.assertEqual(results.clean(hostile), 'abcde')
+        env = results.ok({results.clean('k\ud800\u2028'): results.untrusted(hostile)})
+        self.assertEqual(env['data'], {'k': {'untrusted_text': 'abcde'}})
+        json.dumps(env, ensure_ascii=False).encode('utf-8')
+        pydantic_core.to_json(env)
+
+    def test_clean_scans_a_bounded_prefix(self):
+        with mock.patch.object(results.unicodedata, 'category', wraps=results.unicodedata.category) as cat:
+            out = results.clean('x' * 5_000_000)
+        self.assertEqual(len(out), 2000)
+        self.assertLessEqual(cat.call_count, 2000 * 4)
+
+    def test_unauthenticated_calls_are_cheap(self):
+        def t_echo(caller):
+            """e"""
+            return {}
+        self.reg(t_echo)
+        tokens.revoke(self.t_tester)
+        conn = ratelimit.get_redis_connection('default')
+        for name in ('t_echo', 'no_such_tool'):
+            self.assertEqual(self.err(self.call(name, self.t_tester)), 'unauthorized')
+            self.assertEqual(self.err(registry.call_tool(name, None, {})), 'unauthorized')
+            self.assertEqual(self.err(registry.call_tool(name, 10 ** 9, {})), 'unauthorized')
+        self.assertEqual(list(conn.scan_iter('limes:mcp:rate:*')), [])
+        self.assertEqual(McpCallLog.objects.filter(token__isnull=True).count(), 0)
+        self.assertEqual(McpCallLog.objects.count(), 2)  # only the known (revoked) token is attributable
+        env = self.call('no_such_tool')
+        self.assertEqual((self.err(env), env['error']['message']), ('invalid', 'unknown tool'))
+
+    @override_settings(MCP_RATE_PER_MIN=3)
+    def test_buckets_are_per_token(self):
+        def t_echo(caller):
+            """e"""
+            return {}
+        self.reg(t_echo)
+        for _ in range(3):
+            self.data(self.call('t_echo', self.t_admin))
+        self.assertEqual(self.err(self.call('t_echo', self.t_admin)), 'rate_limited')
+        self.data(self.call('t_echo', self.t_admin_ro))  # same user, other token: own bucket
+
+    def test_open_world_hint(self):
+        def t_a(caller):
+            """a"""
+
+        def t_b(caller):
+            """b"""
+        self.reg(t_a)
+        self.reg(t_b, open_world=True)
+        self.assertFalse(registry.annotations(REGISTRY['t_a'])['openWorldHint'])
+        self.assertTrue(registry.annotations(REGISTRY['t_b'])['openWorldHint'])
+
+    def test_varargs_refused(self):
+        def t_va(caller, *a):
+            """x"""
+
+        def t_kw(caller, **kw):
+            """x"""
+        for fn in (t_va, t_kw):
+            with self.assertRaises(ValueError):
+                registry.tool(title='x')(fn)
+            self.assertNotIn(fn.__name__, REGISTRY)
+
+    def test_fail_closed_is_logged_once_a_minute(self):
+        def t_echo(caller):
+            """e"""
+            return {}
+        self.reg(t_echo)
+        access._last_warn = 0.0
+        with mock.patch('limes.mcp.access.get_redis_connection', side_effect=RedisError):
+            with self.assertLogs('limes.mcp.access', 'WARNING') as cm:
+                self.call('t_echo')
+                self.call('t_echo')
+        self.assertEqual(len(cm.output), 1)
+        self.assertNotIn('lmk_', cm.output[0])

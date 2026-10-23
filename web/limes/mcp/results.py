@@ -20,8 +20,14 @@ Limit = Annotated[int, Field(ge=1, le=MAX_LIMIT)]
 Cursor = Annotated[str | None, Field(max_length=100)]
 
 
+_DROP = ('Cc', 'Cf', 'Cs', 'Zl', 'Zp')
+MAX_OFFSET = 10**7
+
+
 def clean(text, cap=FIELD_CAP):
-    text = ''.join(ch for ch in text if ch in '\n\t' or unicodedata.category(ch) not in ('Cc', 'Cf'))
+    # Cs (lone surrogates) break UTF-8/JSON encoding downstream; Zl/Zp (U+2028/2029) are line breaks in disguise.
+    # Only a bounded prefix is scanned: stripping can shrink it, but never needs more than cap*4 characters of input.
+    text = ''.join(ch for ch in text[:cap * 4] if ch in '\n\t' or unicodedata.category(ch) not in _DROP)
     return text if len(text) <= cap else text[:cap - 1] + '…'
 
 
@@ -52,7 +58,7 @@ def _offset(cursor):
         if not cursor.startswith('c1.'):
             raise ValueError
         n = int(base64.urlsafe_b64decode(cursor[3:].encode('ascii')).decode('ascii'))
-        if n < 0:
+        if not 0 <= n <= MAX_OFFSET:  # also keeps a forged cursor from reaching Postgres as a bigint overflow
             raise ValueError
         return n
     except (ValueError, binascii.Error, UnicodeError):
