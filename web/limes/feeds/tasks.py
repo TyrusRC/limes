@@ -16,8 +16,8 @@ SESSION = requests  # tests swap in a fake; feeds are public third-party URLs, n
 
 
 def _daily_limit(feed):
-    # Backstop behind store.due(): a cadence of 6 h allows 4 downloads a day, plus one retry.
-    return max(1, int(86400 // feed.cadence.total_seconds())) + 1
+    # Backstop behind store.due(): exactly as many downloads a day as the cadence allows (24 h feeds: one).
+    return max(1, int(86400 // feed.cadence.total_seconds()))
 
 
 @app.task(name='refresh_feeds', bind=False)

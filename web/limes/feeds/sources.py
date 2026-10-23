@@ -30,7 +30,7 @@ FEEDS = {f.name: f for f in (
          'Free; attribution requested; never redistributed'),
     Feed('iana_rdap', 'https://data.iana.org/rdap/dns.json', 7 * D, 'rdap_bootstrap',
          'RDAP bootstrap data from IANA', 'https://www.iana.org/help/licensing-terms', False, False,
-         'IANA public registry data'),
+         'CC0 1.0 dedication (IANA registries are "subject to the Creative Commons CC0 1.0 dedication"); no attribution requested'),
     # Off by default (LIMES_FEEDS_OPTIN): terms unclear.
     Feed('blocklist_de', 'https://lists.blocklist.de/lists/all.txt', D, 'plain_ips', 'Data from blocklist.de',
          'https://www.blocklist.de/en/terms.html', True, True, 'No licence stated; use at your own risk'),

@@ -14,6 +14,8 @@ from django.utils import timezone
 
 from dashboard.models import Project
 from limes import celery_routing, continuous
+from celery.exceptions import SoftTimeLimitExceeded
+
 from limes.feeds import parse, sources, store, tasks
 from startScan.models import Asset, DomainBreach, FeedState, Lookalike
 
@@ -122,6 +124,48 @@ class ParserTests(SimpleTestCase):
         self.assertEqual(data, {'org': 'https://rdap.org/o/'})
         self.assertEqual(meta['dropped'], 3)
 
+    def test_v6_floor_and_mapped_and_integer_ips(self):
+        data, meta = parse.spamhaus_drop(b'{"cidr":"2400::/15","sblid":"SBL1"}\n{"cidr":"2400::/16","sblid":"SBL2"}\n')
+        self.assertEqual(data, [('2400::/16', 'SBL2')])
+        self.assertEqual(meta['dropped'], 1)
+        ips, meta = parse.feodo(b'[{"ip_address":134744072},{"ip_address":"::ffff:8.8.8.8"},'
+                                b'{"ip_address":"2606:4700::1%eth0"},{"ip_address":"::ffff:10.0.0.1"}]')
+        self.assertEqual((ips, meta['dropped']), (['8.8.8.8'], 3))
+        ips, _ = parse.plain_ips(b'::ffff:8.8.4.4\n8.8.4.4\n')
+        self.assertEqual(ips, ['8.8.4.4'])
+
+    def test_deep_nesting_is_dropped_not_fatal(self):
+        deep = b'[' * 4000 + b']' * 4000
+        data, meta = parse.spamhaus_drop(deep + b'\n{"cidr":"1.19.0.0/16","sblid":"SBL4"}\n' + b'[' * 100_000)
+        self.assertEqual((len(data), meta['dropped']), (1, 2))
+        asns, meta = parse.spamhaus_asndrop(deep + b'\n{"asn":5}\n')
+        self.assertEqual((asns, meta['dropped']), ([(5, '')], 1))
+
+    def test_rdap_rejects_ip_literals_and_leading_dash(self):
+        blob = (b'{"services":[[["com"],["https://10.0.0.1/"]],[["org"],["https://[::1]/"]],'
+                b'[["-bad","good"],["https://rdap.example/"]],[["net"],["https://localhost/"]]]}')
+        data, meta = parse.rdap_bootstrap(blob)
+        self.assertEqual(data, {'good': 'https://rdap.example/'})
+        self.assertEqual(meta['dropped'], 4)
+
+    def test_big_lists_parse_in_linear_time(self):
+        import time
+        ips = '\n'.join(f'{(i >> 16) % 200 + 11}.{(i >> 8) & 255}.{i & 255}.{i % 250 + 1}' for i in range(200_000))
+        t = time.monotonic()
+        out, meta = parse.plain_ips(ips.encode())
+        self.assertGreater(meta['rows'], 100_000)
+        feo = b'[' + b','.join(b'{"ip_address":"%s"}' % x.encode() for x in ips.split('\n')[:200_000]) + b']'
+        parse.feodo(feo)
+        self.assertLess(time.monotonic() - t, 10)  # was ~110 s with the quadratic list scan
+        junk = b'garbage\n' * 2_000_000
+        self.assertEqual(parse.spamhaus_asndrop(junk)[1]['dropped'], 2_000_000)
+
+    def test_declared_counts(self):
+        _, meta = parse.spamhaus_drop(fixture('drop_v4.json'))
+        self.assertEqual(meta['declared'], 3)
+        self.assertIsNone(parse.spamhaus_drop(b'{"cidr":"1.19.0.0/16","sblid":"SBL4"}\n')[1]['declared'])
+        self.assertEqual(parse.kev(fixture('kev.json'))[1]['declared'], 3)
+
 
 class FeedFixtureCase(TestCase):
     def setUp(self):
@@ -156,7 +200,7 @@ class FetchTests(FeedFixtureCase):
         self.assertEqual((h['If-None-Match'], h['If-Modified-Since']), ('"abc"', 'Thu, 22 Oct 2026 14:00:00 GMT'))
         self.assertEqual(h['User-Agent'], 'Limes-ASM')
         st = FeedState.objects.get(name='kev')
-        self.assertEqual((st.last_good_at, st.status, st.fetched_at), (good, 'not_modified', later))
+        self.assertEqual((st.last_good_at, st.status, st.fetched_at), (later, 'not_modified', later))  # 304 = confirmed fresh
         self.assertEqual(store.read('kev'), before)
 
     def test_zero_entry_fetch_rejected_keeps_last_good(self):
@@ -203,7 +247,7 @@ class FetchTests(FeedFixtureCase):
         # 51 MB of plain body (real cap) is refused too
         big = FakeSession({f.url: (200, {}, b'x' * (51 * 1024 * 1024))})
         self.assertEqual(store.fetch(f, self.now, big), 'error')
-        self.assertLess(len(big.chunks) * store.CHUNK, 52 * 1024 * 1024)
+        self.assertLessEqual(len(big.chunks), store.MAX_BYTES // store.CHUNK + 1)
 
     def test_epss_redirect_same_host_only(self):
         f = self.feed('epss')
@@ -250,6 +294,86 @@ class FetchTests(FeedFixtureCase):
                 raise requests.ConnectionError('secret-host-detail')
         self.assertEqual(store.fetch(f, self.now, Boom()), 'error')
         self.assertEqual(FeedState.objects.get(name='kev').error, 'ConnectionError')
+
+    def test_allow_empty_feeds_reject_garbage_pages(self):
+        html = b'<html>\n<body>Service unavailable</body>\n</html>\n'
+        for name in ('blocklist_de', 'cins'):
+            f = self.feed(name)
+            s = FakeSession({f.url: [(200, {}, fixture('blocklist.txt')), (200, {}, html), (200, {}, b'# nothing\n')]})
+            self.assertEqual(store.fetch(f, self.now, s), 'ok')
+            good = store.read(name)
+            self.assertEqual(store.fetch(f, self.now, s), 'rejected', name)
+            self.assertEqual(store.read(name), good)
+            self.assertEqual(FeedState.objects.get(name=name).entries, 2)
+            self.assertEqual(store.fetch(f, self.now, s), 'ok')  # a genuinely empty list is still fine
+            self.assertEqual(FeedState.objects.get(name=name).entries, 0)
+
+    def test_truncated_or_shrunk_copies_rejected(self):
+        f = self.feed('drop_v4')
+        body = fixture('drop_v4.json')
+        no_trailer = b'\n'.join(body.split(b'\n')[:-2]) + b'\n'
+        wrong = body.replace(b'"records":3', b'"records":9')
+        s = FakeSession({f.url: [(200, {}, body), (200, {}, no_trailer), (200, {}, wrong)]})
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+        self.assertEqual(store.fetch(f, self.now, s), 'rejected')
+        self.assertEqual(store.fetch(f, self.now, s), 'rejected')
+        self.assertEqual(store.read('drop_v4'), body)
+        a = self.feed('asndrop')
+        s = FakeSession({a.url: (200, {}, fixture('asndrop.json').replace(b'"records":2', b'"records":5'))})
+        self.assertEqual(store.fetch(a, self.now, s), 'rejected')
+        k = self.feed('kev')
+        s = FakeSession({k.url: (200, {}, fixture('kev.json').replace(b'"count": 3', b'"count": 30'))})
+        self.assertEqual(store.fetch(k, self.now, s), 'rejected')
+        self.assertIsNone(store.read('kev'))
+        # a sudden shrink of a big feed
+        b = self.feed('blocklist_de')
+        big = '\n'.join(f'8.8.{i // 250}.{i % 250 + 1}' for i in range(100)).encode()
+        small = '\n'.join(f'8.8.{i // 250}.{i % 250 + 1}' for i in range(49)).encode()
+        s = FakeSession({b.url: [(200, {}, big), (200, {}, small), (200, {}, big[:len(big) // 2 + 20])]})
+        self.assertEqual(store.fetch(b, self.now, s), 'ok')
+        self.assertEqual(store.fetch(b, self.now, s), 'rejected')
+        st = FeedState.objects.get(name='blocklist_de')
+        self.assertEqual((st.entries, st.error), (100, 'shrank'))
+        self.assertEqual(store.fetch(b, self.now, s), 'ok')  # 50+ of 100 is not a collapse
+        # small feeds (below 50 entries) are exempt: Feodo may go from 2 to 0
+        fe = self.feed('feodo')
+        s = FakeSession({fe.url: [(200, {}, b'[{"ip_address":"8.8.8.8"}]'), (200, {}, b'[]')]})
+        store.fetch(fe, self.now, s)
+        self.assertEqual(store.fetch(fe, self.now, s), 'ok')
+
+    def test_not_modified_counts_as_fresh(self):
+        f = self.feed('kev')
+        s = FakeSession({f.url: [(200, {'ETag': '"a"'}, fixture('kev.json')), (304, {}, b'')]})
+        store.fetch(f, self.now, s)
+        later = self.now + timedelta(days=5)
+        store.fetch(f, later, s)
+        st = FeedState.objects.get(name='kev')
+        self.assertEqual(st.last_good_at, later)
+        self.assertFalse(store.is_stale(f, st, later + timedelta(days=1)))
+
+    def test_total_deadline_stops_a_dripping_server(self):
+        f = self.feed('kev')
+
+        class Drip(Resp):
+            def iter_content(self, chunk_size=1):
+                while True:
+                    yield b'x'
+
+        class S:
+            def get(self, *a, **k):
+                return Drip(200, {}, b'')
+
+        ticks = iter(range(0, 10 ** 6, 29))  # each clock read is 29 s later: no real sleeping
+        with mock.patch.object(store.time, 'monotonic', lambda: next(ticks)):
+            self.assertEqual(store.fetch(f, self.now, S()), 'error')
+        self.assertEqual(FeedState.objects.get(name='kev').error, 'Timeout')
+
+    def test_soft_time_limit_is_not_swallowed(self):
+        class S:
+            def get(self, *a, **k):
+                raise SoftTimeLimitExceeded()
+        with self.assertRaises(SoftTimeLimitExceeded):
+            store.fetch(self.feed('kev'), self.now, S())
 
     def test_due_and_stale(self):
         f = self.feed('drop_v4')
@@ -304,6 +428,16 @@ class RefreshTests(FeedFixtureCase):
             with override_settings(CONTINUOUS_SCANS=False):
                 self.assertEqual(tasks.refresh_feeds()['reason'], 'disabled')
 
+    def test_one_download_per_day_for_daily_feeds(self):
+        self.assertEqual(tasks._daily_limit(sources.FEEDS['drop_v4']), 1)
+        self.assertEqual(tasks._daily_limit(sources.FEEDS['feodo']), 4)
+        self.assertEqual(tasks._daily_limit(sources.FEEDS['iana_rdap']), 1)
+        s = FakeSession(self.routes())
+        with mock.patch.object(tasks, 'SESSION', s):
+            tasks.refresh_feeds()
+            FeedState.objects.update(fetched_at=self.now - timedelta(days=2))  # due again, same UTC day
+            self.assertEqual(tasks.refresh_feeds()['fetched'], ['feodo'])  # the 6 h feed has 4 a day
+
     def test_daily_budget_caps_downloads(self):
         s = FakeSession(self.routes())
         with mock.patch.object(tasks, 'SESSION', s), mock.patch.object(tasks.ratelimit, 'take_daily', return_value=False):
@@ -333,6 +467,7 @@ class MetadataTests(SimpleTestCase):
         self.assertNotIn('sslbl', sources.FEEDS)
         self.assertEqual({n for n, f in sources.FEEDS.items() if f.optin}, {'blocklist_de', 'cins'})
         self.assertTrue(sources.FEEDS['feodo'].allow_empty)
+        self.assertIn('CC0', sources.FEEDS['iana_rdap'].licence)
         self.assertEqual(sources.FEEDS['feodo'].cadence, timedelta(hours=6))
         self.assertEqual(sources.FEEDS['iana_rdap'].cadence, timedelta(days=7))
         self.assertEqual(sources.REPUTATION, ('drop_v4', 'drop_v6', 'asndrop', 'feodo', 'blocklist_de', 'cins'))

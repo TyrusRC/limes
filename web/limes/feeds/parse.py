@@ -18,7 +18,7 @@ MAX_JSON_ROWS = 200_000
 
 CVE_RE = re.compile(r'^CVE-\d{4}-\d{4,7}$')
 SBL_RE = re.compile(r'^SBL\d{1,10}$')
-TLD_RE = re.compile(r'^[a-z0-9-]{1,63}$')
+TLD_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
 _PRINTABLE = re.compile(r'[^\x20-\x7e]')
 
 
@@ -37,12 +37,16 @@ def _clean(value, limit):
     return _PRINTABLE.sub('', value)[:limit] if isinstance(value, str) else ''
 
 
+def _count(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
 def _meta(rows, dropped, **extra):
     return {'rows': rows, 'dropped': dropped, **extra}
 
 
 def _lines(blob):
-    for raw in blob.split(b'\n'):
+    for raw in io.BytesIO(blob):  # lazy: no list of ten million garbage lines
         raw = raw.strip()
         if raw:
             yield raw
@@ -79,21 +83,38 @@ def _public(net_or_ip):
     return net_or_ip.is_global
 
 
+def _ip(value):
+    """A public IP from a feed string (strings only, no scope ids; IPv4-mapped IPv6 becomes the IPv4), or None."""
+    if not isinstance(value, str) or len(value) > 64 or '%' in value:
+        return None
+    try:
+        ip = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip if _public(ip) else None
+
+
+def _loads(raw):
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError):  # a deeply nested line drops that line only
+        return None
+
+
 def spamhaus_drop(blob):
     out, dropped, meta = [], 0, {}
     for raw in _lines(blob):
         if len(raw) > MAX_LINE:
             dropped += 1
             continue
-        try:
-            rec = json.loads(raw)
-        except ValueError:
-            dropped += 1
-            continue
+        rec = _loads(raw)
         if not isinstance(rec, dict):
             dropped += 1
         elif rec.get('type') == 'metadata':
-            meta = {'source_date': _ts(rec.get('timestamp')), 'copyright': _clean(rec.get('copyright'), 200)}
+            meta = {'source_date': _ts(rec.get('timestamp')), 'copyright': _clean(rec.get('copyright'), 200),
+                    'declared': _count(rec.get('records'))}
         else:
             cidr, sbl = rec.get('cidr'), rec.get('sblid')
             try:
@@ -108,20 +129,18 @@ def spamhaus_drop(blob):
                 out.append((str(net), sbl))
         if len(out) > MAX_JSON_ROWS:
             raise ParseError('too many rows')
-    return out, _meta(len(out), dropped, source_date=meta.get('source_date'), copyright=meta.get('copyright', ''))
+    return out, _meta(len(out), dropped, source_date=meta.get('source_date'), copyright=meta.get('copyright', ''),
+                      declared=meta.get('declared'))
 
 
 def spamhaus_asndrop(blob):
-    out, dropped, source_date = [], 0, None
+    out, dropped, source_date, declared = [], 0, None, None
     for raw in _lines(blob):
-        try:
-            rec = json.loads(raw) if len(raw) <= MAX_LINE else None
-        except ValueError:
-            rec = None
+        rec = _loads(raw) if len(raw) <= MAX_LINE else None
         if not isinstance(rec, dict):
             dropped += 1
         elif rec.get('type') == 'metadata':
-            source_date = _ts(rec.get('timestamp'))
+            source_date, declared = _ts(rec.get('timestamp')), _count(rec.get('records'))
         else:
             asn = rec.get('asn')
             if isinstance(asn, int) and not isinstance(asn, bool) and 1 <= asn < 2 ** 32:
@@ -130,24 +149,21 @@ def spamhaus_asndrop(blob):
                 dropped += 1
         if len(out) > MAX_JSON_ROWS:
             raise ParseError('too many rows')
-    return out, _meta(len(out), dropped, source_date=source_date)
+    return out, _meta(len(out), dropped, source_date=source_date, declared=declared)
 
 
 def feodo(blob):
     data = _json(blob)
     if not isinstance(data, list) or len(data) > MAX_JSON_ROWS:
         raise ParseError('unexpected shape')
-    out, dropped = [], 0
+    out, dropped = {}, 0
     for rec in data:
-        try:
-            ip = ipaddress.ip_address(rec['ip_address']) if isinstance(rec, dict) else None
-        except (KeyError, ValueError):
-            ip = None
-        if ip is None or not _public(ip):
+        ip = _ip(rec.get('ip_address')) if isinstance(rec, dict) else None
+        if ip is None:
             dropped += 1
-        elif str(ip) not in out:
-            out.append(str(ip))
-    return out, _meta(len(out), dropped)
+        else:
+            out[str(ip)] = None  # dict: ordered and O(1) membership
+    return list(out), _meta(len(out), dropped)
 
 
 def plain_ips(blob):
@@ -155,11 +171,8 @@ def plain_ips(blob):
     for raw in _lines(blob):
         if raw.startswith(b'#'):
             continue
-        try:
-            ip = ipaddress.ip_address(raw.decode('ascii')) if len(raw) <= 64 else None
-        except ValueError:  # includes UnicodeDecodeError
-            ip = None
-        if ip is None or not _public(ip):
+        ip = _ip(raw.decode('ascii', 'replace')) if len(raw) <= 64 else None
+        if ip is None:
             dropped += 1
         else:
             seen.add(str(ip))
@@ -181,7 +194,8 @@ def kev(blob):
             continue
         out[cve] = {'added': _date(rec.get('dateAdded')), 'due': _date(rec.get('dueDate')),
                     'ransomware': rec.get('knownRansomwareCampaignUse') == 'Known'}
-    return out, _meta(len(out), dropped, source_date=_ts(data.get('dateReleased')))
+    return out, _meta(len(out), dropped, source_date=_ts(data.get('dateReleased')),
+                      declared=_count(data.get('count')))
 
 
 def _gunzip_lines(blob):
@@ -273,6 +287,14 @@ def _https_base(url):
         return None
     if u.scheme != 'https' or not u.hostname or u.username or u.password or port not in (None, 443):
         return None
+    host = u.hostname
+    if '.' not in host or host.endswith('.local') or host.endswith('.internal'):
+        return None  # bare names (localhost) and IP literals (v4 has dots too, so test below)
+    try:
+        ipaddress.ip_address(host)
+        return None
+    except ValueError:
+        pass
     return url if url.endswith('/') else url + '/'
 
 

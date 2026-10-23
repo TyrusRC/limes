@@ -4,11 +4,13 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import time
 from datetime import timedelta
 from urllib.parse import urljoin, urlsplit
 
 import requests
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 
 from limes.feeds import parse, sources
@@ -20,6 +22,8 @@ MAX_BYTES = 50 * 1024 * 1024
 CHUNK = 64 * 1024
 TIMEOUT = 30
 DEADLINE = 180  # seconds for the whole download, so a slow drip cannot hold a worker
+SHRINK_FLOOR = 50  # below this many previous entries a smaller copy is not treated as a collapse
+SHRINK_RATIO = 0.5
 MAX_REDIRECTS = 3
 HEADERS = {'User-Agent': 'Limes-ASM'}
 _REDIRECTS = (301, 302, 303, 307, 308)
@@ -109,12 +113,26 @@ def _download(feed, state, session):
             if code != 200:
                 return code, resp.headers, b''
             body = bytearray()
-            for chunk in resp.iter_content(CHUNK):
-                body += chunk
-                if len(body) > MAX_BYTES:
-                    raise FetchError('TooLarge')
-                if time.monotonic() - started > DEADLINE:
-                    raise FetchError('Timeout')
+            # The deadline is total wall-clock: the timer closes the connection even while a read is blocked on a
+            # server that drips one byte at a time (the per-chunk check alone would never fire).
+            timer = threading.Timer(DEADLINE, resp.close)
+            timer.daemon = True
+            timer.start()
+            try:
+                for chunk in resp.iter_content(CHUNK):
+                    body += chunk
+                    if len(body) > MAX_BYTES:
+                        raise FetchError('TooLarge')
+                    if time.monotonic() - started > DEADLINE:
+                        raise FetchError('Timeout')
+            except FetchError:
+                raise
+            except Exception:
+                if time.monotonic() - started >= DEADLINE:
+                    raise FetchError('Timeout') from None
+                raise
+            finally:
+                timer.cancel()
             return code, resp.headers, bytes(body)
         finally:
             resp.close()
@@ -129,6 +147,18 @@ def _write(path, blob):
     os.replace(tmp, path)
 
 
+def _problem(feed, state, meta):
+    """Why a parsed copy must not replace the last good one, or ''."""
+    rows, dropped = meta['rows'], meta['dropped']
+    if rows == 0 and (dropped > 0 or not feed.allow_empty):
+        return 'EmptyFeed'  # also an error page of garbage lines on feeds that may legitimately be empty
+    if 'declared' in meta and meta['declared'] != rows + dropped:
+        return 'CountMismatch'  # truncated, or the publisher's trailer/count is missing
+    if state.entries >= SHRINK_FLOOR and state.last_good_at and rows < SHRINK_RATIO * state.entries:
+        return 'shrank'
+    return ''
+
+
 def fetch(feed, now, session=requests):
     """One conditional GET of `feed`; returns and records the status (ok|not_modified|error|rejected)."""
     state, _ = FeedState.objects.get_or_create(name=feed.name, defaults={'url': feed.url})
@@ -137,12 +167,15 @@ def fetch(feed, now, session=requests):
         code, headers, body = _download(feed, state, session)
         if code == 304:
             state.status, state.error = 'not_modified', ''
+            if os.path.exists(feed_path(feed.name)):
+                state.last_good_at = now  # confirmed unchanged: it is as fresh as a new copy
         elif code != 200:
             raise FetchError(f'HTTP {code}')
         else:
             data, meta = parse.PARSERS[feed.parser](body)
-            if meta['rows'] == 0 and not feed.allow_empty:
-                state.status, state.error = 'rejected', 'EmptyFeed'
+            problem = _problem(feed, state, meta)
+            if problem:
+                state.status, state.error = 'rejected', problem
             else:
                 _write(feed_path(feed.name), body)
                 tag = lambda k: headers.get(k, '') if _HEADER_VALUE.match(headers.get(k, '')) else ''  # noqa: E731
@@ -150,6 +183,8 @@ def fetch(feed, now, session=requests):
                 state.etag, state.last_modified = tag('ETag'), tag('Last-Modified')
                 state.source_date, state.last_good_at = meta.get('source_date'), now
                 state.status, state.error = 'ok', ''
+    except SoftTimeLimitExceeded:
+        raise
     except Exception as e:  # noqa: BLE001 - hostile input: any failure keeps the last good copy
         # Only the HTTP status or the exception class: never headers, URLs or messages (they can echo a key).
         reason = str(e) if isinstance(e, FetchError) else type(e).__name__
