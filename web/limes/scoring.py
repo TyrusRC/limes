@@ -311,12 +311,19 @@ def snapshot_scores():
         try:
             now = timezone.now()
             s = project_score(project, now)
+            try:  # the category split is secondary: its failure must not cost the headline snapshot, event or alert
+                categories = {c: v['score'] for c, v in category_scores(project, now).items()}
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception:
+                logger.exception('Category scores failed for project %s', project.pk)
+                categories = None
             # snapshot and event commit together: a failed event leaves no row, so the next run retries it
             with transaction.atomic():
                 snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
                     'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'raw_score': s['raw_score'],
                     'coverage': s['coverage'],
-                    'categories': {c: v['score'] for c, v in category_scores(project, now).items()},
+                    'categories': categories,
                     'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
                 if created:  # a same-day rerun updates the row and must not alert twice
                     prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()

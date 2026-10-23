@@ -99,7 +99,7 @@ Overview
       <dl class="ov-wc-list">
         <div><dt>New assets</dt><dd>{{ w.new_assets|intcomma }}</dd>
           {% if w.new_sample %}<dd class="ov-sample">{% for v in w.new_sample %}<span>{{ v }}</span>{% endfor %}{% if w.new_assets > w.new_sample|length %}<span class="ov-muted">…</span>{% endif %}</dd>{% endif %}</div>
-        <div><dt>Missing or retired</dt><dd>{{ w.removed_assets|intcomma }}</dd>
+        <div><dt>Missing or stale</dt><dd>{{ w.removed_assets|intcomma }}</dd>
           {% if w.removed_sample %}<dd class="ov-sample">{% for v in w.removed_sample %}<span>{{ v }}</span>{% endfor %}{% if w.removed_assets > w.removed_sample|length %}<span class="ov-muted">…</span>{% endif %}</dd>{% endif %}</div>
         <div><dt>Issues introduced</dt><dd>{{ w.introduced|intcomma }}</dd></div>
         <div><dt>Issues resolved</dt><dd>{{ w.resolved|intcomma }}</dd></div>

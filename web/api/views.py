@@ -864,6 +864,8 @@ class SetAssetCadence(APIView):
 			row.cadence_tier = tier
 			row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
 			row.save(update_fields=['cadence_tier', 'enrichment'])
+		from dashboard.stats import invalidate
+		invalidate(asset.project_id)
 		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 

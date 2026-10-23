@@ -654,7 +654,7 @@ class WiringTest(TestCase):
             control.start_scan_run(self.domain, self.scan, 'full', ctx)
             with self.assertLogs('limes.tasks', level='WARNING'):
                 control.report.run(ctx=ctx)  # must not raise: a re-raise re-runs report via link_error
-        inv.assert_called_once()
+        self.assertEqual(inv.call_count, 2)  # early clear, then again after the alert steps (even on a time limit)
         notif.delay.assert_called_once()
 
     def test_sync_error_still_delivers(self):

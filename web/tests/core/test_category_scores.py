@@ -152,6 +152,20 @@ class CategoryEdgeTest(CategoryBase):
             hits = [c for c in scoring.CATEGORIES if TrackedIssue.objects.filter(pk=row.pk).filter(scoring.category_q(c)).exists()]
             self.assertEqual(hits, [scoring.category_of(key)], key)
 
+    def test_category_failure_keeps_headline_snapshot_and_event(self):
+        from unittest import mock
+        from startScan.models import ChangeEvent
+        a = self.host('a.x.com')
+        self.vuln(self.scan(), a, 4)
+        ScoreSnapshot.objects.create(project=self.p, date=timezone.localdate() - timedelta(days=1), version='v',
+                                     score=950, grade='A')
+        with mock.patch.object(scoring, 'category_scores', side_effect=RuntimeError('boom')):
+            scoring.snapshot_scores()
+        snap = ScoreSnapshot.objects.get(project=self.p, date=timezone.localdate())
+        self.assertIsNotNone(snap.score)
+        self.assertIsNone(snap.categories)
+        self.assertEqual(ChangeEvent.objects.filter(kind='score_dropped').count(), 1)
+
     def test_snapshot_shares_one_now(self):
         from unittest import mock
         self.reconcile_project()
