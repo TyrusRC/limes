@@ -45,6 +45,11 @@ def project_for(caller, slug):
     return project
 
 
+def visible_projects(caller):
+    """The projects project_for would accept, for listings. A future ACL changes this and project_for together."""
+    return Project.objects.filter(pk__in=[]) if not caller.user.is_active else Project.objects.all()
+
+
 def require(caller, perm):
     if not has_permission(caller.user, perm):
         raise McpError('forbidden', 'your role does not allow this')

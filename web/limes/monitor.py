@@ -78,6 +78,16 @@ def found_by(asset):
     return labels or ['manual' if asset.added_by_id else 'target']
 
 
+def source_q(label):
+    """Asset filter for one Assets-page 'found by' label; an unknown label matches nothing."""
+    cond = Q(pk__in=[])
+    for name in [k for k, v in FOUND_BY.items() if v == label]:
+        cond |= Q(sources__contains=[{'source': name}])
+    if label == 'manual':  # the label rule of found_by: no sources and added by a user
+        cond |= Q(sources=[], added_by__isnull=False)
+    return cond
+
+
 def _interval_label(delta):
     hours = int(delta.total_seconds() // 3600)
     return f'{hours}h' if hours < 48 else f'{hours // 24}d'

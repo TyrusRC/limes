@@ -2902,14 +2902,8 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		)
 		source = params.get('source')
 		if source:
-			from limes.monitor import FOUND_BY
-			raw = [k for k, label in FOUND_BY.items() if label == source]
-			cond = Q(pk__in=[])  # an unknown label matches nothing
-			for name in raw:
-				cond |= Q(sources__contains=[{'source': name}])
-			if source == 'manual':  # the label rule of monitor.found_by: no sources and added by a user
-				cond |= Q(sources=[], added_by__isnull=False)
-			qs = qs.filter(cond)
+			from limes import monitor
+			qs = qs.filter(monitor.source_q(source))
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
 			if field == 'scope_tier' and value == 'owned':  # the rows the Overview counts: owned, not retired
