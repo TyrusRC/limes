@@ -47,14 +47,14 @@ def _no_answer(asset, now):
             + tls.evaluate({'cert': 'error', 'legacy': {}}, now))
 
 
-def _host_checks(asset, holder, now, observers, resolve, done, refused_rows=False):
+def _host_checks(asset, holder, now, observers, resolve, done):
     """web + tls results for one host, through observers pinned to its vetted IP. Resolves exactly once.
-    A refused host is never contacted: it gets the no-answer rows when refused_rows (the scan path), else none."""
+    A refused host is never contacted: it gets the no-answer rows, so its old fails never linger."""
     ip, reason = safe_fetch.resolve_vetted(asset.value, resolve=resolve)
     if reason:
         done['refused'] = reason
         log.info('risk checks: %s not contacted: %s', asset.value, reason)
-        return _no_answer(asset, now) if refused_rows else None
+        return _no_answer(asset, now)
     deadline = safe_fetch.Deadline()
     obs = {**_pinned(ip, deadline), **(observers or {})}
     http = obs['http'](asset.value, ScanIdentity.for_domain(holder))
@@ -122,7 +122,7 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
         if clock() - start > RUN_BUDGET.total_seconds():
             break
         holder = a if a.request_headers else root
-        step(a, lambda a=a, holder=holder: _host_checks(a, holder, now, observers, resolve, {}, refused_rows=True))
+        step(a, lambda a=a, holder=holder: _host_checks(a, holder, now, observers, resolve, {}))
 
     if root.kind == 'root_domain':
         # DNS only, no contact: not capped or scope-gated
@@ -143,7 +143,7 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
 def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
     """The risk checks for one monitored asset, outside any root scan. Hostnames and roots get web + tls on their
     vetted IP (roots also email + dns); an ip gets the database-only network checks. A refused host is never
-    contacted and gets no web/tls rows; a refused root still gets email + dns, which only query DNS."""
+    contacted: it gets the no-answer web/tls rows (_no_answer), and a root still gets email + dns (DNS only)."""
     now = now or timezone.now()
     obs = {'mail_dns': lambda root: collect.observe_mail_dns(root, resolve=resolve), 'ports': collect.ports_for_ip,
            **(observers or {})}

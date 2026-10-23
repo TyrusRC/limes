@@ -284,13 +284,12 @@ def check_asset(asset, now=None, resolve=collect._resolve, get=http.get_json, ob
     if a.kind != 'ip':
         hosts = collect._mx_hosts(collect._lookup(resolve, a.value.rstrip('.').lower(), 'MX'))
         mx = hosts != 'error' and bool(hosts)
-    result = {'http_live': False, 'checked': 0, 'timeout': False}
-    if status == 'ok' or a.kind == 'root_domain':  # an unresolved root still gets its DNS-only email/dns checks
-        result = run.run_asset_checks(a, now=now, observers=observers, resolve=resolve)
-        if result['refused'] and status == 'ok':
-            status, reason = 'refused', result['refused']
-        if result['timeout']:
-            status, reason = 'timeout', 'the host did not finish answering within the check deadline'
+    # an unresolved or refused name still gets its no-answer rows (no contact), and a root its DNS-only email/dns
+    result = run.run_asset_checks(a, now=now, observers=observers, resolve=resolve)
+    if result['refused'] and status == 'ok':
+        status, reason = 'refused', result['refused']
+    if result['timeout']:
+        status, reason = 'timeout', 'the host did not finish answering within the check deadline'
     if not baseline:
         for ip in new:
             events.record_asset_new(a.project, ip, ports=open_ports.get(ip.value, ()))

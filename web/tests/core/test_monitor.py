@@ -89,12 +89,34 @@ class CheckTest(Base):
         self.assertNotIn(private, run._owned(self.p))
         self.assertEqual(scope.may_attack(self.p, ['10.0.0.1'])[0], [])
         self.assertEqual(scope.may_contact(self.p, ['a.other.com'])[0], [])
-        self.assertEqual(RiskCheck.objects.count(), 0)
+        self.assert_no_answer_rows(h)  # written without contact, so older fails never linger
         self.assertEqual(h.last_resolved_at, self.now)
         mixed = self.asset('hostname', 'b.other.com')
         self.check(mixed, {('b.other.com', 'A'): [PUBLIC, '10.0.0.1'], ('b.other.com', 'AAAA'): []})
         self.assertEqual((self.calls, self.reload(mixed).enrichment['monitor']['status']), ([], 'refused'))
-        self.assertEqual(RiskCheck.objects.count(), 0)
+        self.assert_no_answer_rows(mixed)
+
+    def assert_no_answer_rows(self, a):
+        rows = {r.check_id: r for r in RiskCheck.objects.filter(asset=a)}
+        web = {c: r.status for c, r in rows.items() if c.startswith('web.')}
+        tls = {c: r.status for c, r in rows.items() if c.startswith('tls.')}
+        self.assertEqual((len(web), set(web.values())), (8, {'not_applicable'}))
+        self.assertEqual((len(tls), set(tls.values())), (5, {'error'}))  # unknown, never a pass
+        self.assertEqual({c for c in rows if not c.startswith(('web.', 'tls.', 'email.', 'dns.'))}, set())
+
+    def test_host_that_stops_resolving_supersedes_its_old_fails(self):
+        from limes import scoring
+        h = self.asset('hostname', 'was.other.com')
+        RiskCheck.objects.create(asset=h, check_id='web.hsts_missing', status='fail', severity=3,
+                                 last_checked=self.now - 2 * DAY)
+        self.assertTrue(any(p['asset'] == h.value for p in scoring.project_score(self.p)['top_penalties']))
+        self.check(h, {})  # NXDOMAIN now
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.reload(h).enrichment['monitor']['status'], 'unresolved')
+        row = h.risk_checks.get(check_id='web.hsts_missing')
+        self.assertEqual((row.status, row.last_checked), ('not_applicable', self.now))
+        self.assert_no_answer_rows(h)
+        self.assertFalse(any(p['asset'] == h.value for p in scoring.project_score(self.p)['top_penalties']))
 
     def test_monitor_records_lifecycle_and_issues(self):
         from limes import scoring
@@ -197,13 +219,14 @@ class CheckTest(Base):
             ids = set(root.risk_checks.values_list('check_id', flat=True))
             self.assertIn('email.spf_missing', ids)
             self.assertIn('dns.caa_missing', ids)
-            self.assertFalse({i for i in ids if i.startswith(('web.', 'tls.'))}, ids)
+            self.assert_no_answer_rows(root)  # web/tls: the no-answer rows, written without contact
             m = self.reload(root).enrichment['monitor']
             self.assertEqual((m['status'], m['dns_only']), (status, True))
             self.assertTrue(m['active'])  # MX
         h = self.asset('hostname', 'gone.other.com')
         self.check(h, {})
-        self.assertEqual((h.risk_checks.count(), self.reload(h).enrichment['monitor']['dns_only']), (0, False))
+        self.assertFalse(self.reload(h).enrichment['monitor']['dns_only'])
+        self.assert_no_answer_rows(h)
 
     def test_attempt_is_stamped_before_contact(self):
         from celery.exceptions import SoftTimeLimitExceeded
