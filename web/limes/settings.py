@@ -36,6 +36,13 @@ ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
 ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
+# Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
+# share of each monitor tick's budget the queue may take
+EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
+EVENT_QUEUE_MAX = max(1, env.int('LIMES_EVENT_QUEUE_MAX', default=1000))
+EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
+EVENT_BURST = env.int('LIMES_EVENT_BURST', default=200)
+EVENT_SHARE = min(0.9, max(0.1, env.float('LIMES_EVENT_SHARE', default=0.5)))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
 # NOTE: its terms are only partly published and 1 req/s is Limes's own throttle. Upgrade path: a paid key or Limes's own scanner.
