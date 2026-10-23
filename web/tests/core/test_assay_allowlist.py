@@ -41,6 +41,24 @@ class EnvTest(SimpleTestCase):
         self.assertEqual(env['PATH'], assay.ASSAY_BIN_DIR)
         self.assertEqual(env['HOME'], '/root')
 
+    def test_secrets_are_dropped_and_basics_kept(self):
+        leaky = {'POSTGRES_PASSWORD': 'x', 'LIMES_SECRET_KEY': 'x', 'AI_GATEWAY_API_KEY': 'x',
+                 'NVD_API_KEY': 'x', 'GITHUB_TOKEN': 'x', 'HOME': '/root', 'LANG': 'C.UTF-8',
+                 'https_proxy': 'http://p:1', 'PATH': '/go/bin'}
+        with mock.patch.dict(os.environ, leaky, clear=True):
+            env = assay.restricted_env()
+        self.assertEqual(env, {'PATH': assay.ASSAY_BIN_DIR, 'HOME': '/root', 'LANG': 'C.UTF-8',
+                               'https_proxy': 'http://p:1'})
+
+    def test_preflight_and_scan_get_the_minimal_env(self):
+        with mock.patch.dict(os.environ, {'POSTGRES_PASSWORD': 'x', 'HOME': '/root'}), \
+                mock.patch('shutil.which', return_value='/usr/bin/assay'), \
+                mock.patch.object(assay, 'preflight') as pf:
+            assay_bin, env = assay.prepare(exists=lambda p: False)
+        self.assertNotIn('POSTGRES_PASSWORD', env)
+        self.assertNotIn('POSTGRES_PASSWORD', pf.call_args.args[1])
+        self.assertEqual(pf.call_args.args[1], env)
+
     def test_allowlist_is_nuclei_only(self):
         self.assertEqual(assay.ASSAY_TOOL_ALLOWLIST, ('nuclei',))
 
@@ -54,6 +72,18 @@ class ParseTest(SimpleTestCase):
 
     def test_none_available_is_valid(self):
         self.assertEqual(assay.parse_available_tools(OLD.replace('✓ Available', '✗ Not Available')), set())
+
+    def test_unknown_status_wording_counts_as_available(self):
+        self.assertEqual(assay.parse_available_tools(OLD.replace('✓ Available', '✓ Ready')), {'nuclei'})
+
+    def test_listed_tool_without_status_fails_closed(self):
+        with self.assertRaises(assay.AssayError):
+            assay.parse_available_tools('Registered Security Tools:\n\n  nuclei\n    desc\n')
+
+    def test_only_two_space_indent_is_a_name(self):
+        text = OLD.replace('    ProjectDiscovery Nuclei', '    ProjectDiscovery\n      Nuclei').replace(
+            '    Version: 3.1.0', '    Version: 3.1.0\n    extra')
+        self.assertEqual(assay.parse_available_tools(text), {'nuclei'})
 
     def test_garbage_fails_closed(self):
         with self.assertRaises(assay.AssayError):
@@ -101,6 +131,30 @@ class PreflightTest(SimpleTestCase):
     def test_missing_binary(self):
         with mock.patch('shutil.which', return_value=None), self.assertRaises(assay.AssayError):
             assay.prepare()
+
+
+class FixedPathsTest(SimpleTestCase):
+    def prep(self, present):
+        with mock.patch('shutil.which', return_value='/usr/bin/assay'), \
+                mock.patch.object(assay, 'preflight'):
+            return assay.prepare(exists=lambda p: p in present)
+
+    def test_fake_sqlmap_in_usr_local_bin(self):
+        with self.assertRaises(assay.AssayError) as cm:
+            self.prep({'/usr/local/bin/sqlmap'})
+        self.assertIn('/usr/local/bin/sqlmap', str(cm.exception))
+
+    def test_katana_in_go_bin_is_not_probed_by_assay(self):
+        self.prep({'/go/bin/katana', '/go/bin/gau', '/go/bin/nuclei'})
+
+    def test_katana_in_root_go_bin(self):
+        with self.assertRaises(assay.AssayError):
+            self.prep({'/root/go/bin/katana'})
+
+    def test_opt_script_and_allowlisted_nuclei(self):
+        with self.assertRaises(assay.AssayError):
+            self.prep({'/opt/sqlmap/sqlmap.py'})
+        self.prep({'/usr/bin/nuclei', '/opt/nuclei/nuclei'})
 
 
 class CommandsEnvTest(SimpleTestCase):

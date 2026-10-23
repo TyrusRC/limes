@@ -71,23 +71,64 @@ def parse_report(report_json):
     return vulns
 
 
+# Allow-list, not deny-list: everything else (DB/Django secrets, assay's own AI_GATEWAY_API_KEY,
+# NVD_API_KEY, GITHUB_TOKEN ...) is dropped. Identity/auth reaches assay through --config, not env.
+ENV_PASSTHROUGH = ('HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+                   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy')
+
+# Locations each assay tool wrapper probes outside PATH (read from assay's internal/tools/*).
+# /go/bin is deliberately absent: assay does not probe it, and Limes's katana/gau live there.
+_BIN_DIRS = ('/usr/bin', '/usr/local/bin')
+_GO_DIRS = ('/root/go/bin', '/home/kali/go/bin')
+FIXED_TOOL_PATHS = {
+    'arjun': ('/usr/bin/arjun', '/usr/local/bin/arjun', '/home/kali/.local/bin/arjun'),
+    'commix': tuple(f'{d}/commix' for d in _BIN_DIRS) + ('/opt/commix/commix.py',),
+    'dalfox': tuple(f'{d}/dalfox' for d in _BIN_DIRS + _GO_DIRS),
+    'feroxbuster': tuple(f'{d}/feroxbuster' for d in _BIN_DIRS),
+    'gau': tuple(f'{d}/gau' for d in _BIN_DIRS + _GO_DIRS),
+    'ghauri': tuple(f'{d}/ghauri' for d in _BIN_DIRS) + ('/opt/ghauri/ghauri.py',),
+    'katana': tuple(f'{d}/katana' for d in _BIN_DIRS + _GO_DIRS),
+    'nikto': tuple(f'{d}/nikto' for d in _BIN_DIRS) + ('/opt/nikto/nikto.pl',),
+    'nuclei': tuple(f'{d}/nuclei' for d in _BIN_DIRS) + ('/opt/nuclei/nuclei',),
+    'sqlmap': tuple(f'{d}/sqlmap' for d in _BIN_DIRS) + ('/opt/sqlmap/sqlmap.py',),
+    'tplmap': tuple(f'{d}/tplmap' for d in _BIN_DIRS) + ('/opt/tplmap/tplmap.py',),
+    'wpscan': tuple(f'{d}/wpscan' for d in _BIN_DIRS) + ('/opt/wpscan/wpscan.rb',),
+}
+
+
 def restricted_env():
-    """Current environment (HOME etc. kept) with PATH replaced by the allowlist dir alone.
+    """Minimal environment for assay: PATH is the allowlist dir alone, plus ENV_PASSTHROUGH
+    names that are set in the parent.
 
     NOTE: assay's chromium lookup (go-rod) also uses PATH; the image ships no chromium, so
     headless checks fall back to rod's own download under HOME. If chromium is ever added,
     pass its location explicitly here instead of widening PATH."""
-    return {**os.environ, 'PATH': ASSAY_BIN_DIR}
+    env = {k: os.environ[k] for k in ENV_PASSTHROUGH if k in os.environ}
+    env['PATH'] = ASSAY_BIN_DIR
+    return env
 
 
-_LIST_NAME = re.compile(r'^ {1,4}([a-z0-9][\w.-]*)\s*$')
+def check_fixed_paths(exists=os.path.exists):
+    """assay also probes fixed paths outside PATH, and `tools list` hides some tools
+    (katana, gau, ...). Fail closed if any non-allowlisted tool sits where assay would find it."""
+    found = sorted(p for name, paths in FIXED_TOOL_PATHS.items() if name not in ASSAY_TOOL_ALLOWLIST
+                   for p in paths if exists(p))
+    if found:
+        raise AssayError('assay would find non-allowlisted tools at fixed paths, refusing to scan: '
+                         + ', '.join(found))
+
+
+_LIST_NAME = re.compile(r'^  ([a-z0-9][\w.-]*)\s*$')
+_STATUS = re.compile(r'^\s+Status:\s*(.*?)\s*$')
 _CHECK_LINE = re.compile(r'^\s*([✓✗])\s+([a-z0-9][\w.-]*)')
 
 
 def parse_available_tools(text):
     """Names of tools reported available by `assay tools list` (or `tools check`).
-    Raises AssayError when no tool entry is recognised at all (fail closed)."""
+    A listed tool is available unless its status explicitly says unavailable. Raises
+    AssayError (fail closed) if nothing is recognised or a listed tool has no status."""
     available, seen, current = set(), False, None
+    unparseable = AssayError(f'cannot parse `assay tools list` output: {(text or "")[:200]!r}')
     for line in (text or '').splitlines():
         m = _CHECK_LINE.match(line)
         if m:
@@ -97,15 +138,20 @@ def parse_available_tools(text):
             continue
         m = _LIST_NAME.match(line)
         if m:
-            current = m.group(1)
-            seen = True
+            if current is not None:
+                raise unparseable
+            current, seen = m.group(1), True
             continue
-        if current and 'Status:' in line:
-            if 'Available' in line and 'Not Available' not in line and '✗' not in line:
+        m = _STATUS.match(line)
+        if m and current:
+            status = m.group(1)
+            if not status:
+                raise unparseable
+            if '✗' not in status and 'not available' not in status.lower():
                 available.add(current)
             current = None
-    if not seen:
-        raise AssayError(f'cannot parse `assay tools list` output: {(text or "")[:200]!r}')
+    if not seen or current is not None:
+        raise unparseable
     return available
 
 
@@ -126,11 +172,12 @@ def preflight(assay_bin, env, run=commands.run, now=time.monotonic):
     _cache[key] = now()
 
 
-def prepare():
-    """-> (assay absolute path, restricted env), after a passing preflight."""
+def prepare(exists=os.path.exists):
+    """-> (assay absolute path, restricted env), after the fixed-path check and preflight."""
     assay_bin = shutil.which('assay')
     if not assay_bin:
         raise AssayError('assay binary not found on PATH')
+    check_fixed_paths(exists)
     env = restricted_env()
     preflight(assay_bin, env)
     return assay_bin, env
