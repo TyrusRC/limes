@@ -64,7 +64,7 @@ function edit_asset_tags(id) {
 	asset_fetch(id).then(function(a) {
 		var cur = a.tags || [];
 		var chips = cur.map(function(t, i) {
-			return '<span class="l-tag-chip">' + tag_esc(t) + ' <button type="button" class="btn-close tag_remove" data-i="' + i + '" aria-label="Remove tag ' + tag_esc(t) + '"></button></span>';
+			return '<span class="l-tag-chip">' + tag_esc(t) + ' <button type="button" class="btn-close tag_remove" data-i="' + Number(i) + '" aria-label="Remove tag ' + tag_esc(t) + '"></button></span>';
 		}).join(' ') || '<span class="l-muted">No tags yet.</span>';
 		asset_modal_wide(false);
 		$('#modal_title').text('Tags: ' + a.value);

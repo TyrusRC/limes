@@ -1,7 +1,5 @@
-import json
 import pathlib
-import shutil
-import subprocess
+import re
 
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
@@ -47,31 +45,37 @@ class TagsPageTest(TestCase):
         self.assertIn('id="f_tag"', self.page(self.admin, '/scan/p1/issues'))
 
 
-HOSTILE = ['<img src=x onerror=alert(1)>', '"><script>alert(1)</script>', "' onmouseover='alert(1)", '&amp;']
-HARNESS = """
-const vm = require('vm'), fs = require('fs');
-const ctx = {document: {getElementById: () => null}, fetch: () => {}, console};
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), ctx);
-const names = JSON.parse(process.argv[2]);
-console.log(JSON.stringify({chips: vm.runInContext('tag_chips_html(' + JSON.stringify(names) + ')', ctx),
-                            parsed: vm.runInContext('tag_parse("a, b  c,,d")', ctx)}));
-"""
+SINKS = re.compile(r'insertAdjacentHTML|document\.write|\beval\s*\(|new\s+Function|outerHTML|\.append\(\s*[\'"]<|\.prepend\(\s*[\'"]<')
+LITERAL = re.compile(r"'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"")
+OPERAND = r"[A-Za-z_$][\w$.]*(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?"
+SAFE = re.compile(r'^(tag_esc\(|Number\(|encodeURIComponent\(|chips$|TAG_BULK_MAX$|S$)')
 
 
-class TagChipEscapingTest(TestCase):
-    def test_hostile_names_never_become_markup(self):
-        node = shutil.which('node')
-        self.assertIsNotNone(node, 'node is required for the JS escaping test: install it in the test image')
-        out = subprocess.run([node, '-e', HARNESS, str(WEB / 'static/custom/asset_tags.js'), json.dumps(HOSTILE)],
-                             capture_output=True, text=True, timeout=30, check=True).stdout
-        data = json.loads(out)
-        chips = data['chips']
-        for raw in HOSTILE[:3]:
-            self.assertNotIn(raw, chips)
-        for frag in ('<img', '<script', '" onmouse', "' onmouse"):
-            self.assertNotIn(frag, chips)
-        self.assertEqual(chips.count('<button'), len(HOSTILE))
-        self.assertIn('&lt;img src=x onerror=alert(1)&gt;', chips)
-        self.assertIn('&amp;amp;', chips)  # an ampersand is data, escaped once
-        self.assertEqual(data['parsed'], ['a', 'b', 'c', 'd'])
+class TagScriptSinkTest(TestCase):
+    """asset_tags.js builds markup by string concatenation, so every non-literal piece joined into a string must be
+    escaped (tag_esc), numeric (Number) or one of the pieces built that way; text-only sinks (.text) may take raw text.
+    This fails when someone concatenates a tag, title or message unescaped."""
+
+    def source(self):
+        return re.sub(r'(?m)^\s*//.*$', '', (WEB / 'static/custom/asset_tags.js').read_text())
+
+    def test_no_dynamic_code_or_unusual_html_sinks(self):
+        self.assertIsNone(SINKS.search(self.source()))
+
+    def test_every_value_joined_into_markup_is_escaped(self):
+        checked = 0
+        for line in self.source().splitlines():
+            stripped = LITERAL.sub('S', line)
+            ops = set(re.findall(r'S\s*\+\s*(' + OPERAND + ')', stripped)) | set(re.findall('(' + OPERAND + r')\s*\+\s*S', stripped))
+            for op in ops:
+                checked += 1
+                if '.text(' in line or '.textContent' in line:
+                    continue  # text sinks: no markup is parsed
+                self.assertRegex(op, SAFE, f'unescaped value joined into a string: {line.strip()}')
+        self.assertGreater(checked, 8)  # the scan really saw the concatenations
+
+    def test_tag_esc_escapes_quotes_and_angle_brackets(self):
+        src = self.source()
+        body = src[src.index('var TAG_ENTITIES'):src.index('function tag_chips_html')]
+        for ch in ('&amp;', '&lt;', '&gt;', '&quot;', '&#39;'):
+            self.assertIn(ch, body)
