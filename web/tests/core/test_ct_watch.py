@@ -88,6 +88,23 @@ class HookTest(SimpleTestCase):
         self.assertEqual(len(rec['summary']), 2048)
         self.assertEqual(rec['event'], 'error')
 
+    def test_hook_names_total_reaches_ingest(self):
+        env = self.cert([f'h{i}.x.com' for i in range(1500)])
+        hook.main(env, self.spool)
+        with open(os.path.join(self.spool, TBS + '.json'), 'rb') as f:
+            rec = ingest.parse_record(f.read())
+        self.assertEqual((len(rec['dns_names']), rec['names_total']), (1000, 1500))
+        with open(os.path.join(self.spool, TBS + '.json')) as f:  # a lying total cannot go negative or huge
+            d = json.load(f)
+        for lie in (5, -1, 'x', 10 ** 12):
+            d['names_total'] = lie
+            self.assertIn(ingest.parse_record(json.dumps(d).encode())['names_total'], (1000, 10 ** 6))
+
+    def test_hook_syncs_file_and_directory(self):
+        with mock.patch('limes.ct.hook.os.fsync') as fs:
+            hook.main(self.cert(), self.spool)
+        self.assertGreaterEqual(fs.call_count, 2)
+
     def test_hook_is_executable_with_isolated_shebang(self):
         self.assertTrue(os.access(watch.HOOK_PATH, os.X_OK))
         with open(watch.HOOK_PATH) as f:
@@ -128,6 +145,14 @@ class WatchlistTest(TestCase):
             self.assertEqual(dropped, 3)
 
 
+class WatchNameTest(SimpleTestCase):
+    def test_hostile_names_are_refused(self):
+        for bad in ('a..b.com', '.x.com', 'x.com.', '..', 'a/../b', '-', 'x' * 64 + '.com', '', 'a b.com', ('a.' * 130) + 'com'):
+            self.assertFalse(watch.safe_name(bad), bad)
+        for good in ('x.com', 'xn--80ak6aa92e.com', 'a-b.c-d.example'):
+            self.assertTrue(watch.safe_name(good), good)
+
+
 class FakeProc:
     def __init__(self, argv, kw):
         self.argv, self.kw, self.rc, self.terminated, self.killed = argv, kw, None, 0, 0
@@ -166,12 +191,13 @@ class SupervisorTest(SimpleTestCase):
         self.t = [0.0]
         self.popen = FakePopen()
         self.wl = (['.x.com'], 0, 'h1')
+        self.mocks = {}
         self.sup = watch.Supervisor(popen=self.popen, clock=lambda: self.t[0], wall=lambda: 1_800_000_000 + self.t[0])
         for target, ret in (('watchlist', None), ('drain_spool', {'ingested': 0, 'invalid': 0, 'failed': 0, 'depth': 0, 'projects': set()}),
                             ('read_health', None), ('close_old_connections', None)):
             p = mock.patch.object(watch, target, side_effect=(lambda *a, **k: self.wl) if target == 'watchlist' else None,
                                   return_value=ret)
-            p.start()
+            self.mocks[target] = p.start()
             self.addCleanup(p.stop)
         o = override_settings(CT_STATE_DIR=self.tmp.name, CT_WATCH=True, CONTINUOUS_SCANS=True, CT_WATCH_RESTART_MIN=300)
         o.enable()
@@ -184,7 +210,6 @@ class SupervisorTest(SimpleTestCase):
         self.assertEqual(proc.argv, watch.command(watch.paths(), watch.paths()['watchlist']))
         self.assertIsInstance(proc.argv, list)
         self.assertNotIn('shell', proc.kw)
-        self.assertNotIn('LIMES_SECRET_KEY', proc.kw['env'])  # the child never inherits the app's secrets
         self.assertEqual(hb['state'], 'running')
         with open(watch.paths()['watchlist']) as f:
             self.assertEqual(f.read().split(), ['.x.com'])
@@ -198,6 +223,7 @@ class SupervisorTest(SimpleTestCase):
         with open(watch.paths()['watchlist']) as f:
             self.assertEqual(f.read().split(), ['.x.com', '.y.com'])
         self.assertEqual(hb['watchlist_hash'], 'h2')
+        self.assertEqual(hb['restarts_10m'], 0)  # a planned watchlist restart is not a crash
         self.popen.procs[1].rc = 1  # the child dies
         self.t[0] = 310
         hb = self.sup.step(self.now)
@@ -207,6 +233,59 @@ class SupervisorTest(SimpleTestCase):
             hb = self.sup.step(self.now)
         self.assertEqual(hb['state'], 'off')
         self.assertEqual(self.popen.procs[2].terminated, 1)
+
+    def test_child_env_is_an_allowlist(self):
+        planted = {'POSTGRES_PASSWORD': 'pw-planted-1', 'LIMES_SECRET_KEY': 'sk-planted-2', 'CERTSPOTTER_API_KEY': 'tok-planted-3',
+                   'HTTPS_PROXY': 'http://proxy.invalid:3128', 'no_proxy': 'localhost', 'SSL_CERT_FILE': '/etc/ssl/c.pem'}
+        with mock.patch.dict(os.environ, planted):
+            self.sup.step(self.now)
+        (proc,) = self.popen.procs
+        env = proc.kw['env']
+        allowed = set(watch.CHILD_ENV) | {'HOME', 'LIMES_CT_SPOOL', 'CERTSPOTTER_CONFIG_DIR'}
+        self.assertLessEqual(set(env), allowed)
+        self.assertEqual((env['HTTPS_PROXY'], env['no_proxy'], env['SSL_CERT_FILE']),
+                         (planted['HTTPS_PROXY'], 'localhost', '/etc/ssl/c.pem'))
+        blob = json.dumps([env, proc.argv])
+        for k in ('POSTGRES_PASSWORD', 'LIMES_SECRET_KEY', 'CERTSPOTTER_API_KEY'):
+            self.assertNotIn(planted[k], blob)
+        self.assertFalse(env['CERTSPOTTER_CONFIG_DIR'].startswith(watch.paths()['state']))  # hooks.d is not on the volume
+
+    def test_state_dir_layout_and_ingest_clamp(self):
+        p = watch.paths()
+        self.assertEqual(p['state'], os.path.join(self.tmp.name, 'state'))
+        with override_settings(CT_INGEST_PER_MIN=0):
+            self.sup.step(self.now)
+        self.assertEqual(self.mocks['drain_spool'].call_args[0][1], 1)
+
+    def test_error_window_is_an_hour(self):
+        self.mocks['read_health'].return_value = {
+            'last_error_at': datetime.fromtimestamp(1_800_000_000 - 1800, dt_tz.utc).isoformat(), 'last_error_summary': 'x'}
+        self.assertEqual(self.sup.step(self.now)['health'], 'error')
+        self.t[0] = 3600
+        self.mocks['read_health'].return_value = None
+        self.assertEqual(self.sup.step(self.now)['health'], 'ok')
+
+    def test_last_times_survive_a_restart(self):
+        self.mocks['drain_spool'].return_value = {'ingested': 1, 'invalid': 0, 'failed': 0, 'depth': 0, 'projects': {1}}
+        self.sup.step(self.now)
+        again = watch.Supervisor(popen=self.popen, clock=lambda: self.t[0], wall=lambda: 1_800_000_000)
+        self.mocks['drain_spool'].return_value = {'ingested': 0, 'invalid': 0, 'failed': 0, 'depth': 0, 'projects': set()}
+        hb = again.step(self.now + timedelta(seconds=5))
+        self.assertEqual(hb['last_ingest_at'], self.now.isoformat())
+        self.assertEqual(hb['last_match_at'], self.now.isoformat())
+
+    def test_docker_health_fails_when_the_child_is_down(self):
+        self.sup.step(self.now)
+        self.assertEqual(watch.health_exit_code(self.now.replace(year=2027)), 1)  # stale, for contrast
+        at = datetime.fromtimestamp(1_800_000_000, dt_tz.utc)
+        self.assertEqual(watch.health_exit_code(at), 0)
+        for bad in ({'state': 'backoff', 'pid_alive': False}, {'state': 'running', 'pid_alive': False}):
+            hb = json.loads(self.r.get(watch.HEARTBEAT))
+            self.r.set(watch.HEARTBEAT, json.dumps({**hb, **bad}), ex=600)
+            self.assertEqual(watch.health_exit_code(at), 1, bad)
+        hb.update(state='idle', pid_alive=False)
+        self.r.set(watch.HEARTBEAT, json.dumps(hb), ex=600)
+        self.assertEqual(watch.health_exit_code(at), 0)
 
     def test_empty_watchlist_is_idle(self):
         self.wl = ([], 0, 'e')

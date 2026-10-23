@@ -75,11 +75,13 @@ def parse_record(raw):
         return None
     if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
         return None
+    total = r.get('names_total')  # the hook caps the list; its count of the rest is only believed when plausible
+    total = total if isinstance(total, int) and not isinstance(total, bool) and len(names) <= total <= 1_000_000 else len(names)
     cert = r.get('cert_sha256')
     idx = r.get('entry_index')
     return {'tbs_sha256': tbs,
             'cert_sha256': cert if isinstance(cert, str) and _HEX64.fullmatch(cert) else None,
-            'dns_names': names, 'names_total': len(names),
+            'dns_names': names, 'names_total': total,
             'issuer_dn': _text(r.get('issuer_dn'), 500),
             'not_before': _when(r.get('not_before')), 'not_after': _when(r.get('not_after')),
             'log_uri': _text(r.get('log_uri'), 500),

@@ -23,7 +23,7 @@ STATE_KEY = 'limes:ct:state'
 REASONS = {'no_heartbeat': 'The watcher has not reported', 'stale_heartbeat': 'The watcher stopped reporting',
            'process_down': 'certspotter is not running', 'restart_storm': 'certspotter keeps restarting',
            'watcher_error': 'certspotter reported an error', 'spool_backlog': 'Certificate backlog is growing'}
-ERROR_WINDOW = timedelta(hours=1)
+ERROR_WINDOW = watch.ERROR_WINDOW
 SPOOL_LIMIT = 1000
 RESTART_LIMIT = 3
 SAMPLE_MAX = 1000

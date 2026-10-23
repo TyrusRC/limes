@@ -39,14 +39,25 @@ TMP_MAX_AGE = 3600
 HEALTH_MAX_BYTES = 8192
 _SPOOL_FILE = re.compile(r'[0-9a-f]{64}\.json')
 _HEALTH_FILE = re.compile(r'[0-9]{1,20}\.json')
-_WATCH_NAME = re.compile(r'[a-z0-9.-]+')
+_LABEL = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
+ERROR_WINDOW = timedelta(hours=1)  # a hook error keeps the heartbeat's health at 'error' this long (limes.ct.health)
+CONFIG_DIR = '/nonexistent/certspotter'  # certspotter runs hooks.d scripts from its config dir: never a writable one
+# The only variables the child inherits: the app's database, Redis and API secrets stay out of its reach.
+CHILD_ENV = ('PATH', 'TMPDIR', 'SSL_CERT_FILE', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY',
+             'https_proxy', 'http_proxy', 'no_proxy')
 _FAILS = {}  # file hash -> failed ingests in this process
 
 
 def paths(state_dir=None):
-    state = state_dir or settings.CT_STATE_DIR
-    return {'state': state, 'spool': os.path.join(state, 'spool'), 'tmp': os.path.join(state, 'spool', '.tmp'),
-            'health': os.path.join(state, 'spool', '_health'), 'watchlist': os.path.join(state, 'watchlist.txt')}
+    base = state_dir or settings.CT_STATE_DIR
+    return {'state': os.path.join(base, 'state'), 'spool': os.path.join(base, 'spool'),
+            'tmp': os.path.join(base, 'spool', '.tmp'), 'health': os.path.join(base, 'spool', '_health'),
+            'watchlist': os.path.join(base, 'watchlist.txt'), 'last': os.path.join(base, 'last.json')}
+
+
+def safe_name(n):
+    """A plain DNS name: non-empty LDH labels, no '..', no leading or trailing dot."""
+    return isinstance(n, str) and 0 < len(n) <= 253 and all(_LABEL.fullmatch(l) for l in n.split('.'))
 
 
 def watchlist(max_entries=None):
@@ -57,7 +68,7 @@ def watchlist(max_entries=None):
     idx = ingest.load_index()
 
     def ok(names):
-        return sorted({n for n in names if _WATCH_NAME.fullmatch(n)})
+        return sorted({n for n in names if safe_name(n)})
     roots = ['.' + n for n in ok(idx.roots)]
     hosts = ok(idx.hosts)
     look = ['.' + n for n in ok(idx.lookalikes)]
@@ -219,7 +230,7 @@ class Supervisor:
         self.wl_at = None
         self.last_ingest = self.last_match = None
         self.last_error = {'last_error_at': None, 'last_error_summary': None}
-        self.ever_started = False
+        self.last_loaded = False
 
     def stop(self):
         proc, self.proc = self.proc, None
@@ -232,25 +243,46 @@ class Supervisor:
             proc.kill()
             proc.wait()
 
+    def _load_last(self, p):
+        self.last_loaded = True
+        try:
+            raw = _open_nofollow(p['last'], 4096)
+            d = json.loads(raw or b'')
+            for k, attr in (('ingest', 'last_ingest'), ('match', 'last_match')):
+                if isinstance(d.get(k), str):
+                    setattr(self, attr, d[k][:40])
+        except (OSError, ValueError, AttributeError, RecursionError):
+            pass
+
+    def _save_last(self, p):
+        try:
+            os.makedirs(os.path.dirname(p['last']), mode=0o700, exist_ok=True)
+            tmp = p['last'] + '.new'
+            with open(tmp, 'w') as f:
+                json.dump({'ingest': self.last_ingest, 'match': self.last_match}, f)
+            os.replace(tmp, p['last'])
+        except OSError as e:
+            logger.warning('ct watch: last-seen times not saved (%s)', type(e).__name__)
+
     def _write_watchlist(self, p, lines):
-        os.makedirs(p['state'], mode=0o700, exist_ok=True)
+        os.makedirs(os.path.dirname(p['watchlist']), mode=0o700, exist_ok=True)
         tmp = p['watchlist'] + '.new'
         with open(tmp, 'w') as f:
             f.write('\n'.join(lines) + '\n')
         os.replace(tmp, p['watchlist'])
 
-    def _start(self, p):
+    def _start(self, p, crashed=False):
         lines, _, h = self.wl
         self._write_watchlist(p, lines)
-        for d in (p['spool'], p['tmp'], p['health']):
+        for d in (p['state'], p['spool'], p['tmp'], p['health']):
             os.makedirs(d, mode=0o700, exist_ok=True)
-        env = {'PATH': os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'HOME': p['state'],
-               'LIMES_CT_SPOOL': p['spool']}  # nothing else: no database or Redis secrets reach the child
+        env = {k: os.environ[k] for k in CHILD_ENV if k in os.environ}
+        env.setdefault('PATH', '/usr/local/bin:/usr/bin:/bin')
+        env.update(HOME=p['state'], LIMES_CT_SPOOL=p['spool'], CERTSPOTTER_CONFIG_DIR=CONFIG_DIR)
         self.proc = self.popen(command(p, p['watchlist']), stdin=subprocess.DEVNULL, env=env)
         now = self.clock()
-        if self.ever_started:
+        if crashed:  # a planned watchlist restart is not a crash
             self.restarts.append(now)
-        self.ever_started = True
         self.started, self.started_wall, self.running_hash = now, self.wall(), h
 
     def _supervise(self, p):
@@ -260,13 +292,14 @@ class Supervisor:
         if not self.wl[0]:
             self.stop()
             return 'idle'
+        crashed = False
         if self.proc is not None and self.proc.poll() is not None:
-            self.proc = None
+            self.proc, crashed = None, True
         if self.proc is None:
             recent = [t for t in self.restarts if now - t < 600]
             if len(recent) >= 5 and self.started is not None and now - self.started < 60:
                 return 'backoff'  # a crash loop waits a minute between starts
-            self._start(p)
+            self._start(p, crashed=crashed)
         elif self.wl[2] != self.running_hash and now - self.started >= settings.CT_WATCH_RESTART_MIN:
             self.stop()
             self._start(p)
@@ -279,19 +312,23 @@ class Supervisor:
         else:
             self.stop()
             state = 'off'
-        limit = math.ceil(settings.CT_INGEST_PER_MIN * LOOP_SECONDS / 60)
+        if not self.last_loaded:
+            self._load_last(p)
+        limit = max(1, math.ceil(settings.CT_INGEST_PER_MIN * LOOP_SECONDS / 60))
         res = drain_spool(p['spool'], limit, now)
         if res['ingested']:
             self.last_ingest = now.isoformat()
         if res['projects']:
             self.last_match = now.isoformat()
+        if res['ingested'] or res['projects']:
+            self._save_last(p)
         err = read_health(p['health'])
         if err:
             self.last_error = err
         close_old_connections()
         wall = self.wall()
         lines, dropped, h = self.wl or ([], 0, None)
-        recent_err = self.last_error['last_error_at'] and wall - datetime.fromisoformat(self.last_error['last_error_at']).timestamp() < 600
+        recent_err = self.last_error['last_error_at'] and wall - datetime.fromisoformat(self.last_error['last_error_at']).timestamp() < ERROR_WINDOW.total_seconds()
         hb = {'pid_alive': self.proc is not None and self.proc.poll() is None,
               'started_at': _iso(self.started_wall) if self.started_wall else None,
               'restarts_10m': len([t for t in self.restarts if self.clock() - t < 600]),
@@ -325,7 +362,10 @@ def health_exit_code(now=None):
     now = now or timezone.now()
     try:
         raw = get_redis_connection('default').get(HEARTBEAT)
-        at = datetime.fromisoformat(json.loads(raw)['at'])
+        hb = json.loads(raw)
+        at = datetime.fromisoformat(hb['at'])
+        if hb.get('state') == 'backoff' or (hb.get('state') == 'running' and not hb.get('pid_alive')):
+            return 1  # the watcher loop is alive but certspotter is not
     except Exception:
         return 1
     return 0 if (now - at).total_seconds() <= settings.CT_WATCH_STALE else 1

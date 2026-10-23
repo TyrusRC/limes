@@ -46,7 +46,14 @@ def _publish(spool, final_dir, final_name, record):
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(record, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, os.path.join(final_dir, final_name))
+        dfd = os.open(final_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
     except BaseException:
         try:
             os.unlink(tmp)
