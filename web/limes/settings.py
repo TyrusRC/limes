@@ -36,6 +36,13 @@ ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
 ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
+# MCP server (limes.mcp): off by default; writes need their own switch
+MCP_ENABLED = env.bool('LIMES_MCP_ENABLED', default=False)
+MCP_WRITES_ENABLED = env.bool('LIMES_MCP_WRITES_ENABLED', default=False)
+MCP_ALLOWED_ORIGINS = env.list('LIMES_MCP_ALLOWED_ORIGINS', default=[])
+MCP_ALLOWED_HOSTS = env.list('LIMES_MCP_ALLOWED_HOSTS', default=[])
+MCP_RATE_PER_MIN = max(1, env.int('LIMES_MCP_RATE_PER_MIN', default=60))
+MCP_WRITE_RATE_PER_MIN = max(1, env.int('LIMES_MCP_WRITE_RATE_PER_MIN', default=10))
 # Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
 # InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
 # NOTE: its terms are only partly published and 1 req/s is Limes's own throttle. Upgrade path: a paid key or Limes's own scanner.
@@ -234,7 +241,8 @@ CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor')
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
+                  'limes.mcp.audit')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
@@ -245,6 +253,7 @@ CELERY_BEAT_SCHEDULE = {
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
     'expire-waivers': {'task': 'expire_waivers', 'schedule': 86400.0},
+    'purge-mcp-logs': {'task': 'purge_mcp_logs', 'schedule': 86400.0},
 }
 CELERY_TASK_ROUTES = celery_routing.task_routes()
 CELERY_TASK_ANNOTATIONS = celery_routing.task_annotations()
