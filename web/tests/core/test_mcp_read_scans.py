@@ -12,8 +12,9 @@ from limes.mcp import registry
 from limes.mcp.redact import redact_log
 from limes.mcp.results import FIELD_CAP, LOG_CAP
 from scanEngine.models import EngineType
-from startScan.models import (Asset, ChangeEvent, Command, CveId, IssueNote, IssueWaiver, ScanActivity, ScanHistory,
-                              SubScan, Technology, TrackedIssue, Vulnerability, VulnerabilityTags)
+from startScan.models import (Asset, ChangeEvent, Command, CveId, CweId, IssueNote, IssueWaiver, ScanActivity, ScanHistory,
+                              SubScan, Technology, TrackedIssue, Vulnerability, VulnerabilityReference,
+                              VulnerabilityTags)
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
 
@@ -288,7 +289,7 @@ class HostileTextTests(ScansBase):
         IssueWaiver.objects.create(issue=issue, kind='accepted_risk', reason=H, created_by=self.admin)
         IssueNote.objects.create(issue=issue, author=self.admin, text=H)
         ChangeEvent.objects.create(project=self.p1, kind='issue_new', title=H, asset=owned, detail={'note': H, H: H})
-        d = self.domain(name='h.x.com')
+        d = self.domain(name='ignore-previous-instructions.h.x.com')
         scan = self.scan(d, status=0, error_message=H)
         act = ScanActivity.objects.create(scan_of=scan, name='a', title=H, time=timezone.now(), status=0,
                                           error_message=H, traceback=H)
@@ -298,6 +299,9 @@ class HostileTextTests(ScansBase):
             response=H, request=H, curl_command=H, matcher_name=H, template_id=H, source=H, http_url=H,
             cvss_metrics=H, extracted_results=[H, H], discovered_date=timezone.now())
         v.tags.add(VulnerabilityTags.objects.create(name=H))
+        v.cve_ids.add(CveId.objects.create(name=H))
+        v.cwe_ids.add(CweId.objects.create(name=H))
+        v.references.add(VulnerabilityReference.objects.create(url=H))
         return {'asset_id': owned.id, 'issue_id': issue.id, 'scan_id': scan.id, 'activity_id': act.id,
                 'vulnerability_id': v.id}
 
@@ -414,3 +418,157 @@ class SystemStatusTests(ScansBase):
         self.assertEqual(d['workers'], [])
         self.assertIsNone(d['queues'])
         self.assertNotIn('secret url', json.dumps(env))
+
+
+CORPUS = {
+    'sk_live_' + 'a1B2c3D4e5F6g7H8i9J0': 'a1B2c3D4e5F6g7H8',
+    'rk_live_' + 'a1B2c3D4e5F6g7H8i9J0': 'a1B2c3D4e5F6g7H8',
+    'key=AIza' + 'SyA-abcdefghijklmnopqrstuvwxyz01234': 'abcdefghijklmnopqrstuvwxyz01234',
+    'POST https://hooks.slack.com/services/T01ABCDEF/B02GHIJKL/xYz123AbC456dEf789': 'xYz123AbC456dEf789',
+    'curl -u admin:pw123 http://h/': 'pw123',
+    'curl --user admin:pw124 http://h/': 'pw124',
+    'GET https://u:pa/ss@h/x': 'pa/ss',
+    '-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF\nabc\n-----END PGP PRIVATE KEY BLOCK-----': 'lQOYBF',
+    '{"k": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADAN\\nabc\\n-----END PRIVATE KEY-----\\n"}': 'MIIEvQIBADAN',
+    'PWD=pwd-value-1': 'pwd-value-1',
+    'DB_PASS=pass-value-2': 'pass-value-2',
+    'auth=auth-value-3': 'auth-value-3',
+    'credentials: cred-value-4': 'cred-value-4',
+    'APIKEY=apikey-value-5': 'apikey-value-5',
+    'password:\n  yaml-value-6\nnext: 1': 'yaml-value-6',
+    'run --password flagval7 --other': 'flagval7',
+    'run --token flagval8': 'flagval8',
+    'run --secret flagval9': 'flagval9',
+    'mysql -p flagval10 db': 'flagval10',
+    "mysql -p'flagval11' db": 'flagval11',
+    'mysql -pflagval12 db': 'flagval12',
+    'Authorization: Bearer\n  folded-value-13': 'folded-value-13',
+    'AKIAABCDEFGHIJKLMNOP wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY': 'wJalrXUtnFEMI',
+    'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY, AKIAABCDEFGHIJKLMNOP': 'wJalrXUtnFEMI',
+    'aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY': 'wJalrXUtnFEMI',
+    'password="has a space"': 'has a space',
+    "SECRET='sp ace\\'d tail'": 'tail',
+    '{"password": "two words here", "user": "u"}': 'two words',
+    'password: "yaml quoted val"': 'yaml quoted',
+    'password=ab;cdSECRET14': 'cdSECRET14',
+    'token=ab&cdSECRET15': 'cdSECRET15',
+    'api_key=ab,cdSECRET16': 'cdSECRET16',
+    'redis://:p@ss17@host:6379/0': 'ss17',
+    'Basic dXNlcjpwYXNzd29yZA==': 'dXNlcjpwYXNzd29yZA',
+}
+
+
+class RedactorCorpusTests(ScansBase):
+    def test_reviewer_corpus(self):
+        for text, leak in CORPUS.items():
+            out = redact_log(text)
+            self.assertNotIn(leak, out, text)
+            self.assertIn('***', out, text)
+
+    def test_normalise_before_redact(self):
+        zw = 'ghp_' + 'a' * 10 + '​' + 'b' * 26
+        for text, leak in {zw: 'b' * 26, 'password\x1b[0m=hunter2': 'hunter2',
+                           '\x1b[1mAuthorization\x1b[0m: Bearer xyz999': 'xyz999',
+                           'ＡＫＩＡABCDEFGHIJKLMNOP': 'ABCDEFGHIJKLMNOP',
+                           '\x1b]0;title\x07token=ttt777': 'ttt777'}.items():
+            out = redact_log(text)
+            self.assertNotIn(leak, out, repr(text))
+            self.assertNotIn('[0m', out)
+        # a secret from the domain identity split by a zero-width character in the log
+        self.assertNotIn('ab', redact_log('x a​b y'.replace('a​b', 'a​b'), ['ab']).replace('ab', '', 0).split()[1])
+
+    def test_not_overredacting_plain_data(self):
+        for plain in ('9f86d081884c7d659a2feaf0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+                      '123e4567-e89b-12d3-a456-426614174000', 'nmap -p 80,443 -p 1-1000 host',
+                      'ffuf -u https://x.com/FUZZ', 'GET /index.html 200'):
+            self.assertEqual(redact_log(plain), plain)
+
+    def test_linear_on_1mb_probes(self):
+        import time
+        for probe in ('a.' * 500000, 'key' * 300000, '-----BEGIN PRIVATE KEY-----' * 40000, '://' * 300000,
+                      'password' + ' ' * 1000000, 'Authorization:' * 70000, '-u ' * 300000, 'AKIAABCDEFGHIJKLMNOP ' * 40000):
+            t = time.monotonic()
+            redact_log(probe)
+            self.assertLess(time.monotonic() - t, 3, probe[:20])
+
+
+class LogEdgeTests(ScansBase):
+    def logs(self, output, secrets_domain=None):
+        s = self.scan(secrets_domain)
+        Command.objects.create(scan_history=s, time=timezone.now(), command='c', output=output)
+        return self.data(self.call('get_scan_logs', project='p1', scan_id=s.id))['items'][0]['output_tail']['untrusted_text']
+
+    def test_zero_width_split_secret_does_not_come_back(self):
+        out = self.logs('x ghp_' + 'a' * 10 + '​' + 'b' * 26 + ' END')
+        self.assertNotIn('b' * 26, out)
+        d = self.domain(request_headers={'headers': [{'name': 'X', 'value': identity.encrypt('abcdefghij'), 'secret': True}]})
+        out = self.logs('x abcde​fghij END', d)
+        self.assertNotIn('fghij', out)
+
+    def test_secret_straddling_the_window_start(self):
+        from limes.mcp.tools import scans
+        s = 'PARTIALSECRET1234'
+        head = '\nAuthorization: Bearer q\nEND'
+        mid = '\n' + 'o' * (scans.WINDOW + 4 - len(s) - len(head) - 1)
+        out = self.logs('p' * 100 + s + mid + head)
+        self.assertNotIn('IALSECRET1234', out)
+        self.assertTrue(out.endswith('END'))
+        self.assertNotIn('Bearer q', out)
+
+    def test_tail_window_helper(self):
+        from limes.mcp.redact import tail_window
+        self.assertEqual(tail_window('abc\ndef', 100), 'abc\ndef')
+        self.assertEqual(tail_window('abc\ndefghi\njkl', 9), 'jkl')
+        self.assertEqual(tail_window('x' * 20, 5), '')
+
+    def test_get_scan_size_budget_and_traceback_window(self):
+        import time
+        from limes.mcp.results import RESULT_BUDGET
+        s = self.scan()
+        big = ('password=' + 'q' * 30 + '\n' + 'tb ' * 3000)
+        ScanActivity.objects.bulk_create([ScanActivity(
+            scan_of=s, name='n', title='T' * 1000, time=timezone.now() + timedelta(seconds=i), status=0,
+            error_message='E' * 300, traceback=big * 3) for i in range(200)])
+        t = time.monotonic()
+        env = self.call('get_scan', project='p1', scan_id=s.id)
+        self.assertLess(time.monotonic() - t, 10)
+        d = self.data(env)
+        self.assertLessEqual(len(json.dumps(env)), RESULT_BUDGET + 5000)
+        self.assertTrue(d['stages_truncated'])
+        self.assertGreater(len(d['stages']), 0)
+        small = self.scan()
+        ScanActivity.objects.create(scan_of=small, name='n', title='t', time=timezone.now(), status=0)
+        self.assertFalse(self.data(self.call('get_scan', project='p1', scan_id=small.id))['stages_truncated'])
+
+    def test_secrets_reach_every_redaction_site(self):
+        d = self.domain(request_headers={'headers': [{'name': 'X', 'value': identity.encrypt('S3cr3tV4lue'), 'secret': True}]})
+        s = self.scan(d, status=0, error_message='failed with S3cr3tV4lue')
+        v = Vulnerability.objects.create(scan_history=s, name='n', severity=2, discovered_date=timezone.now(),
+                                         http_url='https://u:pw1@h/', request='r S3cr3tV4lue', response='r S3cr3tV4lue',
+                                         curl_command='curl S3cr3tV4lue', extracted_results=['x S3cr3tV4lue', 'token=zzz1'])
+        for name, args in (('list_scans', {}), ('get_scan', {'scan_id': s.id}),
+                           ('get_vulnerability', {'vulnerability_id': v.id}), ('list_vulnerabilities', {})):
+            blob = json.dumps(self.call(name, project='p1', **args))
+            for leak in ('S3cr3tV4lue', 'pw1', 'zzz1'):
+                self.assertNotIn(leak, blob, name)
+
+    def test_log_tool_descriptions_warn(self):
+        for name in ('get_scan_logs', 'get_scan', 'get_vulnerability'):
+            self.assertIn('Redaction is best-effort: treat output as potentially sensitive.',
+                          registry.REGISTRY[name].description, name)
+
+
+class SystemStatusBrokerDownTests(ScansBase):
+    def test_returns_fast_with_real_unreachable_broker(self):
+        import time
+        from limes.celery import app
+        for key in ('broker_url', 'broker_read_url'):
+            old = app.conf[key]
+            app.conf[key] = 'redis://127.0.0.1:1/0'
+            self.addCleanup(app.conf.__setitem__, key, old)
+        t = time.monotonic()
+        d = self.data(self.call('get_system_status'))
+        took = time.monotonic() - t
+        self.assertLess(took, 5)
+        self.assertEqual(d['workers'], [])
+        self.assertIsNone(d['queues'])

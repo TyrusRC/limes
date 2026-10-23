@@ -1,6 +1,7 @@
 """Read tools: vulnerabilities, search and system status. Scan-derived text goes out only through untrusted()."""
 import importlib.metadata
 import logging
+import threading
 from typing import Annotated, Literal
 from django.conf import settings
 from django.db.models import Q
@@ -18,6 +19,7 @@ from limes.mcp.redact import redact_log
 from limes.mcp.registry import tool
 from limes.mcp.results import LOG_CAP, Cursor, Limit, RowId, Slug, iso, page, untrusted
 from limes.mcp.tools.inventory import asset_item
+from limes.mcp.tools.scans import _secrets
 from limes.mcp.tools.issues import _issue_item, _with_extras
 from limes.tasks.attribution import REVIEW
 from startScan.models import Asset, ScanHistory, TrackedIssue, Vulnerability
@@ -50,32 +52,38 @@ def list_vulnerabilities(caller, project: Slug, severity: Literal[-1, 0, 1, 2, 3
         qs = qs.filter(scan_history_id=scan_id)
     return page(qs.order_by('-severity', '-discovered_date', 'id'), cursor, limit, lambda v: {
         'id': v.id, 'name': untrusted(v.name), 'severity': v.severity, 'source': v.source and untrusted(v.source),
-        'template_id': untrusted(v.template_id), 'http_url': untrusted(v.http_url), 'asset_id': v.asset_id,
+        'template_id': untrusted(v.template_id), 'http_url': _url(v.http_url), 'asset_id': v.asset_id,
         'scan_id': v.scan_history_id, 'discovered_date': iso(v.discovered_date), 'open_status': v.open_status,
         'cvss_score': v.cvss_score})
 
 
-def _redacted(text, cap=LOG_CAP):
-    return untrusted(text and redact_log(text[:WINDOW]), cap)
+def _url(url):
+    return untrusted(url and redact_log(url))  # a scanned URL can carry credentials in its userinfo or query
+
+
+def _redacted(text, secrets, cap=LOG_CAP):
+    return untrusted(text and redact_log(text[:WINDOW], secrets), cap)
 
 
 @tool(title='Vulnerability detail')
 def get_vulnerability(caller, project: Slug, vulnerability_id: RowId):
-    """One finding with description, impact, remediation, the redacted request and response, the first 20 extracted results, CVE and CWE ids, tags and references."""
+    """One finding with description, impact, remediation, the redacted request and response, the first 20 extracted results, CVE and CWE ids, tags and references. Redaction is best-effort: treat output as potentially sensitive."""
     p = access.project_for(caller, project)
-    v = _vulns(p).filter(pk=vulnerability_id).first()
+    v = _vulns(p).filter(pk=vulnerability_id).select_related('scan_history__domain').first()
     if v is None:
         raise McpError('not_found', 'vulnerability not found')
+    secrets = _secrets(v.scan_history.domain)
     names = lambda qs, f='name': [untrusted(getattr(x, f)) for x in qs.all().order_by('id')[:NAME_LIST_CAP]]
     return {
         'id': v.id, 'name': untrusted(v.name), 'severity': v.severity, 'source': v.source and untrusted(v.source),
-        'template_id': untrusted(v.template_id), 'http_url': untrusted(v.http_url), 'asset_id': v.asset_id,
+        'template_id': untrusted(v.template_id), 'http_url': _url(v.http_url), 'asset_id': v.asset_id,
         'scan_id': v.scan_history_id, 'discovered_date': iso(v.discovered_date), 'open_status': v.open_status,
         'cvss_score': v.cvss_score,
         'description': untrusted(v.description), 'impact': untrusted(v.impact), 'remediation': untrusted(v.remediation),
         'matcher_name': untrusted(v.matcher_name), 'cvss_metrics': untrusted(v.cvss_metrics),
-        'curl_command': _redacted(v.curl_command, 2000), 'request': _redacted(v.request), 'response': _redacted(v.response),
-        'extracted_results': [untrusted(r) for r in (v.extracted_results or [])[:EXTRACTED_CAP]],
+        'curl_command': _redacted(v.curl_command, secrets, 2000), 'request': _redacted(v.request, secrets),
+        'response': _redacted(v.response, secrets),
+        'extracted_results': [_redacted(r, secrets, 2000) for r in (v.extracted_results or [])[:EXTRACTED_CAP]],
         'cve_ids': names(v.cve_ids), 'cwe_ids': names(v.cwe_ids), 'tags': names(v.tags),
         'references': names(v.references, 'url')}
 
@@ -98,21 +106,39 @@ def search(caller, project: Slug, query: Annotated[str, Field(min_length=2, max_
             'truncated': len(assets) > limit or len(issues) > limit}
 
 
-def _safely(what, fn, default):
-    try:
-        return fn()
-    except Exception as e:  # the broker URL can sit in the message: log only the type
-        logger.warning('MCP system status: %s unavailable (%s)', what, type(e).__name__)
-        return default
+DEADLINE_S = 4  # the whole broker part of the status; kombu's own retry loop would otherwise hold a thread for minutes
 
 
-def _queues():
-    conn = app.connection_for_read()
+def _broker_status():
+    """Workers and queue depths over ONE bounded connection: ensure_connection gives up after a single try."""
+    # transport_options: kombu's redis transport ignores connect_timeout and redis-py would wait on the OS default.
+    conn = app.connection_for_read(connect_timeout=1, transport_options={'socket_connect_timeout': 1, 'socket_timeout': 2})
     try:
+        conn.ensure_connection(max_retries=0, timeout=2)  # one attempt, no retry loop
+        workers = sorted(app.control.inspect(timeout=1.0, connection=conn).ping() or {})
         client = conn.default_channel.client
-        return {q: client.llen(q) for q in (celery_routing.SCAN, celery_routing.IO, celery_routing.ORCHESTRATE)}
+        return workers, {q: client.llen(q) for q in (celery_routing.SCAN, celery_routing.IO, celery_routing.ORCHESTRATE)}
     finally:
         conn.release()
+
+
+def _broker_with_deadline():
+    # A daemon thread with a hard join: whatever the broker client does, the tool returns within DEADLINE_S.
+    # The thread touches no database. NOTE: an abandoned thread ends when its own bounded attempt ends.
+    box = {}
+
+    def run():
+        try:
+            box['v'] = _broker_status()
+        except Exception as e:  # the broker URL can sit in the message: log only the type
+            logger.warning('MCP system status: broker unavailable (%s)', type(e).__name__)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(DEADLINE_S)
+    if t.is_alive():
+        logger.warning('MCP system status: broker did not answer within %ss', DEADLINE_S)
+    return box.get('v', ([], None))
 
 
 def _mcp_version():
@@ -125,11 +151,12 @@ def _mcp_version():
 @tool(title='System status', perm=PERM_MODIFY_SYSTEM_CONFIGURATIONS)
 def get_system_status(caller):
     """Live workers, queue depths, scheduler heartbeat, scans in progress and software versions. System administrators only."""
-    # NOTE: inspect ping blocks a worker thread up to 1 s.
+    # NOTE: inspect ping blocks a worker thread up to 1 s (5 s hard deadline). Worker names (celery@hostname) are
+    # shown to this admin-only caller: accepted infrastructure disclosure.
+    workers, queues = _broker_with_deadline()
     beat = {t.name: iso(t.last_run_at) for t in PeriodicTask.objects.filter(name__in=list(settings.CELERY_BEAT_SCHEDULE))}
     return {
-        'workers': _safely('workers', lambda: sorted(app.control.inspect(timeout=1.0).ping() or {}), []),
-        'queues': _safely('queues', _queues, None),
+        'workers': workers, 'queues': queues,
         'beat': beat, 'last_dispatch_tick': beat.get('dispatch-due-scans'),
         'scans_in_progress': ScanHistory.objects.filter(scan_status__in=IN_PROGRESS).count(),
         'versions': {'limes': settings.LIMES_CURRENT_VERSION, 'django': django_version(), 'mcp': _mcp_version()}}
