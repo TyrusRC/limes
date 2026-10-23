@@ -1,7 +1,6 @@
 from dashboard.models import *
 from django.contrib.humanize.templatetags.humanize import (naturalday, naturaltime)
 from django.forms.models import model_to_dict
-from recon_note.models import *
 from limes.common_func import *
 from rest_framework import serializers
 from scanEngine.models import *
@@ -132,29 +131,6 @@ class SubScanResultSerializer(serializers.ModelSerializer):
 		if subscan.engine:
 			return subscan.engine.engine_name
 		return ''
-
-
-class ReconNoteSerializer(serializers.ModelSerializer):
-
-	domain_name = serializers.SerializerMethodField('get_domain_name')
-	subdomain_name = serializers.SerializerMethodField('get_subdomain_name')
-	scan_started_time = serializers.SerializerMethodField('get_scan_started_time')
-
-	class Meta:
-		model = TodoNote
-		fields = '__all__'
-
-	def get_domain_name(self, note):
-		if note.scan_history:
-			return note.scan_history.domain.name
-
-	def get_subdomain_name(self, note):
-		if note.subdomain:
-			return note.subdomain.name
-
-	def get_scan_started_time(self, note):
-		if note.scan_history:
-			return note.scan_history.start_scan_date
 
 
 class OnlySubdomainNameSerializer(serializers.ModelSerializer):
@@ -664,7 +640,6 @@ class SubdomainSerializer(serializers.ModelSerializer):
 	medium_count = serializers.SerializerMethodField('get_medium_count')
 	high_count = serializers.SerializerMethodField('get_high_count')
 	critical_count = serializers.SerializerMethodField('get_critical_count')
-	todos_count = serializers.SerializerMethodField('get_todos_count')
 	subscan_count = serializers.SerializerMethodField('get_subscan_count')
 	ip_addresses = IpSerializer(many=True)
 	technologies = TechnologySerializer(many=True)
@@ -702,9 +677,6 @@ class SubdomainSerializer(serializers.ModelSerializer):
 
 	def get_subscan_count(self, subdomain):
 		return subdomain.get_subscan_count
-
-	def get_todos_count(self, subdomain):
-		return len(subdomain.get_todos.filter(is_done=False))
 
 	def get_vuln_count(self, obj):
 		try:

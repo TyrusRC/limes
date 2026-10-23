@@ -1,5 +1,4 @@
 from urllib.parse import urlparse
-from django.apps import apps
 from django.contrib.auth.models import User
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
@@ -298,15 +297,6 @@ class Subdomain(models.Model):
 		if self.scan_history:
 			vulns = vulns.filter(scan_history=self.scan_history)
 		return vulns
-
-	@property
-	def get_todos(self):
-		TodoNote = apps.get_model('recon_note', 'TodoNote')
-		notes = TodoNote.objects
-		if self.scan_history:
-			notes = notes.filter(scan_history=self.scan_history)
-		notes = notes.filter(subdomain__id=self.id)
-		return notes.values()
 
 	@property
 	def get_subscan_count(self):

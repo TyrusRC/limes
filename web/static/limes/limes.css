@@ -840,23 +840,6 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 :root .wizard .card .card-body ul li a { color: var(--ink); }
 /* select2 inline search (pages load their own select2 copy after this file; the main select2 rules carry :root too) */
 :root .select2-container--default .select2-search--inline .select2-search__field { color: var(--ink); }
-/* recon notes (todolist plugin) */
-:root .mail-box-container { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
-:root .tab-title { border-right-color: var(--border); }
-:root .tab-title #addTask { background: var(--brand-solid); color: var(--on-brand); border-radius: var(--radius); font-weight: 600; }
-:root .tab-title .nav-pills a.nav-link, :root .tab-title .nav-pills a.nav-link svg { color: var(--ink-3); fill: none; }
-:root .tab-title .nav-pills .nav-link.active, :root .tab-title .nav-pills a.nav-link:hover { background: var(--brand-tint); color: var(--brand-ink); }
-:root .tab-title .nav-pills .nav-link.active svg, :root .tab-title .nav-pills a.nav-link:hover svg { color: var(--brand-ink); fill: none; }
-:root .tab-title .nav-pills .nav-link .badge { border-color: var(--border); }
-:root .tab-title .nav-pills .nav-link.active .badge { color: var(--brand-ink) !important; }
-:root .compose-box { background: transparent; }
-:root .compose-box .compose-content h5 { color: var(--ink); }
-:root #addTaskModal .modal-footer .btn.add-tsk, :root #addTaskModal .modal-footer .btn.edit-tsk { background: var(--brand-solid); color: var(--on-brand); border-color: var(--brand-solid); border-radius: var(--radius); }
-:root .todo-inbox .todo-item:not(:last-child) { border-bottom-color: var(--border); }
-:root .todo-inbox .todo-item .todo-item-inner .todo-heading { color: var(--ink); }
-:root .todo-inbox .todo-item .todo-item-inner p.todo-text { color: var(--ink-2); }
-:root .todo-inbox .search { border-bottom-color: var(--border); }
-:root .todo-inbox .search input { background: transparent; color: var(--ink); border-color: var(--border); }
 /* markdown editor on Report Settings (EasyMDE, paper theme) */
 :root .EasyMDEContainer .CodeMirror, :root .CodeMirror.cm-s-paper { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
 :root .CodeMirror.cm-s-paper .CodeMirror-cursor { border-left-color: var(--ink); }

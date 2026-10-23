@@ -29,7 +29,6 @@
       <li><a class="l-nav-link" href="{% url 'scan_history' slug %}"{% if cur == 'scan_history' or cur == 'detail_scan' or cur == 'detail_vuln_scan' %} aria-current="page"{% endif %}><i class="fe-activity" aria-hidden="true"></i>Scan History</a></li>
       <li><a class="l-nav-link" href="{% url 'subscan_history' slug %}"{% if cur == 'subscan_history' %} aria-current="page"{% endif %}><i class="fe-layers" aria-hidden="true"></i>Subscans</a></li>
       <li><a class="l-nav-link" href="{% url 'scheduled_scan_view' slug %}"{% if cur == 'scheduled_scan_view' %} aria-current="page"{% endif %}><i class="fe-clock" aria-hidden="true"></i>Scheduled Scans</a></li>
-      <li><a class="l-nav-link" href="{% url 'list_note' slug %}"{% if cur == 'list_note' %} aria-current="page"{% endif %}><i class="fe-check-square" aria-hidden="true"></i>Recon Notes</a></li>
     </ul>
     {% if user|can:'modify_scan_configurations' or user|can:'modify_wordlists' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' or user|can:'modify_scan_report' %}
     <div class="l-nav-section" id="nav-configure">Configure</div>

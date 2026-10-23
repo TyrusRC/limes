@@ -18,7 +18,6 @@ from rest_framework.status import HTTP_400_BAD_REQUEST, HTTP_204_NO_CONTENT, HTT
 from rest_framework.decorators import action
 
 from dashboard.models import *
-from recon_note.models import *
 from limes.celery import app
 from limes.common_func import *
 from limes.database_utils import *
@@ -614,41 +613,6 @@ class CVEDetails(APIView):
 			return  Response({'status': False, 'message': 'CVE ID does not exists.'})
 
 		return Response({'status': True, 'result': response.json()})
-
-
-class AddReconNote(APIView):
-	def post(self, request):
-		req = self.request
-		data = req.data
-
-		subdomain_id = data.get('subdomain_id')
-		title = data.get('title')
-		description = data.get('description')
-		project = data.get('project')
-
-		try:
-			project = Project.objects.get(slug=project)
-			note = TodoNote()
-			note.title = title
-			note.description = description
-
-			# get scan history for subdomain_id
-			if subdomain_id:
-				subdomain = Subdomain.objects.get(id=subdomain_id)
-				note.subdomain = subdomain
-
-				# also get scan history
-				scan_history_id = subdomain.scan_history.id
-				scan_history = ScanHistory.objects.get(id=scan_history_id)
-				note.scan_history = scan_history
-
-			note.project = project
-			note.save()
-			response = {'status': True}
-		except Exception as e:
-			response = {'status': False, 'message': str(e)}
-
-		return Response(response)
 
 
 class ToggleSubdomainImportantStatus(APIView):
@@ -1462,29 +1426,6 @@ class GetFileContents(APIView):
 
 		response['message'] = 'Invalid Query Params'
 		return Response(response)
-
-
-class ListTodoNotes(APIView):
-	def get(self, request, format=None):
-		req = self.request
-		notes = TodoNote.objects.all().order_by('-id')
-		scan_id = req.query_params.get('scan_id')
-		project = req.query_params.get('project')
-		if project:
-			notes = notes.filter(project__slug=project)
-		target_id = req.query_params.get('target_id')
-		todo_id = req.query_params.get('todo_id')
-		subdomain_id = req.query_params.get('subdomain_id')
-		if target_id:
-			notes = notes.filter(scan_history__in=ScanHistory.objects.filter(domain__id=target_id))
-		elif scan_id:
-			notes = notes.filter(scan_history__id=scan_id)
-		if todo_id:
-			notes = notes.filter(id=todo_id)
-		if subdomain_id:
-			notes = notes.filter(subdomain__id=subdomain_id)
-		notes = ReconNoteSerializer(notes, many=True)
-		return Response({'notes': notes.data})
 
 
 class ListScanHistory(APIView):

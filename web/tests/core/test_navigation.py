@@ -18,7 +18,7 @@ SLUG = 'p1'
 NAV = {
     'dashboardIndex': None, 'list_target': None, 'scan_history': None, 'subscan_history': None,
     'scheduled_scan_view': None, 'assets': None, 'issues': None, 'all_subdomains': None,
-    'all_endpoints': None, 'all_vulns': None, 'list_note': None, 'list_organization': None,
+    'all_endpoints': None, 'all_vulns': None, 'list_organization': None,
     'scan_engine_index': 'modify_scan_configurations',
     'wordlist_list': 'modify_wordlists',
     'interesting_lookup': 'modify_interesting_lookup',

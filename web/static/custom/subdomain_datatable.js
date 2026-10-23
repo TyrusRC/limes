@@ -19,7 +19,6 @@ const subdomain_datatable_columns = [
   {'data': 'medium_count'},
   {'data': 'high_count'},
   {'data': 'critical_count'},
-  {'data': 'todos_count'},
   {'data': 'is_important'},
   {'data': 'webserver'},
   {'data': 'content_type'},
