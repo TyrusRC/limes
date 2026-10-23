@@ -48,6 +48,8 @@ PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
 FEEDS_OPTIN = env.list('LIMES_FEEDS_OPTIN', default=[])
 # Sent only to abuse.ch hosts, never logged. Empty: Feodo is fetched without a key.
 ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
+# Spamhaus DQS key (optional ZEN lookups per owned IP); part of every query name, so never logged. Empty: no lookups.
+SPAMHAUS_DQS_KEY = env('LIMES_SPAMHAUS_DQS_KEY', default='')
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)

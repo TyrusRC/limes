@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from limes import scoring
 from limes.alerts import events
-from limes.checks.catalogue import CHECKS
+from limes.checks.catalogue import CHECKS, PROVISIONAL
 from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
@@ -62,7 +62,9 @@ def sync_issues(project, now=None):
                 if row is None:
                     row = TrackedIssue.objects.create(project=project, asset=asset, key=key, severity=sev, first_seen=now,
                                                       last_seen=now, source='check' if key in CHECKS else 'finding')
-                    if not first and buckets[asset_id] in synced:  # a root's first sync is silent too
+                    # a provisional check's first evaluation is a baseline too: silent until `check:<id>` is armed
+                    baseline = key in PROVISIONAL and f'check:{key}' not in synced
+                    if not first and not baseline and buckets[asset_id] in synced:  # a root's first sync is silent too
                         out.append(_event(project, 'issue_new', row, asset))
                     continue
                 kind = None
@@ -88,6 +90,9 @@ def sync_issues(project, now=None):
                 and ((a.parent.enrichment or {}).get('enum') or {}).get('status', 'running') == 'running'
                 and ((a.parent.enrichment or {}).get('enum') or {}).get('pass', 0) == 0}
         known = set(buckets.values()) - held
+        # a provisional check with a fresh pass/fail row has been evaluated: its later new hits alert
+        known |= {f'check:{c}' for c in scoring._fresh_checks(project, now, assets=scoring.issue_assets(project))
+                  .filter(status__in=('pass', 'fail'), check_id__in=PROVISIONAL).values_list('check_id', flat=True)}
         if not synced >= known:
             state.roots = sorted(synced | known)
             state.save(update_fields=['roots'])

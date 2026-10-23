@@ -192,6 +192,16 @@ function asset_checks_html(checks) {
 	return asset_section('Risk checks', asset_table(['Check', 'Status', 'Severity', 'Fix', 'Evidence', 'Checked'], rows));
 }
 
+// Reputation listings (rep.* rows that fail): feed, entry, listed since, credit. Feed text is hostile: escape every field.
+function asset_reputation_html(checks) {
+	var rows = (checks || []).filter(function(c) { return String(c.check || '').indexOf('rep.') === 0 && c.status === 'fail'; }).map(function(c) {
+		var e = c.evidence || {};
+		return '<tr><td>' + asset_esc(e.feed) + '</td><td>' + asset_esc(e.entry) + '</td><td class="text-nowrap">' + asset_esc(String(e.listed_at || '').slice(0, 10) || 'unknown') +
+			'</td><td>' + asset_esc(e.credit) + '</td></tr>';
+	}).join('');
+	return rows ? asset_section('Reputation', asset_table(['Feed', 'Entry', 'Listed since', 'Credit'], rows)) : '';
+}
+
 // Score sub-line under the title, and the top-penalties card above the Assets table.
 function load_asset_score() {
 	var box = document.getElementById('asset_score'), card = document.getElementById('asset_penalties');
@@ -294,7 +304,7 @@ function get_asset_modal(id) {
 			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
 			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
 			asset_cadence_html(a) +
-			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
+			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
 			asset_intel_html(a.enrichment) + '</div>'
 		);

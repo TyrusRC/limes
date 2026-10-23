@@ -26,7 +26,7 @@ def is_immediate(kind, key, severity):
         return False
     key = key or ''
     return (severity or 0) >= IMMEDIATE_SEVERITY or key in ('tls.cert_expired', 'tls.cert_expiring') \
-        or key.startswith('net.exposed_')
+        or key.startswith(('net.exposed_', 'rep.'))
 
 
 def record(project, kind, title, severity=None, asset=None, detail=None, key=None):

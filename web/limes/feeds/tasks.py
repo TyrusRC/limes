@@ -1,9 +1,12 @@
 import logging
 
 import requests
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
+from limes import reputation
 from limes.celery import app
 from limes.continuous import tick_lock
 from limes.feeds import sources, store
@@ -42,4 +45,22 @@ def refresh_feeds():
             fetched.append(feed.name)
             if store.fetch(feed, now, SESSION) == 'ok':
                 changed.append(feed.name)
+        _reputation(changed)
         return {'fetched': fetched, 'changed': changed}
+
+
+EVALUATED = 'limes:reputation:evaluated'
+
+
+def _reputation(changed):
+    """Re-check owned IPs, ranges and ASNs when a reputation feed changed, and at least daily (DQS lookups are daily).
+    NOTE: a cache flush only causes one extra evaluation."""
+    if not (set(changed) & set(sources.REPUTATION)) and cache.get(EVALUATED) is not None:
+        return
+    try:
+        reputation.evaluate_reputation()
+        cache.set(EVALUATED, 1, 24 * 3600)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception:  # noqa: BLE001 - the downloads are done; a failed evaluation retries next tick
+        logger.exception('reputation evaluation failed')

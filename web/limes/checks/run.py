@@ -8,7 +8,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.db.models import Max, Q
 from django.utils import timezone
 
-from limes import safe_fetch, scope
+from limes import reputation, safe_fetch, scope
 from limes.checks import collect, dns, email, network, tls, web
 from limes.checks.catalogue import CHECKS
 from limes.identity import ScanIdentity
@@ -91,6 +91,21 @@ def _write(asset, results, now):
                       'evidence': r.evidence, 'last_checked': now})
 
 
+def _index(now):
+    try:
+        return reputation.index(now)
+    except Exception:  # noqa: BLE001 - reputation must never cost the network checks
+        log.exception('reputation index failed')
+
+
+def _reputation(ip, now, idx=None):
+    try:
+        return reputation.evaluate_asset(ip, now, idx)
+    except Exception:  # noqa: BLE001
+        log.exception('reputation check failed for %s', ip.value)
+        return []
+
+
 def _owned(project):
     return Asset.objects.filter(project=project, scope_tier__in=OWNED).exclude(state='retired')
 
@@ -135,8 +150,10 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
     # owned root only, instead of once per root.
     first = _owned(project).filter(kind='root_domain').order_by('id').first()
     if first and first.id == root.id:
+        idx = None
         for ip in _owned(project).filter(kind='ip'):
-            step(ip, lambda ip=ip: network.evaluate(*obs['ports'](ip, now)))
+            idx = idx or _index(now)  # feeds only, no network; built once per run
+            step(ip, lambda ip=ip: network.evaluate(*obs['ports'](ip, now)) + _reputation(ip, now, idx))
     return done
 
 
@@ -162,5 +179,6 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
             return email.evaluate(mail) + dns.evaluate(dns_obs)
         step(asset, root_checks)
     if asset.kind == 'ip':
-        step(asset, lambda: network.evaluate(*obs['ports'](asset, now)))
+        # reputation reads the stored feeds only: no DNS, no DQS lookup here
+        step(asset, lambda: network.evaluate(*obs['ports'](asset, now)) + _reputation(asset, now))
     return done
