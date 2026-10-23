@@ -104,6 +104,18 @@ class ProbeTest(SimpleTestCase):
         deep = b'[' * 100000 + b']' * 100000
         res, _ = run_ai({':11434/api/tags': Resp(200, deep), ':8000/v1/models': Resp(200, b'\xff\xfe')}, {11434, 8000})
         self.assertEqual(res['net.exposed_ollama'].status, 'not_applicable')
+        self.assertEqual(res['net.exposed_openai_api'].status, 'not_applicable')
+
+    def test_stalled_body_is_error_not_na(self):
+        def stall():
+            yield b'{"models":'
+            raise requests.exceptions.ConnectionError('reset mid-body')
+        for exc in (requests.exceptions.ConnectionError('x'), requests.exceptions.ReadTimeout('x')):
+            def gen(exc=exc):
+                yield b'{'
+                raise exc
+            res, _ = run_ai({':11434/api/tags': Resp(200, chunks=gen())}, {11434})
+            self.assertEqual(res['net.exposed_ollama'].status, 'error')
 
     def test_connection_refused_vs_error(self):
         res, _ = run_ai({':11434/api/tags': requests.exceptions.ConnectionError(),
@@ -128,9 +140,18 @@ class EvaluateTest(SimpleTestCase):
         self.assertEqual(run_ai({path: Resp(200, b'<html>')}, {8000})[0]['net.exposed_openai_api'].status, 'not_applicable')
 
     def test_other_openai_ports_share_the_check(self):
-        res, _ = run_ai({':1234/v1/models': js({'data': []}), ':4000/v1/models': Resp(403)}, {1234, 4000})
+        res, _ = run_ai({':1234/v1/models': js({'object': 'list', 'data': []}), ':4000/v1/models': Resp(403)}, {1234, 4000})
         self.assertEqual(res['net.exposed_openai_api'].evidence['port'], 1234)
         self.assertEqual(res['net.exposed_openai_api'].status, 'fail')
+
+    def test_generic_data_envelope_is_not_openai(self):
+        for body in ({'data': []}, {'data': [{}], 'object': 'page'}, {'object': 'list'}):
+            res, _ = run_ai({':8000/v1/models': js(body)}, {8000})
+            self.assertEqual(res['net.exposed_openai_api'].status, 'not_applicable', body)
+
+    def test_ray_needs_ray_version(self):
+        res, _ = run_ai({':8265/api/version': js({'version': '1'})}, {8265})
+        self.assertEqual(res['net.exposed_ray'].status, 'not_applicable')
 
     def test_jupyter_needs_second_get(self):
         api = js({'version': '2.14.0'})
@@ -196,6 +217,34 @@ class RunTest(TestCase):
                 self.assertEqual({r.status for r in ai_rows.values()}, {'error'})
                 self.assertIn('reason', ai_rows['net.exposed_ollama'].evidence)
 
+    def test_ai_failure_keeps_other_rows(self):
+        def boom(*a):
+            raise RuntimeError('probe blew up')
+        out = run._ip_checks(self.ip(IP), timezone.now(), {'ports': lambda a, n: ({11434: ['naabu']}, True), 'ai': boom}, None)
+        self.assertEqual(len([r for r in out if r.check.startswith('net.exposed_')]), 14)
+        self.assertFalse([r for r in out if r.check in ai.IDS])
+
+    def test_ip_loop_stops_at_budget_oldest_first(self):
+        a, b, c = (self.ip(f'45.1.1.{i}') for i in (1, 2, 3))
+        now = timezone.now()
+        for ip, ago in ((a, 1), (b, 5)):  # b is older; c never checked
+            ip.risk_checks.create(check_id='net.exposed_ftp', status='pass', severity=2, last_checked=now - timedelta(days=ago))
+        seen = []
+        obs = {'ports': lambda asset, n: seen.append(asset.value) or ({}, True), 'mail_dns': lambda r: ({'txt': [], 'dmarc': [], 'mx': []}, {'ds': False, 'caa': False})}
+        late = run.RUN_BUDGET.total_seconds() + 1
+        run.run_checks(self.p, self.root, observers=obs, clock=lambda: late if seen else 0)  # a slow first IP
+        self.assertEqual(seen, ['45.1.1.3'])  # never-checked first, then the budget cuts the rest
+        seen.clear()
+        run.run_checks(self.p, self.root, observers=obs)
+        self.assertEqual(seen, ['45.1.1.2', '45.1.1.1', '45.1.1.3'])  # c was just checked, so it is now the newest
+
+    def test_deadline_expiry_sets_monitor_timeout(self):
+        done = {'timeout': False}
+        obs = {'ports': lambda a, n: ({11434: ['x']}, True), 'ai': lambda *a: {}}
+        with mock.patch.object(safe_fetch.Deadline, 'expired', return_value=True):
+            run._ip_checks(self.ip(IP), timezone.now(), obs, None, done=done)
+        self.assertTrue(done['timeout'])
+
     def test_no_ai_port_no_probe(self):
         def boom(*a):
             raise AssertionError('probed')
@@ -220,6 +269,7 @@ class ExposureTest(TestCase):
                              enrichment={'internetdb': {'ports': [11434, 8000, 443], 'fetched_at': (now - timedelta(days=1)).isoformat()}})
         rows = {r['port']: r for r in posture.exposure(p, now)['rows']}
         self.assertTrue(rows[11434]['ai'])
-        self.assertEqual(rows[11434]['service'], 'ollama')
+        self.assertEqual(rows[11434]['service'], 'Ollama')
+        self.assertEqual(rows[8000]['service'], 'OpenAI-compatible API / Triton')
         self.assertTrue(rows[8000]['ai'])
         self.assertFalse(rows[443]['ai'])

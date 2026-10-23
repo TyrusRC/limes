@@ -274,6 +274,8 @@ def _ai_get(get, ua, base, path):
         resp = get(base + path, headers={'User-Agent': ua}, timeout=TIMEOUT, allow_redirects=False, stream=True)
         try:
             return {'status': resp.status_code, 'json': _read_json(resp) if resp.status_code == 200 else None}
+        except (requests.exceptions.RequestException, OSError):
+            return {'status': 'error', 'json': None}  # stalled or cut off mid-body: unknown, never 'nothing there'
         finally:
             resp.close()
     got = _guard(fetch)

@@ -16,6 +16,8 @@ CERT_LIMIT = 10
 TECH_LIMIT = 10
 CERT_WINDOW = timedelta(days=30)
 CHANGE_WINDOW = timedelta(days=30)
+AI_LABELS = {'ollama': 'Ollama', 'openai_api': 'OpenAI-compatible API', 'triton': 'Triton', 'gradio': 'Gradio',
+             'jupyter': 'Jupyter', 'ray': 'Ray'}
 CERT_CHECKS = ('tls.cert_expired', 'tls.cert_expiring')
 
 
@@ -71,7 +73,7 @@ def exposure(project, now=None):
     for port, n in hosts_by_port.items():
         risky = RISKY_PORTS.get(port)
         ai = AI_PORTS.get(port)
-        rows.append({'port': port, 'service': ', '.join(ai) if ai else _service(port), 'ai': bool(ai), 'hosts': n,
+        rows.append({'port': port, 'service': ' / '.join(AI_LABELS[s] for s in ai) if ai else _service(port), 'ai': bool(ai), 'hosts': n,
                      'risky': bool(risky),
                      'severity': scoring.SEVERITY_NAMES[risky[1]] if risky else None,
                      'check': f'net.exposed_{risky[0]}' if risky else None})

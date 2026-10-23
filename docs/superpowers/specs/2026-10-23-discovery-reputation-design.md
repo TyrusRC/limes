@@ -131,7 +131,7 @@ abuse.ch's terms say "Access to the abuse.ch Platforms is provided only to … A
 | `rep.dnsbl_listed` | reputation | 2 | owned ip | an opt-in DQS ZEN answer is in `127.0.0.0/24` |
 | `net.exposed_ollama` | network | 3 | owned ip:port | `/api/tags` answers without authentication |
 | `net.exposed_openai_api` | network | 3 | owned ip:port | `/v1/models` returns 200 with a model list |
-| `net.exposed_triton` | network | 2 | owned ip:port | `/v2/health/ready` answers |
+| `net.exposed_triton` | network | 2 | owned ip:port | `/v2` server metadata answers with `name` = `triton` (an empty `/v2/health/ready` 200 cannot be told from a catch-all server) |
 | `net.exposed_gradio` | network | 2 | owned ip:port | `/config` is Gradio JSON |
 | `net.exposed_jupyter` | network | 4 | owned ip:port | `/api/kernels` returns 200 |
 | `net.exposed_ray` | network | 4 | owned ip:port | the Ray dashboard API answers |

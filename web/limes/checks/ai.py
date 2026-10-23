@@ -34,14 +34,14 @@ def _judge(svc, probe):
     d = body if isinstance(body, dict) else {}
     if svc == 'ollama' and isinstance(d.get('models'), list):
         return 'fail', None, len(d['models'])
-    if svc == 'openai_api' and isinstance(d.get('data'), list):
+    if svc == 'openai_api' and d.get('object') == 'list' and isinstance(d.get('data'), list):
         return 'fail', None, len(d['data'])
     if svc == 'triton' and d.get('name') == 'triton':
         return 'fail', _text(d.get('version')), None
     if svc == 'gradio' and 'version' in d and 'components' in d:
         return 'fail', _text(d['version']), None
-    if svc == 'ray' and ('ray_version' in d or 'version' in d):
-        return 'fail', _text(d.get('ray_version', d.get('version'))), None
+    if svc == 'ray' and 'ray_version' in d:
+        return 'fail', _text(d['ray_version']), None
     return 'not_applicable', None, None
 
 
