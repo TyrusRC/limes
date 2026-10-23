@@ -13,6 +13,7 @@ from limes.checks.catalogue import PROVISIONAL
 from limes.scan_target import ensure_scan_target
 from startScan.models import Asset, IpAddress, RiskCheck, TrackedIssue
 from targetApp.models import Domain
+from tests.core.mcp_base import McpBase
 from tests.core.test_dashboard_stats import Base
 
 WEB = pathlib.Path(__file__).resolve().parents[2]
@@ -298,3 +299,97 @@ class ApiIsolationTest(DiscoveryBase):
         self.assertEqual(r.status_code, 404)
         rows = self.client.get('/api/listDatatableAsset/', {'project': 'o', 'kind': 'api', 'no_page': '1'}).json()
         self.assertEqual([r['value'] for r in rows], ['https://secret.y.com/v1'])
+
+
+class HostileSpecTest(DiscoveryBase):
+    """A document's title, version and scheme names are attacker text: clipped on the way in, escaped on every way out."""
+    def setUp(self):
+        super().setUp()
+        self.host('a.x.com')
+        doc = oas3([{'url': '/v1'}], title=HOSTILE + 'T' * 500)
+        doc['components']['securitySchemes'] = {HOSTILE: {'type': HOSTILE + '\x07' + 'y' * 100}}
+        doc['info']['version'] = '<script>1</script>'
+        self.web.serve('a.x.com', '/openapi.json', doc)
+        self.run_discovery()
+        self.api = self.apis()['https://a.x.com/v1']
+
+    def test_stored_text_is_clipped_and_free_of_control_characters(self):
+        e = self.api.enrichment
+        self.assertLessEqual(len(e['title']), 200)
+        self.assertLessEqual(len(e['auth_schemes'][0]), 40)
+        self.assertNotIn('\x07', e['auth_schemes'][0])
+
+    @staticmethod
+    def drop_calls(text, names):
+        """text without `name( ... )` calls (balanced), for each name."""
+        for name in names:
+            while True:
+                at = text.find(name + '(')
+                if at < 0:
+                    break
+                depth, k = 0, at + len(name)
+                while k < len(text):
+                    depth += (text[k] == '(') - (text[k] == ')')
+                    k += 1
+                    if depth == 0:
+                        break
+                text = text[:at] + 'X' + text[k:]
+        return text
+
+    def test_assets_js_escapes_every_value_it_joins_into_markup(self):
+        """In the API renderers, document data (anything read off `e` or `a`) may appear only inside asset_esc(...),
+        or in an if() condition; removing those leaves no data access behind."""
+        src = (WEB / 'static/custom/asset.js').read_text()
+        for fn in ('asset_api_summary', 'asset_api_section'):
+            body = src[src.index(f'function {fn}('):]
+            body = re.sub(r'(?m)^\s*//.*$', '', body[:body.index('\n}\n')])
+            body = re.sub(r"'(?:[^'\\\n]|\\.)*'", 'S', body)
+            body = self.drop_calls(body, ['asset_esc', 'asset_opt', 'if '])
+            body = body.split('\n', 1)[1]  # the signature line names the parameter
+            body = body.replace('var e = a.enrichment || {}', 'var e = X')  # the one place the data is picked up
+            self.assertIsNone(re.search(r'\b[ea]\.\w', body), f'{fn} reads document data outside asset_esc: {body}')
+            self.assertIn('X', body)
+        page = (WEB / 'startScan/templates/startScan/assets.html').read_text()
+        self.assertIn("asset_api_summary(row)", page)
+        self.assertIn("{data: 'enrichment'", page)
+
+    def test_mcp_wraps_every_api_text(self):
+        from limes.mcp.tools import inventory
+        item = inventory.asset_item(self.api)
+        self.assertEqual(item['api']['title'], {'untrusted_text': ('<img src=x onerror=alert(1)>' + 'T' * 500)[:200]})
+        for field in ('title', 'version', 'spec_url'):
+            self.assertEqual(set(item['api'][field]), {'untrusted_text'})
+        self.assertTrue(all(set(x) == {'untrusted_text'} for x in item['api']['auth_schemes']))
+        plain = [v for k, v in item.items() if isinstance(v, str)]
+        self.assertTrue(all('<' not in v for v in plain))
+        self.assertIn('api', inventory.KINDS)
+
+
+class McpApiTest(McpBase):
+    def test_list_assets_returns_api_assets_wrapped_and_scoped(self):
+        from limes.mcp import registry
+        registry.load_tools()
+        Asset.objects.create(project=self.p1, kind='api', value='https://a.x.com/v1', scope_tier='owned_host',
+                             enrichment={'title': HOSTILE, 'version': '1', 'endpoints': 3, 'auth_schemes': ['http:bearer']})
+        Asset.objects.create(project=self.p2, kind='api', value='https://secret.y.com/v1', scope_tier='owned_host')
+        d = self.data(self.call('list_assets', project='p1', kind='api'))['items']
+        self.assertEqual([i['value']['untrusted_text'] for i in d], ['https://a.x.com/v1'])
+        self.assertEqual(d[0]['api']['title'], {'untrusted_text': HOSTILE})
+        self.assertEqual(d[0]['api']['endpoints'], 3)
+        self.assertNotIn(HOSTILE, ' '.join(self.outside_untrusted(d)))
+        self.assertNotIn('secret.y.com', json.dumps(d))
+        self.assertEqual(self.data(self.call('list_assets', project='p2', kind='api'))['items'][0]['value']['untrusted_text'],
+                         'https://secret.y.com/v1')
+        self.assertNotIn('api', self.data(self.call('list_assets', project='p1', kind='hostname'))['items'] or [{}][0])
+
+
+class OverviewApiCountTest(DiscoveryBase):
+    def test_attack_surface_counts_owned_apis_only(self):
+        from dashboard.stats import asm_stats
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}, {'url': '/v2'}]))
+        self.run_discovery()
+        Asset.objects.create(project=self.p, kind='api', value='https://z.x.com/v1', scope_tier='candidate')
+        Asset.objects.create(project=self.other, kind='api', value='https://y.com/v1', scope_tier='owned_host')
+        inv = asm_stats(self.p)['inventory']
+        self.assertEqual((inv['api'], inv['owned_root'], inv['owned_host']), (2, 1, 1))  # an API is never a root or a host

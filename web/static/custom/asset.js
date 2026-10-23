@@ -62,6 +62,33 @@ function asset_monitor_html(a) {
 	return asset_esc(m.interval) + '<br><span class="l-muted">' + asset_esc(due) + '</span>' + note;
 }
 
+// prefix plus the escaped value, or nothing when there is no value
+function asset_opt(v, prefix) {
+	return v ? prefix + asset_esc(v) : '';
+}
+
+// API assets (limes.api_discovery): title, version, endpoint count and auth schemes from the discovered document.
+// All of it is the document's own text: every piece goes through asset_esc.
+function asset_api_summary(a) {
+	var e = a.enrichment || {}, parts = [];
+	if (e.protocol === 'graphql') parts.push('GraphQL');
+	if (e.title) parts.push(asset_esc(e.title) + asset_opt(e.version, ' '));
+	if (e.endpoints !== undefined && e.endpoints !== null) parts.push(asset_esc(e.endpoints) + ' endpoints');
+	if ((e.auth_schemes || []).length) parts.push('auth: ' + asset_esc(e.auth_schemes.join(', ')));
+	return parts.join(' &middot; ');
+}
+
+// The asset modal's API section: where the document lives and which servers it names elsewhere (text only, never followed).
+function asset_api_section(a) {
+	if (a.kind !== 'api') return '';
+	var e = a.enrichment || {};
+	var rows = '<tr><td>Summary</td><td>' + (asset_api_summary(a) || '<span class="l-muted">none</span>') + '</td></tr>' +
+		'<tr><td>Document</td><td class="mono">' + asset_esc(e.spec_url) + '</td></tr>' +
+		'<tr><td>Methods</td><td>' + asset_esc((e.methods || []).join(', ')) + '</td></tr>' +
+		'<tr><td>Servers on other hosts (not scanned)</td><td class="mono">' + asset_esc((e.other_servers || []).join(', ')) + '</td></tr>';
+	return asset_section('API', asset_table(['<span class="visually-hidden">Field</span>', 'Value'], rows));
+}
+
 function asset_actions(row) {
 	var id = Number(row.id), html = '';
 	if (row.scope_tier === 'candidate' || row.scope_tier === 'dependency') {
@@ -327,7 +354,7 @@ function get_asset_modal(id) {
 			'<p class="mb-0"><b>Monitored</b> ' + (asset_monitor_html(a) || '<span class="l-muted">not monitored</span>').replace(/<br>/g, ' ') +
 			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
 			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
-			asset_cadence_html(a) +
+			asset_cadence_html(a) + asset_api_section(a) +
 			'<p class="mb-0"><b>Tags</b> ' + (tag_chips_html(a.tags) || '<span class="l-muted">none</span>') +
 			(tag_can_write() ? ' <button type="button" class="btn btn-xs btn-soft-secondary" onclick="edit_asset_tags(' + Number(a.id) + ')">Edit tags</button>' : '') + '</p>' +
 			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +

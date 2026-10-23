@@ -32,8 +32,20 @@ def _ip(address):
         return untrusted(address)
 
 
+def _api(a):
+    """What discovery read from an API's document. All of it is the document's own text: wrapped, never plain."""
+    e = a.enrichment if isinstance(a.enrichment, dict) else {}
+    lst = lambda v: [untrusted(x) for x in v[:20]] if isinstance(v, list) else []
+    n = e.get('endpoints')
+    return {'title': untrusted(e.get('title')), 'version': untrusted(e.get('version')),
+            'endpoints': n if isinstance(n, int) and not isinstance(n, bool) else None,
+            'protocol': 'graphql' if e.get('protocol') == 'graphql' else 'rest', 'spec_url': untrusted(e.get('spec_url')),
+            'methods': lst(e.get('methods')), 'auth_schemes': lst(e.get('auth_schemes')),
+            'other_servers': lst(e.get('other_servers'))}
+
+
 def asset_item(a):
-    return {'id': a.id, 'kind': a.kind, 'value': untrusted(a.value), 'scope_tier': a.scope_tier, 'state': a.state,
+    return {**({'api': _api(a)} if a.kind == 'api' else {}), 'id': a.id, 'kind': a.kind, 'value': untrusted(a.value), 'scope_tier': a.scope_tier, 'state': a.state,
             'cadence_tier': a.cadence_tier, 'first_seen': iso(a.first_seen), 'last_seen': iso(a.last_seen),
             'last_resolved_at': iso(a.last_resolved_at), 'http_status': a.http_status,
             'page_title': untrusted(a.page_title), 'found_by': monitor.found_by(a), 'parent_id': a.parent_id,

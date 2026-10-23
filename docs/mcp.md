@@ -7,7 +7,7 @@ A native [Model Context Protocol](https://modelcontextprotocol.io) server so AI 
 Read tools (all take a `project` slug where relevant; lists are paginated, 50 by default, 200 at most, with an opaque cursor):
 
 - `list_projects`, `get_project_summary`: the projects you can read and their score, counts and monitoring state.
-- `list_assets`, `get_asset`, `list_review_queue`: inventory, one asset in detail, and candidates awaiting a decision. `list_assets` and `list_issues` take a `tag` filter, and assets (`list_assets`, `get_asset`, `search`) carry their `tags` (project-scoped labels, returned as untrusted text).
+- `list_assets`, `get_asset`, `list_review_queue`: inventory, one asset in detail, and candidates awaiting a decision. assets of kind `api` (discovered OpenAPI or GraphQL endpoints) carry an `api` object whose text (title, version, auth schemes, documents) is untrusted. `list_assets` and `list_issues` take a `tag` filter, and assets (`list_assets`, `get_asset`, `search`) carry their `tags` (project-scoped labels, returned as untrusted text).
 - `list_issues`, `get_issue`, `forecast_score`, `get_score_history`: issues with waivers and notes, the "if fixed" score, and daily scores.
 - `list_vulnerabilities`, `get_vulnerability`, `search`: scanner findings and a project-wide search.
 - `list_scans`, `get_scan`, `get_scan_logs`, `list_changes`: scans, their stages and redacted logs, and the change feed.

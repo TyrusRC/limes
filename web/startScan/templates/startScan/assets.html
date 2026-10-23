@@ -30,7 +30,7 @@ Assets
       <label for="f_kind">Kind</label>
       <select id="f_kind" class="form-select">
         <option value="">All kinds</option>
-        <option value="root_domain">Root domain</option><option value="hostname">Hostname</option><option value="ip">IP address</option><option value="cidr">CIDR</option><option value="asn">ASN</option>
+        <option value="root_domain">Root domain</option><option value="hostname">Hostname</option><option value="ip">IP address</option><option value="cidr">CIDR</option><option value="asn">ASN</option><option value="api">API</option>
       </select>
     </div>
     <div class="l-field">
@@ -141,7 +141,7 @@ $(document).ready(function() {
       }},
       {data: 'kind', className: 'text-nowrap', render: esc}, {data: 'scope_tier', className: 'text-nowrap', render: esc}, {data: 'state', render: esc},
       {data: 'http_status', defaultContent: ''},
-      {data: 'page_title', render: function(d) { return esc(d || ''); }},
+      {data: 'page_title', render: function(d, t, row) { return t === 'display' && row.kind === 'api' ? asset_api_summary(row) : esc(d || ''); }},
       {data: 'technologies', orderable: false, render: join},
       {data: 'ip_addresses', orderable: false, render: join},
       {data: 'last_seen', className: 'text-nowrap', render: function(d) { return esc(String(d || '').slice(0, 16).replace('T', ' ')); }},
@@ -150,7 +150,8 @@ $(document).ready(function() {
       {data: 'monitor', orderable: false, className: 'l-col-monitor', render: function(d, t, row) { return asset_monitor_html(row); }},
       {data: 'last_resolved_at', className: 'text-nowrap', render: function(d) { return asset_esc(asset_when(d)); }},
       {data: 'found_by', orderable: false, render: function(d) { return (d || []).map(function(l) { return '<span class="badge l-badge-src">' + asset_esc(l) + '</span>'; }).join(' '); }},
-      {data: 'cadence_tier', visible: false, orderable: false, searchable: false},  // the datatables renderer only sends listed columns
+      {data: 'cadence_tier', visible: false, orderable: false, searchable: false},
+      {data: 'enrichment', visible: false, orderable: false, searchable: false},  // API rows read their summary from it  // the datatables renderer only sends listed columns
       {data: 'id', orderable: false, searchable: false, className: 'l-col-actions', render: function(d, t, row) { return asset_actions(row); }}
     ],
     order: [[8, 'desc']]
