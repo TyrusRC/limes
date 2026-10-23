@@ -5,13 +5,13 @@ import time
 from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
-from django.db.models import Max, Q
+from django.db.models import F, Max, Q
 from django.utils import timezone
 
-from limes import safe_fetch, scope
-from limes.checks import collect, dns, email, network, tls, web
-from limes.checks.catalogue import CHECKS
-from limes.identity import ScanIdentity
+from limes import reputation, safe_fetch, scope
+from limes.checks import ai, collect, dns, email, network, tls, web
+from limes.checks.catalogue import AI_PORTS, CHECKS, Result
+from limes.identity import DEFAULT_UA, ScanIdentity
 from limes.scoring import _root_of
 from startScan.models import Asset, RiskCheck
 
@@ -91,6 +91,61 @@ def _write(asset, results, now):
                       'evidence': r.evidence, 'last_checked': now})
 
 
+def _index(now):
+    try:
+        return reputation.index(now)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception:  # noqa: BLE001 - reputation must never cost the network checks
+        log.exception('reputation index failed')
+
+
+def _reputation(ip, now, idx=None):
+    try:
+        return reputation.evaluate_asset(ip, now, idx)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception:  # noqa: BLE001
+        log.exception('reputation check failed for %s', ip.value)
+        return []
+
+
+def _ai(ip, ports, complete, observe, done=None):
+    """AI-service rows for an owned IP. Probes only AI ports already seen open, through safe_fetch's vetted,
+    pinned get (an IP literal: no DNS); a refused address is not contacted and its rows are 'error'."""
+    if not any(p in AI_PORTS for p in ports):
+        return ai.evaluate({}, complete)
+    vetted, reason = safe_fetch.resolve_vetted(ip.value)
+    if reason:
+        log.info('ai checks: %s not contacted: %s', ip.value, reason)
+        return [Result(i, 'error', {'reason': reason}) for i in ai.IDS]
+    deadline = safe_fetch.Deadline()
+    get = safe_fetch.pinned_get(vetted, vetted, deadline=deadline)
+    found = observe(vetted, ports, get, DEFAULT_UA)
+    if done is not None:
+        done['timeout'] = done.get('timeout', False) or deadline.expired()  # results stand; the monitor is told
+    return ai.evaluate(found, complete)
+
+
+def _ai_safe(ip, ports, complete, observe, done=None):
+    """_ai that can never cost the IP's network and reputation rows (they are written together)."""
+    try:
+        return _ai(ip, ports, complete, observe, done)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.error('ai checks failed for %s: %s', ip.value, type(e).__name__)  # type only: never the text
+        return []
+
+
+def _ip_checks(asset, now, obs, observers, idx=None, done=None):
+    """network + reputation + AI results for one owned IP."""
+    obs = {'ai': collect.observe_ai, **obs, **(observers or {})}
+    ports, complete = obs['ports'](asset, now)
+    return (network.evaluate(ports, complete) + _reputation(asset, now, idx)
+            + _ai_safe(asset, ports, complete, obs['ai'], done))
+
+
 def _owned(project):
     return Asset.objects.filter(project=project, scope_tier__in=OWNED).exclude(state='retired')
 
@@ -135,14 +190,25 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
     # owned root only, instead of once per root.
     first = _owned(project).filter(kind='root_domain').order_by('id').first()
     if first and first.id == root.id:
-        for ip in _owned(project).filter(kind='ip'):
-            step(ip, lambda ip=ip: network.evaluate(*obs['ports'](ip, now)))
+        idx = None
+        # oldest-checked first (never-checked leading), inside the same wall-clock budget as the web phase: AI
+        # probes can take up to a host deadline per IP; unreached IPs keep their rows and go first next run
+        # NOTE: this phase shares RUN_BUDGET, so on a huge estate unmonitored IPs can go stale between runs. They are
+        # taken oldest-checked first across runs, so none starves; monitor.py covers the watched IPs on its own cadence.
+        ips = _owned(project).filter(kind='ip').annotate(last=Max('risk_checks__last_checked')).order_by(
+            F('last').asc(nulls_first=True), 'id')
+        for ip in ips:
+            if clock() - start > RUN_BUDGET.total_seconds():
+                break
+            idx = idx or _index(now)  # feeds only, no network; built once per run
+            step(ip, lambda ip=ip: _ip_checks(ip, now, obs, observers, idx))
     return done
 
 
 def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
     """The risk checks for one monitored asset, outside any root scan. Hostnames and roots get web + tls on their
-    vetted IP (roots also email + dns); an ip gets the database-only network checks. A refused host is never
+    vetted IP (roots also email + dns); an ip gets the network + reputation checks from stored data plus AI probes of
+    its already-seen AI ports. A refused host is never
     contacted: it gets the no-answer web/tls rows (_no_answer), and a root still gets email + dns (DNS only)."""
     now = now or timezone.now()
     obs = {'mail_dns': lambda root: collect.observe_mail_dns(root, resolve=resolve), 'ports': collect.ports_for_ip,
@@ -162,5 +228,6 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
             return email.evaluate(mail) + dns.evaluate(dns_obs)
         step(asset, root_checks)
     if asset.kind == 'ip':
-        step(asset, lambda: network.evaluate(*obs['ports'](asset, now)))
+        # reputation reads the stored feeds only: no DNS, no DQS lookup here
+        step(asset, lambda: _ip_checks(asset, now, obs, observers, done=done))
     return done

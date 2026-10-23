@@ -8,6 +8,14 @@ def build_url(root):
     return f'https://crt.sh/?q=%25.{quote(root)}&output=json&exclude=expired'
 
 
+def exact_url(name):
+    return f'https://crt.sh/?q={quote(name)}&output=json&exclude=expired'
+
+
+def keyword_url(label):
+    return f'https://crt.sh/?q=%25{quote(label)}%25&output=json&exclude=expired'
+
+
 def _clean(raw):
     n = raw.strip().lower().rstrip('.')
     if n.startswith('*.'):

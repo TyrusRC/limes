@@ -230,7 +230,8 @@ def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
         if port == DEFAULT_PORTS[scheme]:
             port = None
         headers = {k: v for k, v in (kw.pop('headers', None) or {}).items() if k.lower() != 'host'}
-        headers['Host'] = host if port is None else f'{host}:{port}'
+        name = f'[{host}]' if ':' in host else host  # an IPv6 literal is bracketed in Host
+        headers['Host'] = name if port is None else f'{name}:{port}'
         kw['allow_redirects'] = False  # callers follow same-host hops themselves (collect._fetch_https)
         pinned = urlunsplit((scheme, _netloc(ip, port), parts.path or '/', parts.query, ''))
         try:

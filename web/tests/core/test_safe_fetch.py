@@ -194,6 +194,14 @@ class PinnedGetTest(SimpleTestCase):
         safe_fetch.pinned_get('h.example.com', PUBLIC, session_factory=FakeSession)('https://h.example.com/', allow_redirects=True)
         self.assertIs(FakeSession.made[-1].requests[0][1]['allow_redirects'], False)
 
+    def test_ipv6_literal_host_header_is_bracketed(self):
+        from limes import safe_fetch
+        v6 = '2606:4700::1111'
+        safe_fetch.pinned_get(v6, v6, session_factory=FakeSession)(f'http://[{v6}]:11434/api/tags')
+        url, kw = FakeSession.made[-1].requests[0]
+        self.assertEqual(url, f'http://[{v6}]:11434/api/tags')
+        self.assertEqual(kw['headers']['Host'], f'[{v6}]:11434')
+
     def test_ipv6_is_bracketed(self):
         from limes import safe_fetch
         safe_fetch.pinned_get('h.example.com', '2606:2800:220:1::1', session_factory=FakeSession)('https://h.example.com/a?b=1')

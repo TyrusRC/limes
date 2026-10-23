@@ -3,19 +3,24 @@ Each builder returns plain data with a fixed number of queries; names are data, 
 import socket
 from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Count
+from django.conf import settings
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from dashboard.stats import OWNED
 from limes import scoring
-from limes.checks.catalogue import RISKY_PORTS
+from limes.checks.catalogue import AI_PORTS, RISKY_PORTS
 from limes.checks.collect import _fresh_internetdb
+from limes.feeds import sources, store
+from limes.lookalike.check import with_created
 
 EXPOSURE_LIMIT = 15
 CERT_LIMIT = 10
 TECH_LIMIT = 10
 CERT_WINDOW = timedelta(days=30)
 CHANGE_WINDOW = timedelta(days=30)
+AI_LABELS = {'ollama': 'Ollama', 'openai_api': 'OpenAI-compatible API', 'triton': 'Triton', 'gradio': 'Gradio',
+             'jupyter': 'Jupyter', 'ray': 'Ray'}
 CERT_CHECKS = ('tls.cert_expired', 'tls.cert_expiring')
 
 
@@ -39,6 +44,7 @@ def category_cards(project, now=None):
         old = before.get(key)
         cards.append({'key': key, 'label': scoring.CATEGORY_LABELS[key], 'score': s['score'], 'grade': s['grade'],
                       'raw_score': s['raw_score'], 'assessed': s['assessed'] > 0, 'open': c['open'], 'waived': c['waived'],
+                      'provisional': s['provisional'],
                       'delta_30': s['score'] - old if s['score'] is not None and isinstance(old, int) and not isinstance(old, bool) else None})
     return cards
 
@@ -69,7 +75,9 @@ def exposure(project, now=None):
     rows = []
     for port, n in hosts_by_port.items():
         risky = RISKY_PORTS.get(port)
-        rows.append({'port': port, 'service': _service(port), 'hosts': n, 'risky': bool(risky),
+        ai = AI_PORTS.get(port)
+        rows.append({'port': port, 'service': ' / '.join(AI_LABELS[s] for s in ai) if ai else _service(port), 'ai': bool(ai), 'hosts': n,
+                     'risky': bool(risky),
                      'severity': scoring.SEVERITY_NAMES[risky[1]] if risky else None,
                      'check': f'net.exposed_{risky[0]}' if risky else None})
     rows.sort(key=lambda r: (not r['risky'], -(RISKY_PORTS[r['port']][1] if r['risky'] else 0), -r['hosts'], r['port']))
@@ -110,3 +118,40 @@ def technologies(project):
             .filter(technologies__name__gt='')  # NULL and '' both fail this, without dropping the asset's other technologies
             .values('technologies__name').annotate(count=Count('id', distinct=True)).order_by('-count', 'technologies__name'))
     return [{'name': r['technologies__name'], 'count': r['count']} for r in rows[:TECH_LIMIT]]
+
+
+BRAND_NEW = timedelta(days=30)
+
+
+def brand(project, now=None):
+    """Registered lookalikes of the project's owned roots, in one aggregate query. A registered lookalike is one a
+    person still has to judge: ignored, ours and gone rows are left out. `new_30` counts the RDAP creation date
+    (the first sighting when RDAP has none); `phishing_ready` is mail or a certificate."""
+    from startScan.models import Lookalike
+    now = now or timezone.now()
+    since = now - BRAND_NEW
+    reg = Q(registered=True) & ~Q(status__in=('ignored', 'ours', 'gone'))
+    # NOTE: the aggregate names must not equal a model field (`registered`), or the filters above resolve to them
+    got = with_created(Lookalike.objects.filter(project=project)).aggregate(
+        n_registered=Count('id', filter=reg),
+        n_new=Count('id', filter=reg & (Q(created__gte=since) | Q(created__isnull=True, first_seen__gte=since))),
+        n_ready=Count('id', filter=reg & (Q(has_mx=True) | Q(ct__count__gt=0))),
+        n_awaiting=Count('id', filter=Q(status='registered')),
+        n_tracked=Count('id'))
+    return {'enabled': settings.LOOKALIKE_ENABLED, 'registered': got['n_registered'], 'new_30': got['n_new'],
+            'phishing_ready': got['n_ready'], 'awaiting': got['n_awaiting'], 'tracked': got['n_tracked']}
+
+
+def data_sources(now=None):
+    """The enabled third-party feeds with their credit, terms page, last good download and staleness."""
+    from startScan.models import FeedState
+    now = now or timezone.now()
+    states = {s.name: s for s in FeedState.objects.all()}
+    out = []
+    for feed in sources.FEEDS.values():
+        if not sources.enabled(feed):
+            continue
+        state = states.get(feed.name)
+        out.append({'name': feed.name, 'credit': feed.credit, 'terms': feed.terms,
+                    'last_good_at': state.last_good_at if state else None, 'stale': store.is_stale(feed, state, now)})
+    return out

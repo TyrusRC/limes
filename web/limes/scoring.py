@@ -17,7 +17,7 @@ from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 
 from limes.celery import app
-from limes.checks.catalogue import CHECKS
+from limes.checks.catalogue import CHECKS, PROVISIONAL
 from limes.definitions import NOTHING_ASSESSED, SUCCESS_TASK
 from startScan.models import (Asset, IssueWaiver, RiskCheck, ScanActivity, ScanHistory, ScoreSnapshot, SubScan,
                               TrackedIssue, Vulnerability)
@@ -33,9 +33,17 @@ CHECK_FRESH = timedelta(days=30)
 TOP_PENALTIES = 5
 KEY_MAX = 255  # TrackedIssue.key max_length
 SEVERITY_NAMES = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
-CATEGORIES = ('web', 'tls', 'email', 'dns', 'network', 'vulnerabilities')
+CATEGORIES = ('web', 'tls', 'email', 'dns', 'network', 'vulnerabilities', 'reputation', 'data_leakage')
 CATEGORY_LABELS = {'web': 'Website', 'tls': 'Encryption', 'email': 'Email', 'dns': 'DNS', 'network': 'Network',
-                   'vulnerabilities': 'Vulnerabilities'}
+                   'vulnerabilities': 'Vulnerabilities', 'reputation': 'IP Reputation', 'data_leakage': 'Data Leakage'}
+# categories whose every check is provisional: shown, never scored
+PROVISIONAL_CATEGORIES = frozenset(g for g in {c.group for c in CHECKS.values()}
+                                   if all(c.provisional for c in CHECKS.values() if c.group == g))
+
+
+def points(key, severity):
+    """The one place a penalty is looked up: provisional checks cost nothing."""
+    return 0 if key in PROVISIONAL else PENALTY.get(severity, 0)
 
 
 def issue_key(key):
@@ -59,9 +67,13 @@ def grade(score):
     return next(g for floor, g in GRADES if score >= floor)
 
 
-def scored_assets(project):
+def _owned_assets(project, kinds):
     return Asset.objects.filter(project=project, scope_tier__in=('owned_root', 'owned_host'),
-                                kind__in=('root_domain', 'hostname', 'ip')).exclude(state='retired')
+                                kind__in=kinds).exclude(state='retired')
+
+
+def scored_assets(project):
+    return _owned_assets(project, ('root_domain', 'hostname', 'ip'))
 
 
 def _owned_domains(project):
@@ -100,23 +112,30 @@ def _root_of(value, roots):
     return next((r for r in sorted(roots, key=len, reverse=True) if value == r or value.endswith('.' + r)), None)
 
 
-def _fresh_checks(project, now=None):
-    """RiskCheck rows on scored assets whose last_checked is within CHECK_FRESH."""
+def issue_assets(project):
+    """Assets whose issues are tracked: scored_assets plus owned ranges and ASNs (reputation listings live there)."""
+    return _owned_assets(project, ('root_domain', 'hostname', 'ip', 'cidr', 'asn'))
+
+
+def _fresh_checks(project, now=None, assets=None):
+    """RiskCheck rows on scored assets (or the given assets) whose last_checked is within CHECK_FRESH."""
     now = now or timezone.now()
-    return RiskCheck.objects.filter(asset__in=scored_assets(project), last_checked__gte=now - CHECK_FRESH)
+    return RiskCheck.objects.filter(asset__in=scored_assets(project) if assets is None else assets,
+                                    last_checked__gte=now - CHECK_FRESH)
 
 
 def assessed_assets(project, base=None, now=None):
     """{asset_id: value} of scored assets that are assessed: their owned root has a baseline, or a risk
     check passed/failed on them recently. An asset with neither is unassessed, not clean."""
     base = baselines(project) if base is None else base
-    checked = set(_fresh_checks(project, now).filter(status__in=('pass', 'fail')).values_list('asset_id', flat=True))
+    checked = set(_fresh_checks(project, now).filter(status__in=('pass', 'fail')).exclude(check_id__in=PROVISIONAL)
+                  .values_list('asset_id', flat=True))
     return {a: v for a, v in scored_assets(project).values_list('id', 'value') if a in checked or _root_of(v, base)}
 
 
 def _check_penalties(project, now=None, asset_ids=None):
     """{asset_id: {check_id: severity}} from fresh failed checks. Only 'fail' ever scores."""
-    rows = _fresh_checks(project, now).filter(status='fail')
+    rows = _fresh_checks(project, now, assets=issue_assets(project)).filter(status='fail')
     if asset_ids is not None:
         rows = rows.filter(asset_id__in=asset_ids)
     out = {}
@@ -152,8 +171,8 @@ def current_issues(project, now=None):
 
 
 def _score(categories):
-    score = max(0, MAX_SCORE - sum(PENALTY.get(s, 0) for s in categories.values()))
-    worst = max(categories.values(), default=0)
+    score = max(0, MAX_SCORE - sum(points(k, s) for k, s in categories.items()))
+    worst = max((s for k, s in categories.items() if k not in PROVISIONAL), default=0)
     return min(score, CEILING.get(worst, MAX_SCORE))
 
 
@@ -163,8 +182,8 @@ def _live(asset_id, categories, excluded):
 
 
 def _rows(value, categories, asset_id=None, waived=()):
-    return [{'asset': value, 'issue': c, 'severity': SEVERITY_NAMES[s], 'points': PENALTY[s],
-             'kind': 'check' if c in CHECKS else 'finding', 'waived': (asset_id, issue_key(c)) in waived}
+    return [{'asset': value, 'issue': c, 'severity': SEVERITY_NAMES[s], 'points': points(c, s),
+             'kind': 'check' if c in CHECKS else 'finding', 'provisional': c in PROVISIONAL, 'waived': (asset_id, issue_key(c)) in waived}
             for c, s in sorted(categories.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
@@ -208,11 +227,11 @@ def project_score(project, now=None, exclude=frozenset()):
     live = {a: _live(a, penalties.get(a, {}), drop) for a in assets}
     score = p10([_score(live[a]) for a in assets])
     raw = p10([_score(penalties.get(a, {})) for a in assets])
-    rows = [r for a, cats in live.items() for r in _rows(assets[a], cats, a)]
+    rows = [r for a, cats in live.items() for r in _rows(assets[a], {k: v for k, v in cats.items() if k not in PROVISIONAL}, a)]
     rows.sort(key=lambda r: (-r['points'], r['asset'], r['issue']))
-    waived_count = sum(1 for a, cats in penalties.items() for c in cats if (a, issue_key(c)) in waived)
+    waived_count = sum(1 for a, cats in penalties.items() for c in cats if c not in PROVISIONAL and (a, issue_key(c)) in waived)
     scored = scored_assets(project).count()
-    fresh = _fresh_checks(project, now).filter(status__in=('pass', 'fail')).values('asset_id').distinct().count()
+    fresh = _fresh_checks(project, now).filter(status__in=('pass', 'fail')).exclude(check_id__in=PROVISIONAL).values('asset_id').distinct().count()
     return {'version': VERSION, 'score': score, 'grade': grade(score), 'raw_score': raw, 'raw_grade': grade(raw),
             'waived_count': waived_count, 'coverage': coverage(project, now, base=base),
             'check_coverage': fresh / scored if scored else None,
@@ -246,20 +265,26 @@ def category_scores(project, now=None):
     checked = {c: set() for c in CATEGORIES}
     for asset_id, check_id in (_fresh_checks(project, now).filter(status__in=('pass', 'fail'))
                                .values_list('asset_id', 'check_id').distinct()):
-        if asset_id in assets and check_id in CHECKS:
+        if asset_id in assets and check_id in CHECKS and check_id not in PROVISIONAL:
             checked[CHECKS[check_id].group].add(asset_id)
     checked['vulnerabilities'] = {a for a, v in assets.items() if _root_of(v, base)}
     split = {c: {} for c in CATEGORIES}
     for asset_id, issues in penalties.items():
         for key, severity in issues.items():
+            if key in PROVISIONAL:
+                continue
             split[category_of(key)].setdefault(asset_id, {})[key] = severity
     out = {}
     for c in CATEGORIES:
+        if c in PROVISIONAL_CATEGORIES:  # shown and counted as issues, never scored (no fake 950)
+            out[c] = {'label': CATEGORY_LABELS[c], 'score': None, 'grade': 'N/A', 'raw_score': None, 'raw_grade': 'N/A',
+                      'assessed': 0, 'provisional': True}
+            continue
         ids = checked[c] | split[c].keys()  # never ignore an asset the headline counts
         live = p10([_score(_live(a, split[c].get(a, {}), waived)) for a in ids])
         raw = p10([_score(split[c].get(a, {})) for a in ids])
         out[c] = {'label': CATEGORY_LABELS[c], 'score': live, 'grade': grade(live), 'raw_score': raw,
-                  'raw_grade': grade(raw), 'assessed': len(ids)}
+                  'raw_grade': grade(raw), 'assessed': len(ids), 'provisional': False}
     return out
 
 

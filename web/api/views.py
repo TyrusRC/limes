@@ -820,7 +820,7 @@ class IssueList(APIView):
 	"""Open issues of a project, worst first, with their active waiver and note count."""
 
 	def get(self, request):
-		from limes.checks.catalogue import CHECKS
+		from limes.checks.catalogue import CHECKS, PROVISIONAL
 		q = request.query_params
 		issues = TrackedIssue.objects.filter(project__slug=q.get('project') or '', status='open').select_related('asset')
 		if q.get('severity') in ('1', '2', '3', '4'):
@@ -832,6 +832,7 @@ class IssueList(APIView):
 		if category is not None:
 			issues = issues.filter(category)
 		now = timezone.now()
+		kev_only = q.get('kev') == 'true'
 		if q.get('waived') in ('true', 'false'):
 			ids = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
 			issues = issues.filter(id__in=ids) if q['waived'] == 'true' else issues.exclude(id__in=ids)
@@ -844,16 +845,27 @@ class IssueList(APIView):
 		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
 			Prefetch('waivers', queryset=live, to_attr='live_waivers'),
 			Prefetch('waivers', queryset=latest, to_attr='all_waivers'))
-		for i in issues.order_by('-severity', 'first_seen', 'id'):
+		issues = list(issues.order_by('-severity', 'first_seen', 'id'))
+		from limes import exploit
+		cves = exploit.issue_cves(issues[0].project_id if issues else None,
+								  [(i.asset_id, i.key) for i in issues if i.source == 'finding'])
+		marks = exploit.markers(c for found in cves.values() for c in found)
+		for i in issues:
+			found = cves.get((i.asset_id, i.key), [])
+			hit = exploit.summary(found, marks)
+			if kev_only and not hit['kev']:
+				continue
 			w = i.live_waivers[0] if i.live_waivers else None
 			# the newest waiver ran out (not revoked, not replaced): the issue counts again, say so
 			last = i.all_waivers[0] if i.all_waivers else None
 			expired = last if not w and last and not last.revoked_at and last.expires_at and last.expires_at <= now else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
-						'source': i.source, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
+						'source': i.source, 'provisional': i.source == 'check' and i.key in PROVISIONAL, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
 						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count,
-						'expired_waiver': _waiver_json(expired) if expired else None})
+						'expired_waiver': _waiver_json(expired) if expired else None,
+						'cves': exploit.cve_rows(found, marks),
+						'kev': hit['kev'], 'epss': hit['epss']})
 		return Response(out)
 
 
@@ -2863,6 +2875,12 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 						   'last_checked': rc.last_checked})
 		checks.sort(key=lambda r: (r['status'] != 'fail', -r['severity'], r['check']))
 		data['risk_checks'] = checks
+		if asset.kind == 'ip':
+			from limes import exploit
+			data['unverified_cves'] = exploit.unverified(asset)
+		if asset.kind == 'root_domain':
+			data['breaches'] = list(asset.domainbreach_set.order_by('-published', 'breach_name').annotate(name=F('breach_name'))
+									.values('name', 'addresses', 'breach_date', 'published'))
 		return Response(data)
 
 	def paginate_queryset(self, queryset, view=None):

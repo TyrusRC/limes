@@ -110,7 +110,7 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None, create_
     from limes.owned_ranges import addresses, range_addresses
     from limes.scan_target import ensure_scan_target
     from limes.tasks.inventory import _append_source
-    from startScan.models import Asset
+    from startScan.models import Asset, Lookalike
     set_authorized = tier == 'co_brand' and active_authorized is not None
     authorized = active_authorized
     added, existing, skipped, warnings = 0, 0, 0, []
@@ -182,6 +182,9 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None, create_
                 _append_source(asset, 'manual', reason or f'added by {user.get_username()}')
                 asset.save()
                 added += 1
+                if c['kind'] in ('hostname', 'root_domain') and tier != 'candidate':
+                    # the user confirmed a lookalike's "This is ours"; an agent's candidate add confirms nothing
+                    Lookalike.objects.filter(project=project, domain=value).update(status='ours')
                 roots.append(asset)
     for asset in roots:
         warning = ensure_scan_target(asset)[1]

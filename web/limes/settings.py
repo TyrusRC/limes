@@ -53,6 +53,20 @@ RANGE_ENUMERATION = env.bool('LIMES_RANGE_ENUMERATION', default=False)
 RANGE_ADDRESS_CAP = max(1, min(env.int('LIMES_RANGE_ADDRESS_CAP', default=4096), 65536))
 INTERNETDB_DAILY_BUDGET = env.int('LIMES_INTERNETDB_DAILY_BUDGET', default=5000)
 PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
+# Third-party reputation feeds (limes/feeds). Opt-in names: blocklist_de, cins (terms unclear, off by default).
+FEEDS_OPTIN = env.list('LIMES_FEEDS_OPTIN', default=[])
+# Sent only to abuse.ch hosts, never logged. Empty: Feodo is fetched without a key.
+ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
+# Spamhaus DQS key (optional ZEN lookups per owned IP); part of every query name, so never logged. Empty: no lookups.
+SPAMHAUS_DQS_KEY = env('LIMES_SPAMHAUS_DQS_KEY', default='')
+# Have I Been Pwned key (optional domain-breach counts for owned roots); sent only in a header, never logged. Empty: off.
+HIBP_API_KEY = env('LIMES_HIBP_API_KEY', default='')
+# Lookalike domains of owned roots (limes/lookalike): DNS, RDAP and crt.sh only. LOOKALIKE_HTTP adds one GET per
+# registered lookalike per week, which tells its operator someone is looking; off by default.
+LOOKALIKE_ENABLED = env.bool('LIMES_LOOKALIKE_ENABLED', default=True)
+LOOKALIKE_DNS_DAILY_BUDGET = env.int('LIMES_LOOKALIKE_DNS_DAILY_BUDGET', default=5000)
+RDAP_DAILY_BUDGET = env.int('LIMES_RDAP_DAILY_BUDGET', default=500)
+LOOKALIKE_HTTP = env.bool('LIMES_LOOKALIKE_HTTP', default=False)
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
@@ -244,13 +258,17 @@ CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
                   'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
-                  'limes.mcp.audit')
+                  'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
     'dispatch-due-scans': {'task': 'dispatch_due_scans', 'schedule': 60.0, 'options': {'expires': 55}},
     'enumerate-ranges': {'task': 'enumerate_ranges', 'schedule': 60.0, 'options': {'expires': 55}},
     'monitor-assets': {'task': 'monitor_assets', 'schedule': 60.0, 'options': {'expires': 55}},
+    'refresh-feeds': {'task': 'refresh_feeds', 'schedule': 3600.0, 'options': {'expires': 3300}},
+    'hibp-sync': {'task': 'hibp_sync', 'schedule': 86400.0},
+    'generate-lookalikes': {'task': 'generate_lookalikes', 'schedule': 86400.0},
+    'lookalike-tick': {'task': 'lookalike_tick', 'schedule': 60.0, 'options': {'expires': 55}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},

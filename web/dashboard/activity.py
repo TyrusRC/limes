@@ -8,8 +8,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from dashboard.stats import OWNED
-from limes import monitor, scoring
-from limes.checks.catalogue import CHECKS
+from limes import exploit, monitor, scoring
+from limes.checks.catalogue import CHECKS, PROVISIONAL
 
 OLDEST_LIMIT = 5
 TOP_RISKS = 10
@@ -63,17 +63,23 @@ def top_risks(project, live, now):
     tracked = {(r['asset_id'], r['key']): r for r in
                TrackedIssue.objects.filter(project=project, status='open', asset_id__in=[a.id for a in live])
                .annotate(detected=_detected()).values('id', 'asset_id', 'key', 'detected')}
+    cves = exploit.issue_cves(project, [(a.id, scoring.issue_key(k)) for a, issues in live.items() for k in issues if k not in CHECKS])
+    marks = exploit.markers(c for found in cves.values() for c in found)
     rows = []
     for asset, issues in live.items():
         for key, sev in issues.items():
+            found = cves.get((asset.id, scoring.issue_key(key)), [])
             t = tracked.get((asset.id, scoring.issue_key(key)))
             when = t['detected'] if t else None
             rows.append({'id': t['id'] if t else None, 'asset': asset.value, 'title': CHECKS[key].title if key in CHECKS else key,
                          'key': key, 'category': scoring.category_of(key),
                          'category_label': scoring.CATEGORY_LABELS.get(scoring.category_of(key), scoring.category_of(key)), 'severity': scoring.SEVERITY_NAMES.get(sev, 'unrated'),
-                         'points': scoring.PENALTY.get(sev, 0), 'detected_at': when,
-                         'age_days': _age(now, when) if when else None})
-    rows.sort(key=lambda r: (-r['points'], r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
+                         'points': scoring.points(key, sev), 'provisional': key in PROVISIONAL, 'detected_at': when,
+                         'age_days': _age(now, when) if when else None,
+                         'cves': found, **exploit.summary(found, marks)})
+            rows[-1]['epss_label'] = exploit.pct_label(rows[-1]['epss'])
+    # KEV and EPSS only order equal-cost rows; they never change `points`
+    rows.sort(key=lambda r: (-r['points'], not r['kev'], -(r['epss'] if r['epss'] is not None else -1), r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
     return rows[:TOP_RISKS]
 
 

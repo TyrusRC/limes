@@ -71,6 +71,17 @@ class ChangesTest(Base):
 
 
 class FindingsTest(Base):
+    def test_provisional_checks_are_not_counted_as_findings(self):
+        from limes.checks.catalogue import CHECKS
+        from startScan.models import RiskCheck
+        a = self.asset('a.x.com')
+        self.scan()
+        before = asm_stats(self.p)['findings']
+        RiskCheck.objects.create(asset=a, check_id='leak.supabase_secret_key', status='fail',
+                                 severity=CHECKS['leak.supabase_secret_key'].severity, last_checked=self.now)
+        invalidate(self.p.id)
+        self.assertEqual(asm_stats(self.p)['findings'], before)  # it scores nothing, so the tile must not count it
+
     def test_counts_only_baseline_findings_on_assessed_assets(self):
         a = self.asset('a.x.com')
         old = self.scan(ago=timedelta(days=3))

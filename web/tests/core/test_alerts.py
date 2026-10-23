@@ -38,6 +38,9 @@ class ImmediacyTest(SimpleTestCase):
         self.assertFalse(events.is_immediate('asset_missing', None, None))
         self.assertTrue(events.is_immediate('asset_new', 'net.exposed_rdp', None))
         self.assertFalse(events.is_immediate('asset_new', None, None))
+        self.assertTrue(events.is_immediate('issue_new', 'rep.listed_attacker', 2))
+        self.assertTrue(events.is_immediate('issue_regressed', 'rep.listed_drop', 3))
+        self.assertFalse(events.is_immediate('issue_fixed', 'rep.listed_drop', 3))
 
 
 class RiskyCheckTest(SimpleTestCase):

@@ -151,6 +151,13 @@ $(document).ready(function() {
 					if (row['cve_ids']) {
 						row['cve_ids'].forEach(cve => {
 							cve_cwe_badge += `<a href="#" onclick="get_and_render_cve_details('${jsEscape(cve.name.toUpperCase())}')" class="badge badge-outline-primary mt-1 me-1" data-toggle="tooltip" data-placement="top" title="CVE ID">${htmlEncode(cve.name.toUpperCase())}</a>`;
+							var intel = (row['cve_intel'] || {})[cve.name.trim().toUpperCase()];
+							if (intel && intel.kev) {
+								cve_cwe_badge += `<span class="badge l-badge-kev mt-1 me-1" title="Listed in CISA Known Exploited Vulnerabilities">KEV</span>`;
+							}
+							if (intel && intel.epss !== null && intel.epss !== undefined) {
+								cve_cwe_badge += `<span class="badge badge-outline-primary mt-1 me-1" title="EPSS exploit probability (FIRST.org)">EPSS ${htmlEncode(intel.epss > 0 && intel.epss < 0.01 ? '<1' : Math.round(intel.epss * 100))}%</span>`;
+							}
 						});
 					}
 					if (row['cwe_ids']) {

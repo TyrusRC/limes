@@ -153,8 +153,8 @@ class CheckTest(Base):
         self.assertEqual(self.reload(ip).missed_count, 1)
         self.check(ip, {(ptr, 'PTR'): ['host.other.com.']}, get=Get(), now=self.now + 2 * DAY)
         self.assertEqual(self.reload(ip).missed_count, 0)
-        self.assertEqual(self.reload(ip).risk_checks.filter(check_id__startswith='net.').count(), 14)
-        self.assertEqual(self.calls, [])  # an IP gets only the database-backed network checks
+        self.assertEqual(self.reload(ip).risk_checks.filter(check_id__startswith='net.').count(), 14 + 6)  # + the six AI rows
+        self.assertEqual(self.calls, [])  # an IP gets no web/tls contact (AI probes use their own pinned get)
 
     def test_new_ip_from_resolution_emits_asset_new(self):
         root = self.asset('root_domain', 'x.com', tier='owned_root')

@@ -6,7 +6,7 @@ from api import asset_add
 from limes.mcp import registry
 from scanEngine.models import EngineType
 from rolepermissions.roles import clear_roles
-from startScan.models import Asset, IssueNote, IssueWaiver, ScanHistory, TrackedIssue
+from startScan.models import Asset, IssueNote, IssueWaiver, Lookalike, ScanHistory, TrackedIssue
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
 
@@ -83,6 +83,17 @@ class WriteToolTests(WriteBase):
             self.data(self.call('add_assets', project='p1', entries=['bad.y.com'], reason='r'))
         self.assertEqual(Asset.objects.get(value='bad.y.com').scope_tier, 'candidate')
         self.assertNotIn('tier', registry.REGISTRY['add_assets'].raw.__annotations__)
+
+    def test_only_a_confirmed_owned_add_marks_a_lookalike_ours(self):
+        """An agent's candidate add confirms nothing; the UI's owned add is the human's "This is ours"."""
+        rows = {d: Lookalike.objects.create(project=self.p1, root=self.root, domain=d, unicode=d, source='permutation',
+                                            fuzzers=['homoglyph']) for d in ('x-c.com', 'x-o.com')}
+        self.data(self.call('add_assets', project='p1', entries=['x-c.com'], reason='r'))
+        self.assertTrue(Asset.objects.filter(project=self.p1, value='x-c.com', scope_tier='candidate').exists())
+        asset_add.add_assets(self.p1, ['x-o.com'], 'owned_host', 'mine', self.admin)
+        for d, want in (('x-c.com', 'unchecked'), ('x-o.com', 'ours')):
+            rows[d].refresh_from_db()
+            self.assertEqual(rows[d].status, want, d)
 
     def test_add_assets_never_touches_existing_rows(self):
         def mk(value, tier, reason):

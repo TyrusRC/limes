@@ -18,7 +18,7 @@ from tests.core.test_dashboard_stats import Base
 
 X = '<img src=x onerror=alert(1)>'
 ESCAPED = '&lt;img src=x onerror=alert(1)&gt;'
-NEW_IDS = ('dash_what_changed', 'dash_categories', 'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation',
+NEW_IDS = ('dash_what_changed', 'dash_categories', 'dash_brand', 'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation',
            'dash_discovery', 'dash_coverage', 'dash_top_risks')
 
 
@@ -55,7 +55,7 @@ class OverviewPageTest(Base):
 
     def test_page_order(self):
         html = self.page('p')
-        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_inventory', 'dash_findings',
+        order = ['dash_risk', 'score_trend', 'dash_what_changed', 'dash_categories', 'dash_brand', 'dash_inventory', 'dash_findings',
                  'dash_exposure', 'dash_certs', 'dash_tech', 'dash_remediation', 'dash_discovery', 'dash_coverage',
                  'dash_top_risks', 'dash_risky', 'dash_changes', 'dash_monitoring']
         at = [html.index(f'id="{i}"') for i in order]
@@ -76,10 +76,14 @@ class OverviewPageTest(Base):
             self.assertIn(f'href="{self.issues_url()}?category={key}"', card)
             if c['assessed']:
                 self.assertIn(f'ov-grade-{c["grade"].lower()}', card)
+            elif c['provisional']:
+                self.assertIn('Provisional, not scored', card)
+                self.assertNotIn('ov-grade-', card)
             else:
                 self.assertIn('Not assessed', card)
                 self.assertNotIn('ov-grade-', card)
-            self.assertIn('No trend yet', card)  # no snapshot 30 days back
+            if not c['provisional']:
+                self.assertIn('No trend yet', card)  # no snapshot 30 days back
 
     def test_hostile_names_escaped_in_every_card(self):
         host = self.asset(X + '.x.com', sources=[{'source': 'crtsh'}], last_resolved_at=self.now)
@@ -101,6 +105,21 @@ class OverviewPageTest(Base):
         for id_ in ('dash_categories', 'dash_exposure', 'dash_discovery'):
             self.assertIn('<h2', section(html, id_))
         self.assertIn('>22<', section(html, 'dash_exposure'))
+
+    def test_overview_provisional_cards(self):
+        a = self.asset('a.x.com')
+        self.check(a, 'leak.supabase_secret_key', 'fail')
+        TrackedIssue.objects.create(project=self.p, asset=a, key=X, source='check', severity=4)
+        sync_issues(self.p, now=self.now)
+        html = section(self.page('p'), 'dash_categories')
+        for key in ('reputation', 'data_leakage'):
+            start = html.index(f'id="cat_{key}"')
+            card = html[start:html.index('</a>', start)]
+            self.assertIn('Provisional, not scored', card)
+            self.assertIn(f'?category={key}"', card)
+            self.assertNotIn('ov-grade-', card)
+        self.assertIn('1 open', html[html.index('id="cat_data_leakage"'):])
+        self.assertNotIn(X, html)
 
     def test_empty_and_unassessed_states(self):
         Project.objects.create(name='e', slug='e', insert_date=self.now)
@@ -157,7 +176,7 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 85  # a rise must be justified in review
+OVERVIEW_QUERIES = 88  # a rise must be justified in review (86 + the Brand aggregate + the feed states)
 WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome; none from the cards
 
 

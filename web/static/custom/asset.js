@@ -157,7 +157,7 @@ function asset_penalty_rows(rows, withAsset) {
 	return (rows || []).map(function(r) {
 		return '<tr' + (r.waived ? ' class="l-row-waived"' : '') + '>' + (withAsset ? '<td>' + asset_esc(r.asset) + '</td>' : '') + '<td>' + asset_esc(r.issue) +
 			'</td><td>' + asset_sev_html(r.severity) + '</td><td class="text-nowrap">' +
-			(r.waived ? '<span class="badge l-badge-waived"><i class="fe-shield" aria-hidden="true"></i>Waived</span>' : '-' + asset_esc(r.points)) + '</td></tr>';
+			(r.waived ? '<span class="badge l-badge-waived"><i class="fe-shield" aria-hidden="true"></i>Waived</span>' : r.provisional ? 'Provisional' : '-' + asset_esc(r.points)) + '</td></tr>';
 	}).join('');
 }
 
@@ -190,6 +190,26 @@ function asset_checks_html(checks) {
 			'</td><td>' + asset_esc(c.fix) + '</td><td>' + ev + '</td><td class="text-nowrap">' + asset_esc(String(c.last_checked || '').slice(0, 10)) + '</td></tr>';
 	}).join('');
 	return asset_section('Risk checks', asset_table(['Check', 'Status', 'Severity', 'Fix', 'Evidence', 'Checked'], rows));
+}
+
+// Reputation listings (rep.* rows that fail): feed, entry, listed since, credit. Feed text is hostile: escape every field.
+function asset_reputation_html(checks) {
+	var rows = (checks || []).filter(function(c) { return String(c.check || '').indexOf('rep.') === 0 && c.status === 'fail'; }).map(function(c) {
+		var e = c.evidence || {};
+		return '<tr><td>' + asset_esc(e.feed) + '</td><td>' + asset_esc(e.entry) + '</td><td class="text-nowrap">' + asset_esc(String(e.listed_at || '').slice(0, 10) || 'unknown') +
+			'</td><td>' + asset_esc(e.credit) + '</td></tr>';
+	}).join('');
+	return rows ? asset_section('Reputation', asset_table(['Feed', 'Entry', 'Listed since', 'Credit'], rows)) : '';
+}
+
+// InternetDB banner-matched CVEs of an IP: not verified, never scored. CVE ids are validated server-side; escape anyway.
+function asset_unverified_cves_html(rows) {
+	if (!rows || !rows.length) return '';
+	var body = rows.map(function(r) {
+		var pct = r.epss === null || r.epss === undefined ? '' : (r.epss > 0 && r.epss < 0.01 ? '<1' : Math.round(r.epss * 100)) + '%';
+		return '<tr><td class="mono">' + asset_esc(r.cve) + '</td><td>' + (r.kev ? '<span class="badge l-badge-kev">KEV</span>' : '') + '</td><td class="text-nowrap">' + asset_esc(pct) + '</td></tr>';
+	}).join('');
+	return asset_section('Unverified CVEs (InternetDB banner)', '<p class="l-hint">Banner match, not verified, not scored.</p>' + asset_table(['CVE', 'Known exploited', 'EPSS'], body));
 }
 
 // Score sub-line under the title, and the top-penalties card above the Assets table.
@@ -253,7 +273,7 @@ function asset_parent_chain(asset) {
 	return step(asset);
 }
 
-function asset_intel_html(e) {
+function asset_intel_html(e, breaches) {
 	e = e || {};
 	var rows = [], idb = e.internetdb, ripe = e.ripestat;
 	if (idb) {
@@ -271,8 +291,22 @@ function asset_intel_html(e) {
 			'</td><td>' + asset_esc(ripe.fetched_at) + '</td></tr>');
 		rows.push('<tr><td>Holder</td><td>' + asset_esc(ripe.holder) + '</td><td></td></tr>');
 	}
-	if (!rows.length) return '';
-	return asset_section('Intel', asset_table(['<span class="visually-hidden">Field</span>', 'Value', 'Fetched'], rows.join('')));
+	var html = '';
+	if (rows.length) html += asset_section('Intel', asset_table(['<span class="visually-hidden">Field</span>', 'Value', 'Fetched'], rows.join('')));
+	var items = (e.backends && e.backends.items) || [];
+	if (items.length) {
+		html += asset_section('Backends referenced by client code, informational', asset_table(['Kind', 'Reference'],
+			items.map(function(b) { return '<tr><td>' + asset_esc(b.kind) + '</td><td>' + asset_esc(b.ref) + '</td></tr>'; }).join('')));
+	}
+	if (breaches && breaches.length) {
+		html += asset_section('Data breaches', asset_table(['Breach', 'Addresses', 'Breach date', 'Published'],
+			breaches.map(function(b) {
+				return '<tr><td>' + asset_esc(b.name) + '</td><td>' + asset_esc(b.addresses) + '</td><td>' + asset_esc(b.breach_date) +
+					'</td><td>' + asset_esc(b.published) + '</td></tr>';
+			}).join('')) +
+			'<p class="l-muted">Breach data: <a href="https://haveibeenpwned.com/" target="_blank" rel="noopener noreferrer">Have I Been Pwned</a> (CC BY 4.0)</p>');
+	}
+	return html;
 }
 
 function get_asset_modal(id) {
@@ -294,9 +328,9 @@ function get_asset_modal(id) {
 			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
 			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
 			asset_cadence_html(a) +
-			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
+			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
-			asset_intel_html(a.enrichment) + '</div>'
+			asset_intel_html(a.enrichment, a.breaches) + '</div>'
 		);
 		$('#modal-footer').html(asset_actions(a));
 		asset_modal_wide(true);

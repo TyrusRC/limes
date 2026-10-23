@@ -3,6 +3,7 @@ from django.urls import path
 from rest_framework import routers
 
 from .views import *
+from .lookalikes import DecideLookalike, LookalikeList, LookalikeReport
 
 app_name = 'api'
 router = routers.DefaultRouter()
@@ -33,6 +34,9 @@ urlpatterns = [
     path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
     path('asset_score/', AssetScore.as_view(), name='asset_score'),
     path('issues/', IssueList.as_view(), name='issues'),
+    path('lookalikes/', LookalikeList.as_view(), name='lookalikes'),
+    path('action/lookalike/decide/', DecideLookalike.as_view(), name='decide_lookalike'),
+    path('action/lookalike/report/', LookalikeReport.as_view(), name='lookalike_report'),
     path('action/issue/waive/', WaiveIssue.as_view(), name='waive_issue'),
     path('action/issue/revoke/', RevokeIssueWaiver.as_view(), name='revoke_issue_waiver'),
     path('issue/notes/', IssueNotes.as_view(), name='issue_notes'),

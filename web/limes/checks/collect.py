@@ -1,5 +1,6 @@
 """Observation collectors for the risk checks. All network I/O lives here, behind
 injectable callables, so the evaluators stay pure. TLS verification is never disabled."""
+import json
 import socket
 import ssl
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -11,9 +12,12 @@ import requests
 from django.utils import timezone
 
 from limes import scope
+from limes.checks.ai import FINGERPRINTS
+from limes.checks.catalogue import AI_PORTS, MAX_AI_PORTS
 
 
 TIMEOUT = 5
+BODY_CAP = 256 * 1024  # bytes read from any probed body
 MAX_REDIRECTS = 3
 FRESH = timedelta(days=30)
 # SSLError reasons that mean the server refused the legacy protocol. Anything else is unknown.
@@ -245,3 +249,50 @@ def ports_for_ip(asset, now):
     for p in naabu:
         ports.setdefault(p, []).append('naabu')
     return dict(sorted(ports.items())), bool(fresh)
+
+
+# ---- AI services (plain HTTP on ports already seen open, through the caller's pinned get) ----
+# NOTE: plain HTTP only: an IP has no hostname to verify a certificate against. Upgrade path: probe https with the
+# IP's PTR or CT name once safe_fetch can pin a verified name.
+
+def _read_json(resp):
+    """The body, capped at BODY_CAP bytes, decoded as JSON; None when it is not (or is cut off, or hostile)."""
+    buf = b''
+    for chunk in resp.iter_content(chunk_size=8192):
+        buf += chunk[:BODY_CAP - len(buf)]
+        if len(buf) >= BODY_CAP:
+            break
+    try:
+        return json.loads(buf)
+    except (ValueError, RecursionError):  # includes UnicodeDecodeError and JSONDecodeError
+        return None
+
+
+def _ai_get(get, ua, base, path):
+    """{'status': int | 'error' | None, 'json': object | None}; None = nothing listening, 'error' = unknown."""
+    def fetch():
+        resp = get(base + path, headers={'User-Agent': ua}, timeout=TIMEOUT, allow_redirects=False, stream=True)
+        try:
+            return {'status': resp.status_code, 'json': _read_json(resp) if resp.status_code == 200 else None}
+        except (requests.exceptions.RequestException, OSError):
+            return {'status': 'error', 'json': None}  # stalled or cut off mid-body: unknown, never 'nothing there'
+        finally:
+            resp.close()
+    got = _guard(fetch)
+    return got if isinstance(got, dict) else {'status': got, 'json': None}
+
+
+def observe_ai(ip, ports, get, ua):
+    """{port: {service: {'status', 'json', 'second'}}} for the lowest MAX_AI_PORTS open ports in AI_PORTS."""
+    out = {}
+    for port in sorted(p for p in set(ports) if p in AI_PORTS)[:MAX_AI_PORTS]:
+        base = f'http://[{ip}]:{port}' if ':' in ip else f'http://{ip}:{port}'
+        out[port] = {}
+        for svc in AI_PORTS[port]:
+            probe = _ai_get(get, ua, base, FINGERPRINTS[svc])
+            probe['second'] = None
+            body = probe['json']
+            if svc == 'jupyter' and isinstance(body, dict) and 'version' in body:
+                probe['second'] = _ai_get(get, ua, base, '/api/kernels')
+            out[port][svc] = probe
+    return out

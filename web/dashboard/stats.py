@@ -16,7 +16,8 @@ SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 CHANGE_LABELS = {'issue_new': 'New issue', 'issue_fixed': 'Fixed', 'issue_regressed': 'Came back',
                  'score_dropped': 'Score dropped', 'score_changed': 'Score changed', 'waiver_expired': 'Waiver expired',
                  'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed',
-                 'asset_new': 'New asset'}
+                 'asset_new': 'New asset', 'breach_new': 'New breach',
+                 'lookalike_new': 'New lookalike', 'lookalike_active': 'Lookalike active'}
 
 
 def _key(project_id):
@@ -73,12 +74,13 @@ def _sev_counts(categories):
 def _risky_assets(live):
     """Assessed assets below the maximum, weakest first, scored the way the headline is."""
     from limes import scoring
+    from limes.checks.catalogue import PROVISIONAL
     rows = []
     for a, cats in live.items():
         score = scoring._score(cats)
         if score < scoring.MAX_SCORE:
             rows.append({'value': a.value, 'kind': a.kind, 'score': score, 'grade': scoring.grade(score),
-                         'last_seen': a.last_seen, 'counts': _sev_counts(cats.values())})
+                         'last_seen': a.last_seen, 'counts': _sev_counts(s for k, s in cats.items() if k not in PROVISIONAL)})
     rows.sort(key=lambda r: (r['score'], r['value']))
     return rows[:RISKY_LIMIT]
 
@@ -111,7 +113,8 @@ def _changes(project, now):
 
 def _findings(live):
     """Open issues (findings and failed checks) on assessed assets, actively waived ones left out."""
-    return _sev_counts(sev for cats in live.values() for sev in cats.values())
+    from limes.checks.catalogue import PROVISIONAL
+    return _sev_counts(sev for cats in live.values() for k, sev in cats.items() if k not in PROVISIONAL)  # 0 points: not counted
 
 
 def _monitoring(project, now):
@@ -152,6 +155,8 @@ def asm_stats(project):
         'exposure': posture.exposure(project, now),
         'certificates': posture.certificates(project, now),
         'technologies': posture.technologies(project),
+        'brand': posture.brand(project, now),
+        'data_sources': posture.data_sources(now),
         'remediation': activity.remediation(project, now),
         'top_risks': activity.top_risks(project, live, now),
         'what_changed': activity.what_changed(project, now, risk['score']),

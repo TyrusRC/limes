@@ -1,0 +1,85 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}
+Lookalikes
+{% endblock title %}
+
+{% block page_title %}Lookalikes{% endblock page_title %}
+
+{% block main_content %}
+{% with can_write=user|can:'modify_targets' %}
+<p class="l-page-sub" id="lk_summary" aria-live="polite"></p>
+
+<div class="l-banner" id="lk_off" role="status" hidden>
+  <span class="l-banner-icon" aria-hidden="true"><i class="fe-info"></i></span>
+  <div class="l-banner-text"><strong>Lookalike monitoring is off.</strong>
+    <div>The operator can turn it on with LIMES_LOOKALIKE_ENABLED. Existing rows are kept.</div></div>
+</div>
+
+<section class="card" aria-label="Filters">
+  <div class="l-filter-bar">
+    <div class="l-field">
+      <label for="lk_f_status">Status</label>
+      <select id="lk_f_status" class="form-select">
+        <option value="">Any status</option>
+        <option value="registered">Awaiting review</option><option value="watching">Watching</option><option value="reported">Reported</option>
+        <option value="ignored">Ignored</option><option value="ours">Ours</option><option value="unregistered">Not registered</option>
+        <option value="gone">Gone</option><option value="unchecked">Not checked yet</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="lk_f_registered">Registration</label>
+      <select id="lk_f_registered" class="form-select">
+        <option value="">Registered or not</option>
+        <option value="true" selected>Registered</option><option value="false">Not registered</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="lk_f_mx">Mail</label>
+      <select id="lk_f_mx" class="form-select">
+        <option value="">Any</option><option value="true">Has a mail server</option>
+      </select>
+    </div>
+    <div class="l-field">
+      <label for="lk_f_young">Age</label>
+      <select id="lk_f_young" class="form-select">
+        <option value="">Any age</option><option value="true">Registered in the last 30 days</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<section class="card l-table-card" aria-label="Lookalike list">
+  <table id="lk_table" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}">
+    <thead>
+      <tr>
+        <th>Domain</th><th>Registered</th><th>Age</th><th>Registrar</th><th>Mail</th><th>Certificate</th><th>A record</th><th>Status</th><th>First seen</th>
+        {% if can_write %}<th><span class="visually-hidden">Actions</span></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+<p class="l-muted small mt-2" id="lk_credit"></p>
+<p class="l-hint">Domains are shown as text and are never links: do not open them from here. Limes sends no mail; copy the report and send it yourself.</p>
+
+<section class="card" id="lk_report_card" aria-labelledby="lk_report_title" hidden>
+  <div class="card-header d-flex align-items-center justify-content-between gap-2">
+    <h2 class="card-title mb-0" id="lk_report_title">Abuse report</h2>
+    <button type="button" class="btn btn-light" id="lk_copy"><i class="fe-clipboard" aria-hidden="true"></i>Copy</button>
+  </div>
+  <div class="card-body">
+    <label class="visually-hidden" for="lk_report">Abuse report text</label>
+    <textarea id="lk_report" class="form-control lk-report" readonly rows="14"></textarea>
+  </div>
+</section>
+{% endwith %}
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'custom/lookalikes.js' %}"></script>
+<script type="text/javascript">
+$(document).ready(function() { lookalikes_init(); });
+</script>
+{% endblock page_level_script %}

@@ -134,7 +134,7 @@ class BaselineTest(Base):
         a = self.host('a.x.com')
         self.vuln(self.scan(ago=timedelta(days=2)), a, 3)
         self.vuln(self.scan(ago=timedelta(hours=1)), a, 3)
-        self.assertEqual(scoring.asset_breakdown(a)['penalties'], [{'asset': 'a.x.com', 'issue': 't1', 'severity': 'high', 'points': 80, 'kind': 'finding', 'waived': False}])
+        self.assertEqual(scoring.asset_breakdown(a)['penalties'], [{'asset': 'a.x.com', 'issue': 't1', 'severity': 'high', 'points': 80, 'kind': 'finding', 'provisional': False, 'waived': False}])
 
     def test_only_owned_unretired_assets_count(self):
         s = self.scan()

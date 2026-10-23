@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from limes import scoring
 from limes.alerts import events
-from limes.checks.catalogue import CHECKS
+from limes.checks.catalogue import CHECKS, PROVISIONAL
 from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
 
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
@@ -43,12 +43,18 @@ def sync_issues(project, now=None):
         issues, assessed = scoring.current_issues(project, now=now)
         issues = {a: {issue_key(k): sev for k, sev in keys.items()} for a, keys in issues.items()}
         rows = {(r.asset_id, r.key): r for r in TrackedIssue.objects.filter(project=project)}
-        assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed).select_related('parent')}
+        tracked = scoring.issue_assets(project)
+        passed = set(scoring._fresh_checks(project, now, assets=tracked)
+                     .filter(status='pass').values_list('asset_id', 'check_id'))
+        # an IP whose listing is carried by an owned range is not its own issue: its old one is closed below
+        covered = set(scoring._fresh_checks(project, now, assets=tracked)
+                      .filter(status='not_applicable', check_id__in=PROVISIONAL, evidence__has_key='covered_by')
+                      .values_list('asset_id', 'check_id'))
+        assets = {a.id: a for a in Asset.objects.filter(project=project, id__in=set(issues) | assessed | {a for a, _ in passed}).select_related('parent')}
         roots = list(Asset.objects.filter(project=project, kind='root_domain', scope_tier='owned_root')
                      .values_list('value', flat=True))
         buckets = {a.id: _bucket(a, roots) for a in assets.values()}
         synced = set(state.roots)
-        passed = set(scoring._fresh_checks(project, now).filter(status='pass').values_list('asset_id', 'check_id'))
         waived = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__project=project)
                      .values_list('issue_id', flat=True))
         out = []
@@ -61,7 +67,11 @@ def sync_issues(project, now=None):
                 if row is None:
                     row = TrackedIssue.objects.create(project=project, asset=asset, key=key, severity=sev, first_seen=now,
                                                       last_seen=now, source='check' if key in CHECKS else 'finding')
-                    if not first and buckets[asset_id] in synced:  # a root's first sync is silent too
+                    # a provisional check's first evaluation is a baseline too: silent until `check:<id>` is armed.
+                    # NOTE: so an owned cidr/asn added later is silent on its first listing too (its own bucket is not
+                    # in state.roots yet), and the IPs it covers raise no IP-level alert either.
+                    baseline = key in PROVISIONAL and f'check:{key}' not in synced
+                    if not first and not baseline and buckets[asset_id] in synced:  # a root's first sync is silent too
                         out.append(_event(project, 'issue_new', row, asset))
                     continue
                 kind = None
@@ -75,6 +85,10 @@ def sync_issues(project, now=None):
                 if kind and row.id not in waived:  # state still moves; only the announcement is silenced
                     out.append(_event(project, kind, row, asset))
         for (asset_id, key), row in rows.items():
+            if row.status == 'open' and (asset_id, key) in covered and key not in issues.get(asset_id, {}):
+                row.status, row.fixed_at = 'fixed', now  # moved to the range's issue: no event, one listing = one alert
+                row.save()
+                continue
             gone = (asset_id, key) in passed if row.source == 'check' else asset_id in assessed
             if row.status == 'open' and key not in issues.get(asset_id, {}) and gone and asset_id in assets:
                 row.status, row.fixed_at = 'fixed', now
@@ -87,6 +101,9 @@ def sync_issues(project, now=None):
                 and ((a.parent.enrichment or {}).get('enum') or {}).get('status', 'running') == 'running'
                 and ((a.parent.enrichment or {}).get('enum') or {}).get('pass', 0) == 0}
         known = set(buckets.values()) - held
+        # a provisional check with a fresh pass/fail row has been evaluated: its later new hits alert
+        known |= {f'check:{c}' for c in scoring._fresh_checks(project, now, assets=tracked)
+                  .filter(status__in=('pass', 'fail'), check_id__in=PROVISIONAL).values_list('check_id', flat=True).distinct()}
         if not synced >= known:
             state.roots = sorted(synced | known)
             state.save(update_fields=['roots'])

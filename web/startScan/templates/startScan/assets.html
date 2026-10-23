@@ -139,6 +139,13 @@ $(document).ready(function() {
     ],
     order: [[8, 'desc']]
   });
+  // ?add=<domain> (the Lookalikes page's "This is ours") opens the add form with the value typed in. Text only: it is
+  // set as the textarea's value and nothing is added until the user confirms.
+  var addValue = query.get('add');
+  if (addValue) {
+    show_add_asset_modal();
+    document.getElementById('asset_entries').value = addValue.slice(0, 253);
+  }
   $('#asset_results_filter input').attr('aria-label', 'Filter this list');
   $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });

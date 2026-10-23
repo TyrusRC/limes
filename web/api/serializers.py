@@ -10,6 +10,7 @@ from targetApp.models import *
 from dashboard.models import InAppNotification
 from django.utils.http import url_has_allowed_host_and_scheme
 from urllib.parse import urlsplit
+from django.db.models import QuerySet
 
 
 def safe_redirect_link(url):
@@ -733,6 +734,28 @@ class VulnerabilitySerializer(serializers.ModelSerializer):
 	discovered_date = serializers.SerializerMethodField()
 	severity = serializers.SerializerMethodField()
 	scan_history = serializers.SerializerMethodField()
+	cve_intel = serializers.SerializerMethodField()
+
+	def get_cve_intel(self, vulnerability):
+		"""{cve: {kev, epss, percentile}}; the whole page is looked up in two queries on the first call."""
+		root = self.root
+		memo = getattr(root, '_cve_intel', None)
+		if memo is None:
+			from limes import exploit
+			from limes.feeds import parse
+			instance = root.instance
+			rows = list(instance) if isinstance(instance, (list, tuple, QuerySet)) else [vulnerability]
+			through = Vulnerability.cve_ids.through
+			by_vuln = {}
+			for vid, name in through.objects.filter(vulnerability_id__in=[v.pk for v in rows]).values_list('vulnerability_id', 'cveid__name'):
+				by_vuln.setdefault(vid, []).append(name)
+			marks = exploit.markers(n for names in by_vuln.values() for n in names)
+			memo = {vid: {c: {k: marks[c][k] for k in ('kev', 'epss', 'percentile')}
+									for c in sorted({c for c in map(parse.norm_cve, names) if c} & marks.keys())}
+								for vid, names in by_vuln.items()}
+			if isinstance(instance, (list, tuple, QuerySet)):  # a single object is not the page: do not serve it to the next one
+				root._cve_intel = memo
+		return memo.get(vulnerability.pk, {})
 
 	def get_discovered_date(self, Vulnerability):
 		return Vulnerability.discovered_date.strftime("%b %d, %Y %H:%M")

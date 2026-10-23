@@ -17,6 +17,7 @@
       <li><a class="l-nav-link" href="{% url 'dashboardIndex' slug %}"{% if cur == 'dashboardIndex' %} aria-current="page"{% endif %}><i class="fe-grid" aria-hidden="true"></i>Overview</a></li>
       <li><a class="l-nav-link" href="{% url 'issues' slug %}"{% if cur == 'issues' %} aria-current="page"{% endif %}><i class="fe-alert-octagon" aria-hidden="true"></i>Issues</a></li>
       <li><a class="l-nav-link" href="{% url 'assets' slug %}"{% if cur == 'assets' %} aria-current="page"{% endif %}><i class="fe-box" aria-hidden="true"></i>Assets</a></li>
+      <li><a class="l-nav-link" href="{% url 'lookalikes' slug %}"{% if cur == 'lookalikes' %} aria-current="page"{% endif %}><i class="fe-copy" aria-hidden="true"></i>Lookalikes</a></li>
       <li><a class="l-nav-link" href="{% url 'all_subdomains' slug %}"{% if cur == 'all_subdomains' %} aria-current="page"{% endif %}><i class="fe-globe" aria-hidden="true"></i>Subdomains</a></li>
       <li><a class="l-nav-link" href="{% url 'all_endpoints' slug %}"{% if cur == 'all_endpoints' %} aria-current="page"{% endif %}><i class="fe-link" aria-hidden="true"></i>Endpoints</a></li>
       <li><a class="l-nav-link" href="{% url 'all_vulns' slug %}"{% if cur == 'all_vulns' %} aria-current="page"{% endif %}><i class="fe-alert-triangle" aria-hidden="true"></i>Vulnerabilities</a></li>

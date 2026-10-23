@@ -11,6 +11,7 @@ Overview
 {% block main_content %}
 {% url 'assets' slug=project.slug as assets_url %}
 {% url 'issues' slug=project.slug as issues_url %}
+{% url 'lookalikes' slug=project.slug as lookalikes_url %}
 <p class="ov-sub">
   <span>{{ project.name }}</span>
   <span>{% if monitoring.last_scan %}Last scan {{ monitoring.last_scan|naturaltime }}{% else %}No scans yet{% endif %}</span>
@@ -115,16 +116,38 @@ Overview
       <a class="ov-cat" id="cat_{{ c.key }}" href="{{ issues_url }}?category={{ c.key }}">
         <span class="ov-cat-label">{{ c.label }}</span>
         <span class="ov-cat-main">
-          {% if c.assessed %}<span class="ov-grade ov-grade-{{ c.grade|lower }}">{{ c.grade }}</span><span class="ov-cat-score">{{ c.score }}</span>{% if c.raw_score != c.score %}<span class="ov-muted ov-cat-raw">raw {{ c.raw_score }}</span>{% endif %}
+          {% if c.provisional %}<span class="ov-cat-na ov-cat-prov">Provisional, not scored</span>
+          {% elif c.assessed %}<span class="ov-grade ov-grade-{{ c.grade|lower }}">{{ c.grade }}</span><span class="ov-cat-score">{{ c.score }}</span>{% if c.raw_score != c.score %}<span class="ov-muted ov-cat-raw">raw {{ c.raw_score }}</span>{% endif %}
           {% else %}<span class="ov-cat-na">Not assessed</span>{% endif %}
         </span>
         <span class="ov-cat-foot">
           <span>{{ c.open|intcomma }} open{% if c.waived %} · {{ c.waived }} waived{% endif %}</span>
-          {% if c.delta_30 is None %}<span class="ov-muted">No trend yet</span>{% else %}<span class="ov-delta{% if c.delta_30 > 0 %} ov-delta-up{% elif c.delta_30 < 0 %} ov-delta-down{% endif %}">{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}</span>{% endif %}
+          {% if c.provisional %}{% elif c.delta_30 is None %}<span class="ov-muted">No trend yet</span>{% else %}<span class="ov-delta{% if c.delta_30 > 0 %} ov-delta-up{% elif c.delta_30 < 0 %} ov-delta-down{% endif %}">{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}</span>{% endif %}
         </span>
       </a>
       {% endfor %}
     </div>
+    <div class="ov-card-foot ov-sources" id="dash_sources">
+      <span>Data sources:
+      {% regroup data_sources by credit as sources %}{% for g in sources %}<a href="{{ g.list.0.terms }}" target="_blank" rel="noopener noreferrer">{{ g.grouper }}</a> ({% for f in g.list %}{{ f.name }} {% if f.last_good_at %}{{ f.last_good_at|date:"Y-m-d" }}{% if f.stale %} <span class="ov-tag ov-stale">stale</span>{% endif %}{% else %}not fetched yet{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}){% if not forloop.last %} · {% endif %}{% endfor %}</span>
+    </div>
+  </section>
+
+  <section class="card ov-brand" id="dash_brand" aria-labelledby="h-brand">
+    <div class="ov-card-head"><h2 id="h-brand">Brand</h2><a class="ov-meta" href="{{ lookalikes_url }}">Lookalikes</a></div>
+    {% if not brand.enabled %}
+    <p class="ov-note ov-empty-note ov-pad">Lookalike monitoring is off. The operator can turn it on with LIMES_LOOKALIKE_ENABLED.</p>
+    {% elif not brand.tracked %}
+    <p class="ov-note ov-empty-note ov-pad">No lookalike domains tracked yet. They are generated daily for each owned root domain.</p>
+    {% else %}
+    <div class="ov-stats">
+      <a class="ov-stat" href="{{ lookalikes_url }}?registered=true"><div class="ov-stat-label"><i class="fe-copy" aria-hidden="true"></i>Registered</div><div class="ov-stat-value">{{ brand.registered|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?young=true"><div class="ov-stat-label"><i class="fe-clock" aria-hidden="true"></i>New in 30 days</div><div class="ov-stat-value">{{ brand.new_30|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?mx=true"><div class="ov-stat-label"><i class="fe-mail" aria-hidden="true"></i>Phishing-ready</div><div class="ov-stat-value">{{ brand.phishing_ready|intcomma }}</div></a>
+      <a class="ov-stat" href="{{ lookalikes_url }}?status=registered"><div class="ov-stat-label"><i class="fe-eye" aria-hidden="true"></i>Awaiting review</div><div class="ov-stat-value">{{ brand.awaiting|intcomma }}</div></a>
+    </div>
+    <div class="ov-card-foot"><span>Phishing-ready means the domain has mail or a certificate · {{ brand.tracked|intcomma }} candidates tracked</span></div>
+    {% endif %}
   </section>
 
   <section class="card ov-surface" id="dash_inventory" aria-labelledby="h-surface">
@@ -164,7 +187,7 @@ Overview
         {% for r in exposure.rows %}
           <tr>
             <td class="mono">{{ r.port }}</td>
-            <td>{{ r.service|default:"—" }}</td>
+            <td>{{ r.service|default:"—" }}{% if r.ai %} <span class="ov-tag">AI</span>{% endif %}</td>
             <td class="ov-num">{{ r.hosts|intcomma }}</td>
             <td>{% if r.risky %}<a class="sev-{{ r.severity }}" href="{{ issues_url }}?category=network" title="Network issues">{{ r.severity|capfirst }}</a>{% else %}<span class="ov-muted">—</span>{% endif %}</td>
           </tr>
@@ -290,7 +313,7 @@ Overview
   </section>
 
   <section class="card ov-wide" id="dash_top_risks" aria-labelledby="h-top">
-    <div class="ov-card-head"><h2 id="h-top">Top risks</h2><span class="ov-meta">Open issues costing the most points, waived ones left out</span></div>
+    <div class="ov-card-head"><h2 id="h-top">Top risks</h2><span class="ov-meta">Open issues costing the most points, waived ones left out. Ties: known exploited, then EPSS</span></div>
     {% if top_risks %}
     <div class="table-responsive ov-flush">
       <table class="table mb-0 ov-table">
@@ -298,10 +321,10 @@ Overview
         <tbody>
         {% for r in top_risks %}
           <tr>
-            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span></td>
+            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}EPSS {{ r.epss_label }}{% endif %}</span>{% endif %}</td>
             <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
             <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
-            <td class="ov-num">−{{ r.points }}</td>
+            <td class="ov-num">{% if r.provisional %}<span class="ov-tag">Provisional</span>{% else %}−{{ r.points }}{% endif %}</td>
             <td class="ov-muted text-nowrap ov-hide-sm">{% if r.detected_at %}<time datetime="{{ r.detected_at|date:'c' }}">{{ r.detected_at|date:'Y-m-d' }}</time> · {{ r.age_days }} d{% else %}—{% endif %}</td>
           </tr>
         {% endfor %}
@@ -357,6 +380,9 @@ Overview
         {% elif c.kind == 'asset_missing' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-eye-off"></i></span>
         {% elif c.kind == 'asset_auto_confirmed' %}<span class="ov-fi ov-fi-ok" aria-hidden="true"><i class="fe-globe"></i></span>
         {% elif c.kind == 'asset_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-plus-circle"></i></span>
+        {% elif c.kind == 'breach_new' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-shield-off"></i></span>
+        {% elif c.kind == 'lookalike_new' %}<span class="ov-fi ov-fi-warn" aria-hidden="true"><i class="fe-copy"></i></span>
+        {% elif c.kind == 'lookalike_active' %}<span class="ov-fi ov-fi-bad" aria-hidden="true"><i class="fe-alert-octagon"></i></span>
         {% else %}<span class="ov-fi" aria-hidden="true"><i class="fe-activity"></i></span>{% endif %}
         <div class="ov-feed-text">
           <div class="ov-feed-title">{{ c.title }}</div>

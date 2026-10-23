@@ -65,6 +65,38 @@ class GetJsonTest(SimpleTestCase):
             self.assertEqual(self.get(s), (None, None))
         self.assertEqual((s.calls, self.sleeps), ([], []))
 
+    def test_get_json_headers_and_max_wait(self):
+        s = Session(Resp(200, {}))
+        self.assertEqual(http.get_json('https://x/', provider='hibp', session=s, clock=self.clock, sleep=self.sleep,
+                                       headers={'hibp-api-key': 'k'}), (200, {}))
+        self.assertEqual(s.calls[0][2], {'User-Agent': 'Limes-ASM', 'hibp-api-key': 'k'})
+        s = Session(Resp(200, {}))
+        with mock.patch.object(http.ratelimit, 'reserve', return_value=30.0):
+            self.assertEqual(http.get_json('https://x/', provider='hibp', session=s, clock=self.clock, sleep=self.sleep,
+                                           max_wait=5), (None, None))
+        self.assertEqual((s.calls, self.sleeps), ([], []))
+
+    def test_429_honours_retry_after_bounded_by_max_wait_and_charges_budget(self):
+        r429 = Resp(429)
+        r429.headers = {'Retry-After': '7'}
+        s = Session(r429, Resp(200, {'ok': 1}))
+        charged = []
+        out = http.get_json('https://x/', provider='hibp', session=s, clock=self.clock, sleep=self.sleep,
+                            max_wait=30, budget=lambda: charged.append(1) or True)
+        self.assertEqual(out, (200, {'ok': 1}))
+        self.assertIn(7, self.sleeps)
+        self.assertEqual(len(charged), 1)
+        long = Resp(429)
+        long.headers = {'Retry-After': '3600'}
+        s = Session(long, Resp(200, {}))
+        self.assertEqual(http.get_json('https://x/', provider='hibp', session=s, clock=self.clock, sleep=self.sleep,
+                                       max_wait=30), (None, None))
+        self.assertEqual(len(s.calls), 1)
+        s = Session(r429, Resp(200, {}))
+        self.assertEqual(http.get_json('https://x/', provider='hibp', session=s, clock=self.clock, sleep=self.sleep,
+                                       budget=lambda: False), (None, None))
+        self.assertEqual(len(s.calls), 1)
+
     def test_success_uses_timeout_and_user_agent(self):
         s = Session(Resp(200, {'a': 1}))
         self.assertEqual(self.get(s), (200, {'a': 1}))

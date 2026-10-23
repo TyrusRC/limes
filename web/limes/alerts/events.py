@@ -10,9 +10,10 @@ from startScan.models import ChangeEvent
 
 logger = logging.getLogger(__name__)
 KINDS = ('issue_new', 'issue_fixed', 'issue_regressed', 'score_dropped', 'score_changed',
-         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new')
+         'asset_auto_confirmed', 'asset_missing', 'waiver_expired', 'asset_new', 'breach_new',
+         'lookalike_new', 'lookalike_active')
 IMMEDIATE_SEVERITY = 3
-ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed')
+ALWAYS_IMMEDIATE = ('score_dropped', 'asset_auto_confirmed', 'lookalike_active')
 
 
 def is_immediate(kind, key, severity):
@@ -20,13 +21,15 @@ def is_immediate(kind, key, severity):
         return True
     if kind == 'asset_new':  # only a new host that exposes a risky service interrupts
         return (key or '').startswith('net.exposed_')
+    if kind == 'lookalike_new':  # only a registration that is ready to phish interrupts
+        return key == 'phishing_ready'
     if kind == 'waiver_expired':  # the caller passes severity only while the issue is still open
         return (severity or 0) >= IMMEDIATE_SEVERITY
     if kind not in ('issue_new', 'issue_regressed'):
         return False
     key = key or ''
     return (severity or 0) >= IMMEDIATE_SEVERITY or key in ('tls.cert_expired', 'tls.cert_expiring') \
-        or key.startswith('net.exposed_')
+        or key.startswith(('net.exposed_', 'rep.'))
 
 
 def record(project, kind, title, severity=None, asset=None, detail=None, key=None):
