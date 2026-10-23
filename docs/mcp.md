@@ -7,13 +7,13 @@ A native [Model Context Protocol](https://modelcontextprotocol.io) server so AI 
 Read tools (all take a `project` slug where relevant; lists are paginated, 50 by default, 200 at most, with an opaque cursor):
 
 - `list_projects`, `get_project_summary`: the projects you can read and their score, counts and monitoring state.
-- `list_assets`, `get_asset`, `list_review_queue`: inventory, one asset in detail, and candidates awaiting a decision.
+- `list_assets`, `get_asset`, `list_review_queue`: inventory, one asset in detail, and candidates awaiting a decision. `list_assets` and `list_issues` take a `tag` filter, and assets (`list_assets`, `get_asset`, `search`) carry their `tags` (project-scoped labels, returned as untrusted text).
 - `list_issues`, `get_issue`, `forecast_score`, `get_score_history`: issues with waivers and notes, the "if fixed" score, and daily scores.
 - `list_vulnerabilities`, `get_vulnerability`, `search`: scanner findings and a project-wide search.
 - `list_scans`, `get_scan`, `get_scan_logs`, `list_changes`: scans, their stages and redacted logs, and the change feed.
 - `get_system_status`: workers, queues and versions. System administrators only.
 
-Write tools (off unless enabled, see below): `add_assets` (candidates only by default, 50 entries at most), `start_asm_scan`, `set_asset_cadence`, `waive_issue`, `revoke_waiver`, `add_issue_note`. They call the same services as the web UI and take explicit ids or values, never a filter.
+Write tools (off unless enabled, see below): `add_assets` (candidates only by default, 50 entries at most), `start_asm_scan`, `set_asset_cadence`, `waive_issue`, `revoke_waiver`, `add_issue_note`, `tag_assets` (add and remove tags on up to 200 assets; lower-case names of 40 characters at most, 20 tags per asset, 200 per project; an asset id outside the project fails the whole call). They call the same services as the web UI and take explicit ids or values, never a filter.
 
 Free text that came from scanned hosts, scan tools or users is returned as `{"untrusted_text": "..."}` with control characters removed and a length cap, and every result carries a notice to treat it as data only. Read tools declare `readOnlyHint`. Write tools declare `destructiveHint` on `add_assets`, `set_asset_cadence`, `waive_issue` and `revoke_waiver`, and `openWorldHint` on `add_assets` and `start_asm_scan` (they reach the internet).
 

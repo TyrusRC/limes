@@ -96,7 +96,8 @@ def search(caller, project: Slug, query: Annotated[str, Field(min_length=2, max_
     p = access.project_for(caller, project)
     now = timezone.now()
     assets = list(Asset.objects.filter(project=p).exclude(scope_tier='candidate', confidence__lt=REVIEW)
-                  .filter(Q(value__icontains=query) | Q(page_title__icontains=query)).order_by('value', 'id')[:limit + 1])
+                  .filter(Q(value__icontains=query) | Q(page_title__icontains=query)).prefetch_related('tags')
+                  .order_by('value', 'id')[:limit + 1])
     needle = query.lower()
     titled = [k for k, c in CHECKS.items() if needle in c.title.lower()]
     issues = list(_with_extras(TrackedIssue.objects.filter(project=p).filter(

@@ -43,7 +43,7 @@ class ScopingTests(McpBase):
     def test_every_id_parameter_is_swept(self):
         found = {p for spec in registry.REGISTRY.values() for p in inspect.signature(spec.raw).parameters
                  if p.endswith('_id') or p.endswith('_ids')}
-        self.assertEqual(found - set(ID_PARAMS), {'issue_ids'}, 'a new id parameter needs a sweep case')
+        self.assertEqual(found - set(ID_PARAMS), {'issue_ids', 'asset_ids'}, 'a new id parameter needs a sweep case')  # asset_ids: tag_assets, swept in test_mcp_tags
         a = {**self.ids}
         mine = self.call('forecast_score', project='p1', issue_ids=[a['issue_id']])
         gone = self.call('forecast_score', project='p1', issue_ids=[10**9])
@@ -89,7 +89,7 @@ class ScopingTests(McpBase):
         self.assertEqual(self.data(e)['items'] if e['ok'] else [], [])
 
     def test_write_tools_annotated(self):
-        writes = {'add_assets', 'start_asm_scan', 'set_asset_cadence', 'waive_issue', 'revoke_waiver', 'add_issue_note'}
+        writes = {'add_assets', 'start_asm_scan', 'set_asset_cadence', 'waive_issue', 'revoke_waiver', 'add_issue_note', 'tag_assets'}
         for name, spec in registry.REGISTRY.items():
             a = registry.annotations(spec)
             self.assertEqual(a['readOnlyHint'], name not in writes, name)

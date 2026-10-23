@@ -42,7 +42,8 @@ class WriteToolTests(WriteBase):
                  'set_asset_cadence': dict(asset_id=self.host.id, cadence_tier='off'),
                  'waive_issue': dict(issue_id=self.issue.id, kind='false_positive', reason='r'),
                  'revoke_waiver': dict(issue_id=self.issue.id),
-                 'add_issue_note': dict(issue_id=self.issue.id, text='t')}
+                 'add_issue_note': dict(issue_id=self.issue.id, text='t'),
+                 'tag_assets': dict(asset_ids=[self.host.id], add=['t'])}
         self.assertEqual({n for n, s in registry.REGISTRY.items() if s.write}, set(calls))
         with mock.patch('limes.continuous.initiate_scan.apply_async'):
             for name, a in calls.items():

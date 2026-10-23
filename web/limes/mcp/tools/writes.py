@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 from api import asset_add
 from limes.definitions import PERM_INITATE_SCANS_SUBSCANS, PERM_MODIFY_TARGETS
-from limes import continuous, waivers
+from limes import continuous, tags, waivers
 from limes.definitions import INITIATED_TASK, RUNNING_TASK
 from limes.mcp import access
 from limes.mcp.access import McpError
@@ -117,3 +117,18 @@ def add_issue_note(caller, project: Slug, issue_id: RowId, text: Text):
     except waivers.WaiverError as e:
         raise McpError('invalid', str(e)) from None
     return {'note_id': n.id}
+
+
+@tool(title='Tag assets', write=True, perm=PERM_MODIFY_TARGETS)
+def tag_assets(caller, project: Slug,
+               asset_ids: Annotated[list[RowId], Field(min_length=1, max_length=tags.MAX_ASSETS)],
+               add: Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=tags.MAX_NAMES)] | None = None,
+               remove: Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=tags.MAX_NAMES)] | None = None):
+    """Add and remove tags on up to 200 of the project's assets. Tags are lower case (letters, digits and . _ : / -, 40 characters at most), 20 per asset and 200 per project. A new name creates the tag; a tag nothing uses any more is deleted. An asset id outside the project fails the whole call."""
+    p = access.project_for(caller, project)
+    try:
+        return tags.change_tags(p, asset_ids, add, remove)
+    except tags.AssetNotFound:
+        raise McpError('not_found', 'asset not found') from None
+    except tags.TagError as e:
+        raise McpError('invalid', str(e)) from None

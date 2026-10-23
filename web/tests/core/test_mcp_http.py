@@ -107,7 +107,7 @@ class McpHttpTests(TransactionTestCase):
                 return {t['name']: t for t in r.json()['result']['tools']}
         off = listing(MCP_WRITES_ENABLED=False)
         writes = {n for n, s in registry.load_tools().items() if s.write}
-        self.assertEqual(len(writes), 6)
+        self.assertEqual(len(writes), 7)
         self.assertFalse(writes & set(off))
         for n, t in off.items():
             self.assertIs(t['annotations']['readOnlyHint'], True, n)

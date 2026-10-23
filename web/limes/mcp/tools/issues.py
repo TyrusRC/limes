@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from django.db.models import Count, Prefetch
 from django.utils import timezone
 from pydantic import Field
-from limes import scoring
+from limes import scoring, tags
 from limes.mcp import access
 from limes.mcp.access import McpError
 from limes.mcp.registry import tool
@@ -37,8 +37,8 @@ def _with_extras(qs, now):
 def list_issues(caller, project: Slug, status: Literal['open', 'fixed'] = 'open',
                 severity: Literal[1, 2, 3, 4] | None = None, source: Literal['check', 'finding'] | None = None,
                 waived: bool | None = None, category: Literal[scoring.CATEGORIES] | None = None,
-                cursor: Cursor = None, limit: Limit = 50):
-    """List the project's issues, worst first, with the active waiver and note count. severity 4 is critical, 1 low."""
+                tag: Annotated[str, Field(max_length=100)] | None = None, cursor: Cursor = None, limit: Limit = 50):
+    """List the project's issues, worst first, with the active waiver and note count. severity 4 is critical, 1 low. tag keeps issues whose asset carries that tag."""
     p = access.project_for(caller, project)
     now = timezone.now()
     qs = TrackedIssue.objects.filter(project=p, status=status)
@@ -48,6 +48,8 @@ def list_issues(caller, project: Slug, status: Literal['open', 'fixed'] = 'open'
         qs = qs.filter(source=source)
     if category:
         qs = qs.filter(scoring.category_q(category))
+    if tag:
+        qs = qs.filter(asset__tags__name=tags.lookup(tag)) if tags.lookup(tag) else qs.none()
     if waived is not None:
         qs = qs.filter(waived_exists(now)) if waived else qs.exclude(waived_exists(now))
     return page(_with_extras(qs, now).order_by('-severity', 'first_seen', 'id'), cursor, limit, _issue_item)

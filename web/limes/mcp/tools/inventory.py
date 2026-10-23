@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from django.db.models import Count, Exists, F, OuterRef, Q
 from django.utils import timezone
 from pydantic import Field
-from limes import monitor, scoring
+from limes import monitor, scoring, tags
 from limes.mcp import access
 from limes.mcp.access import McpError
 from limes.mcp.registry import tool
@@ -36,7 +36,8 @@ def asset_item(a):
     return {'id': a.id, 'kind': a.kind, 'value': untrusted(a.value), 'scope_tier': a.scope_tier, 'state': a.state,
             'cadence_tier': a.cadence_tier, 'first_seen': iso(a.first_seen), 'last_seen': iso(a.last_seen),
             'last_resolved_at': iso(a.last_resolved_at), 'http_status': a.http_status,
-            'page_title': untrusted(a.page_title), 'found_by': monitor.found_by(a), 'parent_id': a.parent_id}
+            'page_title': untrusted(a.page_title), 'found_by': monitor.found_by(a), 'parent_id': a.parent_id,
+            'tags': [untrusted(t.name) for t in sorted(a.tags.all(), key=lambda t: t.name)]}  # callers prefetch 'tags'
 
 
 def issue_title(source, key):
@@ -85,10 +86,13 @@ def get_project_summary(caller, project: Slug):
 @tool(title='List assets')
 def list_assets(caller, project: Slug, kind: Literal[KINDS] | None = None, scope_tier: Literal[TIERS] | None = None,
                 state: Literal[STATES] | None = None, source: Literal[SOURCES] | None = None,
-                text: Annotated[str, Field(max_length=200)] | None = None, cursor: Cursor = None, limit: Limit = 50):
-    """List the project's assets, ordered by value. scope_tier 'owned' means owned and not retired, as on the Assets page. Candidates below the review threshold are left out, as there. text matches the asset value."""
+                text: Annotated[str, Field(max_length=200)] | None = None, tag: Annotated[str, Field(max_length=100)] | None = None,
+                cursor: Cursor = None, limit: Limit = 50):
+    """List the project's assets, ordered by value. scope_tier 'owned' means owned and not retired, as on the Assets page. Candidates below the review threshold are left out, as there. text matches the asset value. tag keeps assets carrying that tag (project tags are lower case)."""
     p = access.project_for(caller, project)
-    qs = Asset.objects.filter(project=p).exclude(scope_tier='candidate', confidence__lt=REVIEW)
+    qs = Asset.objects.filter(project=p).exclude(scope_tier='candidate', confidence__lt=REVIEW).prefetch_related('tags')
+    if tag:
+        qs = qs.filter(tags__name=tags.lookup(tag)) if tags.lookup(tag) else qs.none()
     if kind:
         qs = qs.filter(kind=kind)
     if scope_tier == 'owned':
@@ -135,7 +139,7 @@ def get_asset(caller, project: Slug, asset_id: RowId):
     """One asset with its parents, sources, tracking state, technologies, addresses, open issues and risk breakdown."""
     p = access.project_for(caller, project)
     a = (Asset.objects.filter(project=p, pk=asset_id).select_related('parent__parent', 'added_by')
-         .prefetch_related('technologies', 'ip_addresses').first())
+         .prefetch_related('technologies', 'ip_addresses', 'tags').first())
     if a is None:
         raise McpError('not_found', 'asset not found')
     tracking = monitor.monitor_state(a)
