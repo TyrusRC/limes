@@ -8,6 +8,9 @@ from unittest import mock
 
 import dns.exception
 import dns.resolver
+from celery.exceptions import SoftTimeLimitExceeded
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
@@ -33,6 +36,7 @@ def _ndjson(rows):
 class FeedBase(TestCase):
     def setUp(self):
         cache.clear()
+        reputation._INDEXES.clear()
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
         ov = override_settings(LIMES_RESULTS=self.dir, FEEDS_OPTIN=[], SPAMHAUS_DQS_KEY='')
@@ -213,6 +217,123 @@ class RunTests(FeedBase):
             self.assertEqual(RiskCheck.objects.get(asset=recent, check_id='rep.dnsbl_listed').status, 'pass')
 
 
+class FixRoundTests(FeedBase):
+    def synced(self):
+        return IssueSyncState.objects.create(project=self.p, first_synced_at=self.now - timedelta(days=2), roots=['#ips'])
+
+    def test_soft_time_limit_propagates(self):
+        self.feeds()
+        ip = self.asset('ip', '45.10.1.5')
+        with mock.patch.object(reputation, 'evaluate_asset', side_effect=SoftTimeLimitExceeded):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                reputation.evaluate_reputation(self.now)
+            with self.assertRaises(SoftTimeLimitExceeded):
+                run.run_asset_checks(ip, now=self.now)
+        with mock.patch.object(reputation, 'index', side_effect=SoftTimeLimitExceeded):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                run.run_asset_checks(ip, now=self.now)
+
+    def test_index_is_built_once_and_rebuilt_when_a_feed_changes(self):
+        self.feeds()
+        a, b = self.asset('ip', '45.10.1.5'), self.asset('ip', '45.11.0.1')
+        with mock.patch.object(reputation, '_build', wraps=reputation._build) as build:
+            reputation.evaluate_asset(a, self.now)
+            reputation.evaluate_asset(b, self.now)
+            self.assertEqual(build.call_count, 1)
+            self.feed('drop_v4', _ndjson([('45.11.0.0/24', 'SBL5')]))
+            self.assertEqual(self.result(b, 'rep.listed_drop').status, 'fail')
+            self.assertEqual(build.call_count, 2)
+
+    def test_sync_issues_queries_do_not_grow_with_ips(self):
+        counts = []
+        for n in (3, 40):
+            Asset.objects.filter(project=self.p).delete()
+            TrackedIssue.objects.all().delete()
+            self.feeds()
+            for i in range(n):
+                self.asset('ip', f'46.1.0.{i + 1}')
+            reputation.evaluate_reputation(self.now)
+            with CaptureQueriesContext(connection) as q:
+                sync_issues(self.p, self.now)
+            counts.append(len(q))
+        self.assertEqual(counts[0], counts[1])
+        self.assertTrue(any('DISTINCT' in x['sql'] and 'check_id' in x['sql'] for x in q.captured_queries))
+
+    def test_cache_error_does_not_break_feed_refresh(self):
+        from limes.feeds import tasks
+        with mock.patch.object(tasks.cache, 'get', side_effect=RuntimeError('redis down')):
+            self.assertIsNone(tasks._reputation([]))
+
+    def test_ipv4_mapped_ipv6_uses_the_v4_list(self):
+        self.feeds()
+        self.assertEqual(self.result(self.asset('ip', '::ffff:45.10.1.5'), 'rep.listed_drop').status, 'fail')
+
+    def test_cidr_added_later_closes_the_ips_own_issue(self):
+        self.feeds()
+        self.synced()
+        ip = self.asset('ip', '45.10.0.5')
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.get(asset=ip, key='rep.listed_drop').status, 'open')
+        cidr = self.asset('cidr', '45.10.0.0/24')
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.get(asset=ip, key='rep.listed_drop').status, 'fixed')
+        self.assertEqual(TrackedIssue.objects.get(asset=cidr, key='rep.listed_drop').status, 'open')
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    def test_disabling_an_optin_feed_does_not_fix_or_alert(self):
+        self.feeds()
+        self.feed('blocklist_de', b'45.13.0.1\n')
+        self.synced()
+        ip = self.asset('ip', '45.13.0.1')
+        with override_settings(FEEDS_OPTIN=['blocklist_de']):
+            reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.get(asset=ip, key='rep.listed_attacker').status, 'open')
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(RiskCheck.objects.get(asset=ip, check_id='rep.listed_attacker').status, 'not_applicable')
+        self.assertEqual(TrackedIssue.objects.get(asset=ip, key='rep.listed_attacker').status, 'open')
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    def test_no_sync_state_stays_silent(self):
+        self.feeds()
+        self.asset('ip', '45.10.1.5')
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.count(), 1)
+        self.assertEqual(ChangeEvent.objects.count(), 0)
+
+    def test_asn_issue_is_created(self):
+        self.feeds()
+        asn = self.asset('asn', 'AS12345')
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.get(asset=asn).key, 'rep.listed_asndrop')
+
+    def test_delisted_is_fixed_and_relisted_regresses_immediately(self):
+        self.feeds()
+        self.synced()
+        ip = self.asset('ip', '45.10.1.5')
+        reputation.evaluate_reputation(self.now)
+        self.feed('drop_v4', _ndjson([('46.0.0.0/22', 'SBL1')]))
+        reputation.evaluate_reputation(self.now)
+        self.assertEqual(TrackedIssue.objects.get(asset=ip).status, 'fixed')
+        self.assertEqual(list(ChangeEvent.objects.values_list('kind', flat=True)), ['issue_fixed'])
+        self.feed('drop_v4', _ndjson(DROP4))
+        reputation.evaluate_reputation(self.now)
+        ev = ChangeEvent.objects.order_by('id').last()
+        self.assertEqual((ev.kind, ev.immediate), ('issue_regressed', True))
+
+    def test_burst_is_capped_and_the_rest_waits_for_the_digest(self):
+        from limes.alerts.deliver import ALERT_HOURLY_CAP
+        self.feeds(drop4=[('45.10.0.0/16', 'SBL1')])
+        self.synced()
+        self.asset('ip', '45.10.255.255')
+        reputation.evaluate_reputation(self.now)
+        for i in range(500):
+            self.asset('ip', f'45.10.{i // 250}.{i % 250 + 1}')
+        with mock.patch('limes.tasks.notifications.send_notif.delay'):
+            reputation.evaluate_reputation(self.now)
+        self.assertEqual(ChangeEvent.objects.count(), 500)
+        self.assertEqual(ChangeEvent.objects.filter(notified_at__isnull=False).count(), ALERT_HOURLY_CAP)
+
+
 class Resolver:
     def __init__(self, answer):
         self.answer, self.names = answer, []
@@ -236,7 +357,8 @@ class DqsTests(SimpleTestCase):
         self.assertEqual(self.q(dns.resolver.NXDOMAIN)[0], ('clean', None))
         self.assertEqual(self.q(['127.255.255.254'])[0][0], 'error')
         self.assertEqual(self.q(['127.255.255.255'])[0][0], 'error')
-        self.assertEqual(self.q(dns.exception.Timeout)[0], ('error', 'Timeout'))
+        with self.assertLogs('limes.reputation'):
+            self.assertEqual(self.q(dns.exception.Timeout)[0], ('error', 'Timeout'))
         self.assertEqual(self.q(['10.1.1.1'])[0][0], 'error')
         self.assertEqual(self.q([], ip='2a0d::1')[0], ('error', 'ipv6 not supported'))
         self.assertEqual(self.q(['127.0.0.2'], ip='not-an-ip')[0][0], 'error')

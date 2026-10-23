@@ -12,6 +12,7 @@ from datetime import timedelta
 
 import dns.exception
 import dns.resolver
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.utils import timezone
 
@@ -94,7 +95,24 @@ def _good(name, states, now, idx):
     return loaded[0]
 
 
+_INDEXES = {}
+
+
 def index(now):
+    """The Index for `now`, shared by every caller within 5 minutes while no reputation feed's state changes (the
+    monitor asks once per IP). NOTE: per process, at most 4 entries; upgrade path: none needed."""
+    states = list(FeedState.objects.filter(name__in=sources.REPUTATION).order_by('name').values_list(
+        'name', 'sha256', 'last_good_at', 'source_date', 'status'))
+    key = (tuple(states), tuple(sorted(settings.FEEDS_OPTIN)), int(now.timestamp()) // 300)
+    hit = _INDEXES.get(key)
+    if hit is None:
+        if len(_INDEXES) >= 4:
+            _INDEXES.clear()
+        hit = _INDEXES[key] = _build(now)
+    return hit
+
+
+def _build(now):
     """NOTE: the whole index lives in memory per run (DROP ~2k networks, ASN-DROP ~500); IP and range lookups
     bisect. Upgrade path: PostgreSQL inet/cidr columns and GiST."""
     idx = Index()
@@ -155,6 +173,7 @@ def _ip_results(asset, now, idx, dqs, ranges):
         ip = ipaddress.ip_address(asset.value)
     except ValueError:
         return []
+    ip = getattr(ip, 'ipv4_mapped', None) or ip
     out, x = [], int(ip)
     if idx.stale['rep.listed_drop' + ('6' if ip.version == 6 else '')]:
         out.append(Result('rep.listed_drop', 'error', _stale()))
@@ -288,6 +307,8 @@ def evaluate_reputation(now=None):
                     pass
         last_dqs = dict(RiskCheck.objects.filter(asset__in=[a for a in assets if a.kind == 'ip'], check_id='rep.dnsbl_listed')
                         .values_list('asset_id', 'last_checked'))
+        attacker_rows = set(RiskCheck.objects.filter(asset__in=[a for a in assets if a.kind == 'ip'], check_id='rep.listed_attacker')
+                            .exclude(status='not_applicable').values_list('asset_id', flat=True))
         try:
             for a in assets:
                 dqs = None
@@ -299,13 +320,22 @@ def evaluate_reputation(now=None):
                     else:
                         dqs = dqs_lookup(a.value, key)
                 try:
-                    _write(a, evaluate_asset(a, now, idx, dqs, ranges), now)
+                    results = evaluate_asset(a, now, idx, dqs, ranges)
+                    if a.kind == 'ip' and not idx.attacker_feeds and a.id in attacker_rows:
+                        # opt-in list switched off: the old listing is neither passing nor failing any more. The row
+                        # becomes not_applicable, so the issue leaves the Issues page but is never marked fixed.
+                        results.append(Result('rep.listed_attacker', 'not_applicable', {'reason': 'feed disabled'}))
+                    _write(a, results, now)
                     checked += 1
+                except SoftTimeLimitExceeded:
+                    raise
                 except Exception:  # noqa: BLE001 - one bad asset must not stop the project
                     log.exception('reputation check failed for %s', a.value)
             for job in (sync_issues, deliver_immediate):
                 job(project)
             invalidate(project.id)
+        except SoftTimeLimitExceeded:
+            raise
         except Exception:  # noqa: BLE001 - other projects still run
             log.exception('reputation evaluation failed for project %s', project.id)
     return {'checked': checked, 'projects': len(by_project)}

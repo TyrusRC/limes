@@ -55,15 +55,15 @@ EVALUATED = 'limes:reputation:evaluated'
 def _reputation(changed):
     """Re-check owned IPs, ranges and ASNs when a reputation feed changed, and at least daily (DQS lookups are daily).
     NOTE: a cache flush only causes one extra evaluation."""
-    if not (set(changed) & set(sources.REPUTATION)) and cache.get(EVALUATED) is not None:
-        return
     try:
+        if not (set(changed) & set(sources.REPUTATION)) and cache.get(EVALUATED) is not None:
+            return
         reputation.evaluate_reputation()
         cache.set(EVALUATED, 1, 24 * 3600)
     except SoftTimeLimitExceeded:
         raise
-    except Exception:  # noqa: BLE001 - the downloads are done; a failed evaluation retries next tick
-        logger.exception('reputation evaluation failed')
+    except Exception as e:  # noqa: BLE001 - the downloads are done; a failed evaluation retries next tick
+        logger.warning('reputation evaluation failed: %s', type(e).__name__)  # type only: never a message
 
 
 def refresh_one(name, force=False):

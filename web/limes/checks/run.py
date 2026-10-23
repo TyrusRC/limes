@@ -94,6 +94,8 @@ def _write(asset, results, now):
 def _index(now):
     try:
         return reputation.index(now)
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:  # noqa: BLE001 - reputation must never cost the network checks
         log.exception('reputation index failed')
 
@@ -101,6 +103,8 @@ def _index(now):
 def _reputation(ip, now, idx=None):
     try:
         return reputation.evaluate_asset(ip, now, idx)
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:  # noqa: BLE001
         log.exception('reputation check failed for %s', ip.value)
         return []
