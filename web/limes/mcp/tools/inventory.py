@@ -5,7 +5,7 @@ from django.db.models import Count, Exists, F, OuterRef, Q
 from django.utils import timezone
 from pydantic import Field
 from limes import monitor, scoring
-from limes.mcp import access, results
+from limes.mcp import access
 from limes.mcp.access import McpError
 from limes.mcp.registry import tool
 from limes.mcp.results import Cursor, Limit, RowId, Slug, iso, page, untrusted
@@ -139,7 +139,7 @@ def get_asset(caller, project: Slug, asset_id: RowId):
         'decision_reason': untrusted(a.decision_reason or None),
         'added_by': a.added_by.username if a.added_by else None, 'missed_count': a.missed_count,
         'parent_chain': _parent_chain(a),
-        'sources': [{'source': results.clean(str(s.get('source')), 60), 'evidence': untrusted(s.get('evidence')),
+        'sources': [{'source': untrusted(s.get('source')), 'evidence': untrusted(s.get('evidence')),
                      'seen_at': s.get('seen_at')} for s in a.sources or [] if isinstance(s, dict)],
         'tracking': tracking,
         'ip_addresses': [ip.address for ip in a.ip_addresses.all()],
