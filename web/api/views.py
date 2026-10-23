@@ -2910,7 +2910,9 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			qs = qs.filter(cond)
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
-			if value:
+			if field == 'scope_tier' and value == 'owned':  # the rows the Overview counts: owned, not retired
+				qs = qs.filter(scope_tier__in=('owned_root', 'owned_host')).exclude(state='retired')
+			elif value:
 				qs = qs.filter(**{field: value})
 		tag = params.get('tag')
 		if tag:

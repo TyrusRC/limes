@@ -89,12 +89,13 @@ def what_changed(project, now, score):
         # NOTE: the model keeps no timestamp for going missing or retired; last_seen (the last sighting) is the closest honest field.
         gone = owned.filter(state__in=GONE_STATES, last_seen__gte=since)
         snap = (ScoreSnapshot.objects.filter(project=project, date__lte=timezone.localtime(since).date(), score__isnull=False)
-                .order_by('-date').values_list('score', flat=True).first())
+                .order_by('-date').values_list('score', 'date').first())
+        snap, snap_date = snap or (None, None)
         out.append({'days': n, 'new_assets': new.count(), 'new_sample': _sample(new),
                     'removed_assets': gone.count(), 'removed_sample': _sample(gone),
                     'introduced': issues.filter(detected__gte=since).count(),
                     'resolved': issues.filter(status='fixed', fixed_at__gte=since).count(),
-                    'score_from': snap, 'score_to': score,
+                    'score_from': snap, 'score_from_date': snap_date, 'score_to': score,
                     'score_delta': score - snap if snap is not None and score is not None else None})
     return out
 

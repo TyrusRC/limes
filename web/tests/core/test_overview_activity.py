@@ -148,11 +148,13 @@ class WhatChangedTest(ActivityBase):
         self.assertEqual((w30['resolved'], w90['resolved']), (1, 1))
         self.assertEqual((w30['score_from'], w30['score_to'], w30['score_delta']), (700, 765, 65))
         self.assertEqual((w90['score_from'], w90['score_delta']), (600, 165))
+        self.assertEqual((w30['score_from_date'], w90['score_from_date']), (today - days(31), today - days(91)))
 
     def test_no_snapshot_or_score(self):
         self.root.delete()
         w30, _ = activity.what_changed(self.p, self.now, 765)
         self.assertEqual((w30['score_from'], w30['score_to'], w30['score_delta']), (None, 765, None))
+        self.assertIsNone(w30['score_from_date'])
         w30, _ = activity.what_changed(self.p, self.now, None)
         self.assertEqual((w30['score_to'], w30['score_delta']), (None, None))
         self.assertEqual((w30['new_sample'], w30['removed_sample']), ([], []))
