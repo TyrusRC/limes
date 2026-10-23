@@ -104,9 +104,9 @@ def observe_http(host, ident, get=requests.get):
 
 # ---- TLS ----
 
-def _tls_connect(host, legacy=None):
-    """Verified handshake on 443; returns the peer cert. legacy pins TLS 1.0/1.1."""
-    ctx = ssl.create_default_context()
+def tls_context(legacy=None, make=ssl.create_default_context):
+    """A verifying client context (CERT_REQUIRED, hostname checked); legacy pins TLS 1.0/1.1."""
+    ctx = make()
     if legacy:
         if not getattr(ssl, f'HAS_{legacy}', False):
             raise ContextRefused(f'{legacy} not supported by this OpenSSL')
@@ -115,6 +115,12 @@ def _tls_connect(host, legacy=None):
             ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion[legacy]
         except (ssl.SSLError, ValueError) as e:
             raise ContextRefused(str(e))
+    return ctx
+
+
+def _tls_connect(host, legacy=None):
+    """Verified handshake on 443; returns the peer cert. Resolves on its own: scan paths use safe_fetch's pinned one."""
+    ctx = tls_context(legacy)
     with socket.create_connection((host, 443), timeout=TIMEOUT) as sock:
         with ctx.wrap_socket(sock, server_hostname=host) as tls:
             return tls.getpeercert()

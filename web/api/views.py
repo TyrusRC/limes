@@ -7,7 +7,7 @@ import requests
 
 from ipaddress import IPv4Network
 from django.db import transaction
-from django.db.models import CharField, Count, F, Prefetch, Q, Value
+from django.db.models import CharField, Count, Exists, F, OuterRef, Prefetch, Q, Value
 from django.utils import timezone
 from django.template.defaultfilters import slugify
 from datetime import datetime
@@ -31,6 +31,7 @@ from startScan.models import *
 from startScan.models import EndPoint
 from startScan.asset_models import CADENCE_TIERS
 from limes.continuous import start_asm_scan
+from limes.scan_target import ensure_scan_target
 from targetApp.models import *
 from api.permissions import *
 from api.serializers import *
@@ -674,6 +675,9 @@ class AddAssets(APIView):
 
 	def post(self, request):
 		from api.asset_add import classify_asset_entry
+		from django.conf import settings
+		from limes.owned_ranges import addresses, range_addresses
+		from limes.tasks.inventory import _append_source
 		from dashboard.stats import invalidate
 		data = request.data
 		if not isinstance(data, dict):
@@ -695,6 +699,11 @@ class AddAssets(APIView):
 		set_authorized = tier == 'co_brand' and 'active_authorized' in data
 		authorized = data.get('active_authorized') in (True, 'true', 'True', '1', 1, 'on')
 		added, existing, skipped, warnings = 0, 0, 0, []
+		roots = []  # owned roots added, promoted or re-added, given a scan target once the transaction commits
+		cap = settings.RANGE_ADDRESS_CAP
+		# NOTE: `used` is read once without a lock, so two concurrent requests can both pass and exceed the cap.
+		# Upgrade: select_for_update on the project row around this read and the writes.
+		used = range_addresses(project)
 		with transaction.atomic():
 			for entry in raw:
 				if not isinstance(entry, str):
@@ -706,29 +715,60 @@ class AddAssets(APIView):
 					skipped += 1
 					warnings.append(c['error'])
 					continue
-				asset, created = Asset.objects.get_or_create(
-					project=project, kind=c['kind'], value=c['value'],
-					defaults={'scope_tier': tier, 'state': 'active'})
-				# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
-				# those are explicit decisions made through Confirm/Reject.
-				if not created and asset.scope_tier == 'rejected':
-					skipped += 1
-					warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+				# The project cap is all-or-nothing per entry, against a running total across the request.
+				# Only a missing row or a promoted candidate/dependency adds addresses: an owned row is already
+				# in `used`, a rejected or co_brand one is skipped or left alone below.
+				# NOTE: one query per CIDR (about 24 per range, 5000 entries per request at most). Upgrade:
+				# read the project's cidr tiers once before the loop.
+				new_cidrs = []
+				if c['kind'] == 'cidr' and tier != 'co_brand':
+					for v in c['values']:
+						row_tier = Asset.objects.filter(project=project, kind='cidr', value=v).values_list(
+							'scope_tier', flat=True).first()
+						if row_tier in (None, 'candidate', 'dependency'):
+							new_cidrs.append(v)
+				need = sum(addresses(v) for v in new_cidrs)
+				if need and used + need > cap:
+					skipped += len(c['values'])
+					warnings.extend(
+						f"{entry.strip()} would add {need} addresses, over this project's cap of {cap} "
+						f'({used} in use): add fewer ranges or ask the operator to raise LIMES_RANGE_ADDRESS_CAP'
+						for _ in c['values'])
 					continue
-				promote = created or asset.scope_tier in ('candidate', 'dependency')
-				if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
-					existing += 1
-					continue
-				if promote:
-					asset.scope_tier = tier
-					asset.state = 'active'
-				if set_authorized:
-					asset.active_authorized = authorized
-				asset.added_by = request.user
-				if reason:
-					asset.decision_reason = reason
-				asset.save()
-				added += 1
+				used += need
+				if c['warning'] and c['warning'] not in warnings:
+					warnings.append(c['warning'])
+				for value in c['values']:
+					asset, created = Asset.objects.get_or_create(
+						project=project, kind=c['kind'], value=value,
+						defaults={'scope_tier': tier, 'state': 'active'})
+					# Re-adding never downgrades a tier, resurrects a rejection or wipes a recorded reason;
+					# those are explicit decisions made through Confirm/Reject.
+					if not created and asset.scope_tier == 'rejected':
+						skipped += 1
+						warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+						continue
+					promote = created or asset.scope_tier in ('candidate', 'dependency')
+					if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
+						existing += 1
+						roots.append(asset)  # idempotent: re-adding links a root whose earlier clash was cleared
+						continue
+					if promote:
+						asset.scope_tier = tier
+						asset.state = 'active'
+					if set_authorized:
+						asset.active_authorized = authorized
+					asset.added_by = request.user
+					if reason:
+						asset.decision_reason = reason
+					_append_source(asset, 'manual', reason or f'added by {request.user.get_username()}')
+					asset.save()
+					added += 1
+					roots.append(asset)
+		for asset in roots:
+			warning = ensure_scan_target(asset)[1]
+			if warning:
+				warnings.append(warning)
 		invalidate(project.id)
 		return Response({'status': True, 'message': {
 			'added': added, 'existing': existing, 'skipped': skipped, 'warnings': warnings}})
@@ -767,8 +807,9 @@ class ConfirmAsset(APIView):
 		asset.added_by = request.user
 		asset.decision_reason = str(data.get('reason') or '')[:5000]
 		asset.save()
+		warning = ensure_scan_target(asset)[1]
 		invalidate(asset.project_id)
-		return Response({'status': True, 'message': 'confirmed'})
+		return Response({'status': True, 'message': f'confirmed. {warning}' if warning else 'confirmed'})
 
 
 class RejectAsset(APIView):
@@ -801,20 +842,28 @@ class RescanAsset(APIView):
 
 
 class SetAssetCadence(APIView):
-	"""How often continuous monitoring rediscovers an owned root (limes.continuous)."""
+	"""How often an owned asset is rediscovered or monitored (limes.continuous, limes.monitor, limes.owned_ranges).
+	A cadence set here is explicit: it overrides the monitor's activity rule ('off' stops monitoring)."""
 	permission_classes = [HasPermission]
 	permission_required = PERM_INITATE_SCANS_SUBSCANS
+	KINDS = ('root_domain', 'hostname', 'ip', 'cidr', 'asn')
 
 	def post(self, request):
 		asset = _load_asset(request)
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
-		if asset.kind != 'root_domain':
-			return Response({'status': False, 'message': 'cadence applies to root domains only'})
+		if asset.kind not in self.KINDS:
+			return Response({'status': False, 'message': 'cadence applies to roots, hostnames, IPs, ranges and ASNs only'})
+		if asset.scope_tier not in ('owned_root', 'owned_host'):
+			return Response({'status': False, 'message': 'cadence applies to owned assets only'})
 		tier = request.data.get('cadence_tier')
 		if not isinstance(tier, str) or tier not in dict(CADENCE_TIERS):
 			return Response({'status': False, 'message': 'unknown cadence tier'})
-		Asset.objects.filter(pk=asset.pk).update(cadence_tier=tier)
+		with transaction.atomic():
+			row = Asset.objects.select_for_update().get(pk=asset.pk)
+			row.cadence_tier = tier
+			row.enrichment = {**(row.enrichment or {}), 'cadence_explicit': True}
+			row.save(update_fields=['cadence_tier', 'enrichment'])
 		return Response({'status': True, 'message': f'cadence set to {tier}'})
 
 
@@ -2840,10 +2889,21 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 			return Asset.objects.none()
 		qs = (
 			Asset.objects.filter(project__slug=project)
-			.select_related('parent')
+			.select_related('parent', 'parent__parent')
 			.prefetch_related('technologies', 'ip_addresses', 'tags')
-			.annotate(vuln_count=Count('vulnerabilities', distinct=True))
+			.annotate(vuln_count=Count('vulnerabilities', distinct=True),
+					  has_target=Exists(Domain.objects.filter(project=OuterRef('project'), name=OuterRef('value'))))
 		)
+		source = params.get('source')
+		if source:
+			from limes.monitor import FOUND_BY
+			raw = [k for k, label in FOUND_BY.items() if label == source]
+			cond = Q(pk__in=[])  # an unknown label matches nothing
+			for name in raw:
+				cond |= Q(sources__contains=[{'source': name}])
+			if source == 'manual':  # the label rule of monitor.found_by: no sources and added by a user
+				cond |= Q(sources=[], added_by__isnull=False)
+			qs = qs.filter(cond)
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
 			if value:
@@ -2865,10 +2925,10 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		direction = self.request.GET.get('order[0][dir]', 'asc')
 		# No checkbox column in A2: DataTables column index -> model field.
 		colmap = {'0': 'value', '1': 'kind', '2': 'scope_tier', '3': 'state',
-				  '4': 'http_status', '8': 'last_seen', '10': 'confidence'}
+				  '4': 'http_status', '8': 'last_seen', '10': 'confidence', '12': 'last_resolved_at'}
 		field = colmap.get(col, 'value')
-		if field == 'confidence':
-			f = F('confidence')
+		if field in ('confidence', 'last_resolved_at'):
+			f = F(field)
 			return qs.order_by(f.desc(nulls_last=True) if direction == 'desc' else f.asc(nulls_last=True), 'id')
 		return qs.order_by(('-' if direction == 'desc' else '') + field, 'id')
 

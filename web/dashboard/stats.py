@@ -15,7 +15,8 @@ OWNED = ('owned_root', 'owned_host')
 SEVERITY_FIELDS = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
 CHANGE_LABELS = {'issue_new': 'New issue', 'issue_fixed': 'Fixed', 'issue_regressed': 'Came back',
                  'score_dropped': 'Score dropped', 'score_changed': 'Score changed', 'waiver_expired': 'Waiver expired',
-                 'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed'}
+                 'asset_missing': 'Asset missing', 'asset_auto_confirmed': 'Auto-confirmed',
+                 'asset_new': 'New asset'}
 
 
 def _key(project_id):

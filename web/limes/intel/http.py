@@ -1,12 +1,14 @@
 """Polite JSON fetches from passive third-party providers. Never contacts a target.
 
-NOTE: rate state is per process (prefork workers each keep their own); crt.sh is often
-slow or down. Upgrade path: a shared rate limiter in Redis and a local CT mirror/certstream.
+NOTE: crt.sh is often slow or down. Upgrade path: a local CT mirror/certstream. Rate limits are shared
+across workers through the cache (see ratelimit).
 """
 import logging
 import time
 
 import requests
+
+from limes.intel import ratelimit
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +16,17 @@ TIMEOUT = 30
 RETRIES = 2
 MIN_INTERVAL = {'crtsh': 5.0, 'internetdb': 1.0, 'ripestat': 0.25}
 HEADERS = {'User-Agent': 'Limes-ASM'}
-_last = {}
 
 
-def get_json(url, *, provider, session=requests, clock=time.monotonic, sleep=time.sleep):
-    """(status, parsed JSON | None); (None, None) after retries. Never raises."""
+def get_json(url, *, provider, session=requests, clock=time.time, sleep=time.sleep):
+    """(status, parsed JSON | None); (None, None) after retries or when the provider is saturated. Never raises."""
     for attempt in range(RETRIES + 1):
-        wait = MIN_INTERVAL.get(provider, 1.0) - (clock() - _last.get(provider, float('-inf')))
+        wait = ratelimit.reserve(provider, MIN_INTERVAL.get(provider, 1.0), clock())
+        if wait is None:  # provider saturated: same outcome as exhausted retries, without a long sleep
+            logger.warning(f'{provider}: rate-limit slots exhausted, skipping')
+            return None, None
         if wait > 0:
             sleep(wait)
-        _last[provider] = clock()
         try:
             resp = session.get(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=False)
         except requests.RequestException as e:

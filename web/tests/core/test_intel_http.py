@@ -1,9 +1,11 @@
+from datetime import date
 from unittest import mock
 
 import requests
+from django.core.cache import cache
 from django.test import SimpleTestCase
 
-from limes.intel import domains, http
+from limes.intel import domains, http, ratelimit
 
 
 class RegistrableTest(SimpleTestCase):
@@ -44,7 +46,7 @@ class Session:
 
 class GetJsonTest(SimpleTestCase):
     def setUp(self):
-        http._last.clear()
+        cache.clear()
         self.now, self.sleeps = [0.0], []
 
     def clock(self):
@@ -56,6 +58,12 @@ class GetJsonTest(SimpleTestCase):
 
     def get(self, session, provider='internetdb'):
         return http.get_json('https://x/', provider=provider, session=session, clock=self.clock, sleep=self.sleep)
+
+    def test_saturated_provider_returns_busy_without_sleeping(self):
+        s = Session(Resp(200, {}))
+        with mock.patch.object(http.ratelimit, 'reserve', return_value=None), self.assertLogs('limes.intel.http', 'WARNING'):
+            self.assertEqual(self.get(s), (None, None))
+        self.assertEqual((s.calls, self.sleeps), ([], []))
 
     def test_success_uses_timeout_and_user_agent(self):
         s = Session(Resp(200, {'a': 1}))
@@ -101,3 +109,51 @@ class GetJsonTest(SimpleTestCase):
         self.get(s, provider='crtsh')
         self.get(s, provider='crtsh')
         self.assertIn(5.0, self.sleeps)
+
+
+class BrokenCache:
+    def add(self, *a, **k):
+        raise ConnectionError('redis down')
+
+    incr = add
+
+
+class RateLimitTest(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+        ratelimit._local.clear()
+
+    def test_reserve_spaces_calls_across_processes(self):
+        self.assertAlmostEqual(ratelimit.reserve('internetdb', 1.0, now=100.2), 0.8)
+        self.assertAlmostEqual(ratelimit.reserve('internetdb', 1.0, now=100.2), 1.8)
+        self.assertAlmostEqual(ratelimit.reserve('ripestat', 1.0, now=100.2), 0.8)  # providers are independent
+
+    def test_slots_never_closer_than_interval(self):
+        fire = [100.9 + ratelimit.reserve('p', 1.0, now=100.9), 101.0 + ratelimit.reserve('p', 1.0, now=101.0)]
+        self.assertGreaterEqual(fire[1] - fire[0], 1.0)
+
+    def test_saturated_returns_none(self):
+        for _ in range(ratelimit.SLOTS):
+            self.assertIsNotNone(ratelimit.reserve('p', 1.0, now=50.0))
+        self.assertIsNone(ratelimit.reserve('p', 1.0, now=50.0))
+
+    def test_reserve_falls_back_locally_when_cache_is_down(self):
+        ratelimit._warned = False
+        with self.assertLogs('limes.intel.ratelimit', 'WARNING') as logs:
+            self.assertEqual(ratelimit.reserve('p', 1.0, now=10.0, cache=BrokenCache()), 0)
+        self.assertIn('per-process spacing', logs.output[0])
+        self.assertAlmostEqual(ratelimit.reserve('p', 1.0, now=10.2, cache=BrokenCache()), 0.8)
+
+    def test_take_daily_and_per_tick(self):
+        self.assertTrue(all(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 1)) for _ in range(5000)))
+        self.assertFalse(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 1)))
+        self.assertTrue(ratelimit.take_daily('internetdb', 5000, today=date(2026, 1, 2)))
+        self.assertEqual(ratelimit.per_tick(5000), 4)
+        self.assertEqual(ratelimit.per_tick(10000), 7)
+        self.assertEqual(ratelimit.per_tick(1), 1)
+
+    def test_take_daily_fails_closed_when_cache_is_down(self):
+        ratelimit._warned = False
+        with self.assertLogs('limes.intel.ratelimit', 'WARNING') as logs:
+            self.assertFalse(ratelimit.take_daily('internetdb', 5000, cache=BrokenCache()))
+        self.assertIn('failing closed', logs.output[0])

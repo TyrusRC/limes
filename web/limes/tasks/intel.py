@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime, timedelta
 
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -39,8 +40,13 @@ def _fresh(asset, key, now):
 
 
 def _store(asset, key, data, now):
-    asset.enrichment = {**(asset.enrichment or {}), key: {**data, 'fetched_at': now.isoformat()}}
-    asset.save(update_fields=['enrichment'])
+    """Write one enrichment key, merged into the row as stored now (locked), so a concurrent write of another key
+    (a cadence set by the user, the monitor's status) is never lost to this caller's stale copy."""
+    with transaction.atomic():
+        row = Asset.objects.select_for_update().only('enrichment').get(pk=asset.pk)
+        row.enrichment = {**(row.enrichment or {}), key: {**data, 'fetched_at': now.isoformat()}}
+        row.save(update_fields=['enrichment'])
+    asset.enrichment = row.enrichment
 
 
 def run_crtsh(project, root, get=http.get_json):

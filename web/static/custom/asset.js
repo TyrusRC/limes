@@ -38,6 +38,30 @@ function asset_post(url, body) {
 	});
 }
 
+var ASSET_MONITORABLE = ['root_domain', 'hostname', 'ip', 'cidr', 'asn'];
+
+function asset_owned(a) {
+	return a.scope_tier === 'owned_root' || a.scope_tier === 'owned_host';
+}
+
+function asset_when(iso) {
+	return iso ? String(iso).slice(0, 16).replace('T', ' ') + ' UTC' : '';
+}
+
+// "Monitored" cell: interval and next due, "off", or the refusal/limit reason. Everything goes through asset_esc.
+function asset_monitor_html(a) {
+	if (!asset_owned(a) || ASSET_MONITORABLE.indexOf(a.kind) === -1) return '';
+	var m = a.monitor || {};
+	if (a.cadence_tier === 'off') return 'off';
+	if (m.status === 'refused') return '<span class="l-monitor-bad">Refused: ' + asset_esc(m.reason || 'no reason given') + '</span>';
+	if (m.status === 'range_sweep') return '<span class="l-muted">Range sweep</span>';
+	if (m.status === 'enumeration_off') return '<span class="l-muted">' + asset_esc(m.reason) + '</span>';
+	if (!m.interval) return '';
+	var due = m.next_due ? 'next ' + asset_when(m.next_due) : 'not checked yet';
+	var note = m.status && m.status !== 'ok' ? '<br><span class="l-muted">' + asset_esc(m.status + (m.reason ? ': ' + m.reason : '')) + '</span>' : '';
+	return asset_esc(m.interval) + '<br><span class="l-muted">' + asset_esc(due) + '</span>' + note;
+}
+
 function asset_actions(row) {
 	var id = Number(row.id), html = '';
 	if (row.scope_tier === 'candidate' || row.scope_tier === 'dependency') {
@@ -45,7 +69,10 @@ function asset_actions(row) {
 		html += '<button class="btn btn-xs btn-soft-danger me-1" onclick="reject_asset(' + id + ')">Reject</button>';
 	}
 	if (row.kind === 'root_domain') {
-		html += '<button class="btn btn-xs btn-soft-primary" onclick="rescan_asset(' + id + ')">Rescan</button>';
+		html += '<button class="btn btn-xs btn-soft-primary me-1" onclick="rescan_asset(' + id + ')">Rescan</button>';
+	}
+	if (asset_owned(row) && ASSET_MONITORABLE.indexOf(row.kind) !== -1 && row.cadence_tier !== 'off') {
+		html += '<button class="btn btn-xs btn-soft-secondary" onclick="stop_monitoring(' + id + ')">Stop monitoring</button>';
 	}
 	return html;
 }
@@ -75,6 +102,10 @@ function reject_asset(id) {
 	asset_run_action('reject', id, {reason: reason});
 }
 
+function stop_monitoring(id) {
+	asset_run_action('cadence', id, {cadence_tier: 'off'});
+}
+
 function rescan_asset(id) {
 	asset_run_action('rescan', id);
 }
@@ -84,7 +115,7 @@ var ASSET_CADENCES = [['crown_jewel', 'Crown jewel (daily)'], ['standard', 'Stan
 
 // How often continuous monitoring rediscovers an owned root.
 function asset_cadence_html(a) {
-	if (a.kind !== 'root_domain') return '';
+	if (!asset_owned(a) || ASSET_MONITORABLE.indexOf(a.kind) === -1) return '';
 	var opts = ASSET_CADENCES.map(function(c) {
 		return '<option value="' + c[0] + '"' + (a.cadence_tier === c[0] ? ' selected' : '') + '>' + c[1] + '</option>';
 	}).join('');
@@ -97,6 +128,7 @@ function set_asset_cadence(id) {
 	var body = {asset_id: Number(id), project: asset_project(), cadence_tier: document.getElementById('asset_cadence').value};
 	asset_post('/api/action/asset/cadence/', body).then(function(data) {
 		asset_toast(data.message);
+		if (data.status) asset_reload();
 	}).catch(function() {
 		asset_toast('Request failed.');
 	});
@@ -258,6 +290,9 @@ function get_asset_modal(id) {
 			'<div class="l-meta-row mt-0"><span class="badge">' + asset_esc(a.kind) + '</span><span class="badge">' + asset_esc(a.scope_tier) +
 			'</span><span class="badge">' + asset_esc(a.state) + '</span><span>' + asset_esc(a.vuln_count) + ' vulnerabilities</span></div>' +
 			(a.decision_reason ? '<p class="mb-0"><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
+			'<p class="mb-0"><b>Monitored</b> ' + (asset_monitor_html(a) || '<span class="l-muted">not monitored</span>').replace(/<br>/g, ' ') +
+			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
+			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
 			asset_cadence_html(a) +
 			asset_risk_html(a.risk) + asset_checks_html(a.risk_checks) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
 			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
@@ -281,14 +316,15 @@ function show_add_asset_modal() {
 	asset_modal_wide(false);
 	$('#modal_title').text('Add assets');
 	$('#modal-content').html(
-		'<label class="form-label" for="asset_entries">Domains, hosts, IPs or CIDRs (one per line or comma separated)</label>' +
+		'<label class="form-label" for="asset_entries">Domains, hosts, IPs, CIDRs, start\u2013end ranges (1.2.3.0-1.2.3.255) or ASNs (AS12345); one per line or comma separated</label>' +
 		'<textarea id="asset_entries" class="form-control mb-2" rows="6" placeholder="example.com&#10;app.example.com&#10;203.0.113.10"></textarea>' +
 		'<label class="form-label" for="asset_csv">Or load a CSV / text file</label>' +
 		'<input type="file" id="asset_csv" class="form-control mb-2" accept=".csv,.txt,text/csv,text/plain">' +
 		'<label class="form-label" for="asset_tier">Scope tier</label>' +
 		'<select id="asset_tier" class="form-select mb-2">' +
-		'<option value="owned_host">Owned host / IP / CIDR</option><option value="owned_root">Owned root domain</option>' +
+		'<option value="owned_host">Host: monitored only</option><option value="owned_root">Owned root: discovers subdomains</option>' +
 		'<option value="co_brand">Co-brand host (passive unless authorized)</option></select>' +
+		'<p class="l-hint mb-2"><b>A host added alone is watched, but its subdomains are not discovered.</b> Add the domain as an owned root to find its subdomains.</p>' +
 		'<label class="form-label" for="asset_reason">Reason (audited)</label>' +
 		'<input type="text" id="asset_reason" class="form-control mb-2" maxlength="5000">' +
 		'<div id="asset_add_result"></div>'

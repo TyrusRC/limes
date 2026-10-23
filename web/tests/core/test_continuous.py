@@ -124,19 +124,11 @@ class DispatchTest(Base):
         self.assertEqual(kw['scan_type'], LIVE_SCAN)  # LIVE_SCAN: initiate_scan uses scan_history_id as given
 
     def test_concurrent_tick_does_not_dispatch(self):
-        from django.db import connections
         self.root('a.com')
-        other = connections['default'].copy()  # a second session, like a parallel worker
-        try:
-            with other.cursor() as c:
-                c.execute('SELECT pg_advisory_lock(%s)', [continuous.DISPATCH_LOCK])
+        with continuous.tick_lock('dispatch_due_scans') as got:  # another worker's tick holds it
+            self.assertTrue(got)
             self.assertEqual(continuous.dispatch_due_scans(), {'dispatched': 0, 'skipped': 0, 'reason': 'locked'})
             self.apply_async.assert_not_called()
-        finally:
-            # unlock explicitly: Postgres frees a closed session's locks asynchronously, so a bare close races
-            with other.cursor() as c:
-                c.execute('SELECT pg_advisory_unlock(%s)', [continuous.DISPATCH_LOCK])
-            other.close()
         self.assertEqual(continuous.dispatch_due_scans()['dispatched'], 1)
 
     def test_next_tick_never_redispatches_the_same_root(self):
@@ -205,3 +197,58 @@ class AgingTest(TestCase):
             a = self.asset(state, state, 200)
             a.mark_missing_or_seen(True)
             self.assertEqual(self.state(a), 'active', state)
+
+
+class TickLockTest(TestCase):
+    """One running tick per task across workers, through Redis (owner token + TTL), not a Postgres session lock:
+    behind pgbouncer's transaction pooling, lock and unlock can reach different server connections."""
+    NAME = 'monitor_assets'
+    KEY = 'limes:tick:monitor_assets'
+
+    def setUp(self):
+        from django_redis import get_redis_connection
+        self.redis = get_redis_connection('default')
+        self.redis.delete(self.KEY)
+        self.addCleanup(self.redis.delete, self.KEY)
+
+    def test_second_holder_refused_until_released(self):
+        with continuous.tick_lock(self.NAME) as first:
+            with continuous.tick_lock(self.NAME) as second:
+                self.assertEqual((first, second), (True, False))
+            self.assertTrue(self.redis.exists(self.KEY))  # the refused holder never releases the other's lock
+        with continuous.tick_lock(self.NAME) as again:
+            self.assertTrue(again)  # a released lock is free for the next tick
+        from limes.celery_routing import TASK_PLAN
+        with continuous.tick_lock(self.NAME):
+            self.assertLessEqual(self.redis.ttl(self.KEY), TASK_PLAN[self.NAME][1])  # TTL = the hard time limit
+            self.assertGreater(self.redis.ttl(self.KEY), TASK_PLAN[self.NAME][1] - 5)
+
+    def test_dead_holders_lock_expires(self):
+        import time
+        self.redis.lock(self.KEY, timeout=0.05).acquire()  # a worker that was killed: never released
+        with continuous.tick_lock(self.NAME) as got:
+            self.assertFalse(got)
+        time.sleep(0.15)
+        with continuous.tick_lock(self.NAME) as got:
+            self.assertTrue(got)
+
+    def test_stale_release_is_refused(self):
+        with continuous.tick_lock(self.NAME) as got:
+            self.assertTrue(got)
+            self.redis.delete(self.KEY)  # our TTL ran out meanwhile ...
+            other = self.redis.lock(self.KEY, timeout=60)
+            self.assertTrue(other.acquire(blocking=False))  # ... and another tick took the lock
+        self.assertTrue(other.owned())  # our late release did not remove the new holder's lock
+        other.release()
+
+    def test_redis_down_reads_locked(self):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        with mock.patch('limes.continuous.get_redis_connection', side_effect=RedisConnectionError('down')):
+            with continuous.tick_lock(self.NAME) as got:
+                self.assertFalse(got)
+        broken = mock.Mock()
+        broken.lock.return_value.acquire.side_effect = RedisConnectionError('down')
+        with mock.patch('limes.continuous.get_redis_connection', return_value=broken):
+            with continuous.tick_lock(self.NAME) as got:
+                self.assertFalse(got)
+        broken.lock.return_value.release.assert_not_called()

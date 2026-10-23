@@ -1,10 +1,12 @@
+from datetime import timedelta
 from unittest import mock
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
 from dashboard.views import on_user_logged_in
 from rest_framework.test import APIClient
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from dashboard.models import Project
 from startScan.models import Asset
 
@@ -99,6 +101,74 @@ class AssetListApiTest(TestCase):
         r = self.c.get(f'/api/listDatatableAsset/{self.root.id}/', {'project': 'p1'})
         self.assertEqual(r.json()['enrichment']['ripestat']['asn'], '13335')
 
+    def test_found_by_and_source_filter(self):
+        def host(value, src):
+            return Asset.objects.create(project=self.p, kind='hostname', value=value, scope_tier='owned_host',
+                                        sources=[{'source': src, 'evidence': 'e'}] if src else [])
+        host('ct.x.com', 'crtsh')
+        host('man.x.com', 'manual')
+        host('dns.x.com', 'dns')
+        host('weird.x.com', 'mystery')
+        self.assertEqual(self._vals(project='p1', source='CT'), {'ct.x.com'})
+        self.assertEqual(self._vals(project='p1', source='manual'), {'man.x.com'})
+        self.assertEqual(self._vals(project='p1', source='scan'), {'dns.x.com'})
+        self.assertEqual(self._vals(project='p1', source='nope'), set())
+        rows = {r['value']: r['found_by'] for r in self._get(project='p1').json()}
+        self.assertEqual((rows['ct.x.com'], rows['weird.x.com'], rows['a.x.com']), (['CT'], ['other'], ['target']))
+
+    def test_monitor_state_shape(self):
+        now = timezone.now()
+        Asset.objects.create(project=self.p, kind='hostname', value='live.x.com', scope_tier='owned_host',
+                             last_resolved_at=now - timedelta(hours=2),
+                             enrichment={'monitor': {'active': True, 'status': 'ok'}})
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS64500', scope_tier='owned_host',
+                                   enrichment={'asn': {'status': 'refused', 'reason': 'too many addresses'}})
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='203.0.113.0/24', scope_tier='owned_host', parent=asn)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        live = rows['live.x.com']
+        self.assertEqual(live['interval'], '24h')
+        due = parse_datetime(live['next_due']) - now
+        self.assertAlmostEqual(due.total_seconds() / 3600, 22, delta=0.1)
+        self.assertEqual((rows['AS64500']['status'], rows['AS64500']['reason']), ('refused', 'too many addresses'))
+        self.assertEqual(rows['203.0.113.0/24']['status'], 'enumeration_off')  # LIMES_RANGE_ENUMERATION defaults off
+        self.assertEqual(rows['a.x.com']['interval'], '30d')  # never active: monthly
+        self.assertEqual(rows['b.x.com']['interval'], None)  # a candidate is not monitored
+
+    def test_monitor_state_root_scan_cadence_and_off(self):
+        from targetApp.models import Domain
+        now = timezone.now()
+        Domain.objects.create(project=self.p, name='x.com', insert_date=now)  # x.com now has a scan target
+        Asset.objects.filter(pk=self.root.pk).update(cadence_tier='standard', last_resolved_at=now - timedelta(days=1))
+        Asset.objects.create(project=self.p, kind='hostname', value='off.x.com', scope_tier='owned_host',
+                             cadence_tier='off', last_resolved_at=now)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        root = rows['x.com']
+        self.assertEqual(root['interval'], '7d')  # the scan cadence, not the monitor's active/inactive rule
+        self.assertAlmostEqual((parse_datetime(root['next_due']) - now).total_seconds() / 86400, 6, delta=0.01)
+        self.assertEqual((rows['off.x.com']['interval'], rows['off.x.com']['next_due']), (None, None))
+
+    def test_source_manual_includes_added_by_without_sources(self):
+        Asset.objects.create(project=self.p, kind='hostname', value='hand.x.com', scope_tier='owned_host', added_by=self.user)
+        self.assertIn('hand.x.com', self._vals(project='p1', source='manual'))
+        self.assertNotIn('a.x.com', self._vals(project='p1', source='manual'))
+        rows = {r['value']: r['found_by'] for r in self._get(project='p1').json()}
+        self.assertEqual(rows['hand.x.com'], ['manual'])
+
+    def test_swept_ip_is_a_range_sweep(self):
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='203.0.113.0/24', scope_tier='owned_host')
+        Asset.objects.create(project=self.p, kind='ip', value='203.0.113.9', scope_tier='owned_host', parent=cidr)
+        Asset.objects.create(project=self.p, kind='ip', value='203.0.113.10', scope_tier='owned_host',
+                             sources=[{'source': 'cidr', 'evidence': 'x'}])
+        Asset.objects.create(project=self.p, kind='ip', value='198.51.100.1', scope_tier='owned_host')
+        with override_settings(RANGE_ENUMERATION=True):
+            rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        self.assertEqual((rows['203.0.113.9']['status'], rows['203.0.113.9']['interval']), ('range_sweep', None))
+        # no live range above it: the monitor covers it, like any other IP
+        for v in ('203.0.113.10', '198.51.100.1'):
+            self.assertEqual(rows[v]['interval'], '30d', v)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}  # enumeration off
+        self.assertEqual(rows['203.0.113.9']['interval'], '30d')
+
     def test_no_n_plus_one(self):
         # session + user + asset(+parent join, vuln count) + 3 prefetches
         with self.assertNumQueries(6):
@@ -108,7 +178,13 @@ class AssetListApiTest(TestCase):
         a.tags.create(name='t1')
         a.technologies.create(name='nginx')
         a.ip_addresses.create(address='1.2.3.4')
-        with self.assertNumQueries(6):  # same count with one more row: does not scale
+        # an IP swept from a range that came from an ASN: its monitor state reads parent and grandparent
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS64500', scope_tier='owned_host')
+        rng = Asset.objects.create(project=self.p, kind='cidr', value='198.51.100.0/24',
+                                   scope_tier='owned_host', parent=asn)
+        Asset.objects.create(project=self.p, kind='ip', value='198.51.100.7', scope_tier='owned_host',
+                             parent=rng, sources=[{'source': 'cidr', 'evidence': '198.51.100.0/24'}])
+        with self.assertNumQueries(6):  # same count with more rows: does not scale
             rows = self._get(project='p1').json()
         c = next(r for r in rows if r['value'] == 'c.x.com')
         self.assertEqual((c['tags'], c['technologies'], c['ip_addresses'], c['vuln_count']),
@@ -150,6 +226,60 @@ class AddAssetsApiTest(TestCase):
         self.inv.assert_called_with(self.p.id)
         self._post(self.admin, **body)
         self.assertEqual(Asset.objects.filter(project=self.p, value='c.x.com').count(), 1)
+
+    def test_every_entry_accounted(self):
+        text = '8.8.8.1-8.8.8.6\nexample.co.uk\nAS12345\n12345\n8.8.8.2/31'
+        msg = self._post(self.admin, project='p1', text=text, tier='owned_root').json()['message']
+        self.assertEqual((msg['added'], msg['skipped'], msg['existing']), (6, 1, 1))
+        self.assertEqual(msg['added'] + msg['existing'] + msg['skipped'], 8)
+        self.assertGreaterEqual(len(msg['warnings']), msg['skipped'])
+        self.assertTrue(any('AS12345' in w for w in msg['warnings']))
+        self.assertEqual(Asset.objects.filter(project=self.p, kind='cidr').count(), 4)
+        self.assertTrue(Asset.objects.filter(project=self.p, kind='asn', value='AS12345').exists())
+        self.assertTrue(Asset.objects.filter(project=self.p, kind='root_domain', value='example.co.uk').exists())
+
+    def test_project_range_cap(self):
+        from django.test import override_settings
+        Asset.objects.create(project=self.p, kind='cidr', value='8.8.0.0/21', scope_tier='owned_root')
+        with override_settings(RANGE_ADDRESS_CAP=4096):
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/20'], tier='owned_root').json()['message']
+            self.assertEqual((msg['added'], msg['skipped']), (0, 1))
+            self.assertIn('4096', msg['warnings'][0])
+            self.assertIn('cap of 4096', msg['warnings'][0])
+            self.assertIn('LIMES_RANGE_ADDRESS_CAP', msg['warnings'][0])
+            self.assertIn('2048', msg['warnings'][0])
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/22', '9.9.4.0/22', '9.9.8.0/22'],
+                             tier='owned_root').json()['message']
+            self.assertEqual((msg['added'], msg['skipped']), (2, 1))  # 2048 in use + two /22 fill the cap; the third is refused
+
+    def test_readding_a_rejected_range_is_not_a_cap_warning(self):
+        from django.test import override_settings
+        Asset.objects.create(project=self.p, kind='cidr', value='8.8.0.0/21', scope_tier='owned_root')
+        Asset.objects.create(project=self.p, kind='cidr', value='9.9.0.0/20', scope_tier='rejected')
+        with override_settings(RANGE_ADDRESS_CAP=4096):
+            msg = self._post(self.admin, project='p1', entries=['9.9.0.0/20', '9.9.16.0/22'],
+                             tier='owned_root').json()['message']
+        self.assertEqual((msg['added'], msg['skipped']), (1, 1))
+        self.assertTrue(any('was rejected' in w for w in msg['warnings']))
+        self.assertFalse(any('cap' in w for w in msg['warnings']))
+        self.assertEqual(Asset.objects.get(project=self.p, value='9.9.0.0/20').scope_tier, 'rejected')
+
+    def test_range_addresses_counts_owned_live_cidrs(self):
+        from limes.owned_ranges import addresses, range_addresses
+        asn = Asset.objects.create(project=self.p, kind='asn', value='AS1', scope_tier='owned_root')
+        mk = lambda v, **kw: Asset.objects.create(project=self.p, kind='cidr', value=v, **{'scope_tier': 'owned_root', **kw})
+        mk('8.8.0.0/24'); mk('8.8.1.0/24', parent=asn); mk('8.8.2.0/24', state='retired')
+        mk('8.8.3.0/24', scope_tier='candidate')
+        self.assertEqual(range_addresses(self.p), 512)
+        self.assertEqual(range_addresses(self.p, exclude_parent=asn), 256)
+        self.assertEqual((addresses('8.8.8.8'), addresses('2606:4700::/120')), (1, 256))
+
+    def test_manual_source_recorded(self):
+        self._post(self.admin, project='p1', entries=['d.x.com'], reason='because')
+        a = Asset.objects.get(project=self.p, value='d.x.com')
+        self.assertEqual((a.sources[0]['source'], a.sources[0]['evidence']), ('manual', 'because'))
+        self._post(self.admin, project='p1', entries=['e.x.com'])
+        self.assertEqual(Asset.objects.get(value='e.x.com').sources[0]['evidence'], 'added by adm')
 
     def test_readding_a_dependency_ip_promotes_it(self):
         Asset.objects.create(project=self.p, kind='ip', value='8.8.8.8', scope_tier='dependency')
@@ -401,10 +531,19 @@ class AssetCadenceApiTest(TestCase):
             self.assertEqual(self.tier(self.root), tier)
 
     def test_rejects_unknown_tier_and_non_roots(self):
+        cand = Asset.objects.create(project=self.p, kind='hostname', value='c.y.com', scope_tier='candidate')
+        cidr = Asset.objects.create(project=self.p, kind='cidr', value='93.184.216.0/28', scope_tier='owned_host')
         for body in ({'asset_id': self.root.id, 'cadence_tier': 'hourly'}, {'asset_id': self.root.id},
-                     {'asset_id': self.root.id, 'cadence_tier': ['off']}, {'asset_id': self.host.id, 'cadence_tier': 'off'}):
+                     {'asset_id': self.root.id, 'cadence_tier': ['off']}, {'asset_id': cand.id, 'cadence_tier': 'off'}):
             self.assertFalse(self._post(self.admin, **body).json()['status'], body)
-        self.assertEqual((self.tier(self.root), self.tier(self.host)), ('standard', 'standard'))
+        self.assertEqual((self.tier(self.root), self.tier(cand)), ('standard', 'standard'))
+        self.assertTrue(self._post(self.admin, asset_id=cidr.id, cadence_tier='inactive').json()['status'])
+
+    def test_hostname_cadence_is_explicit(self):
+        r = self._post(self.admin, asset_id=self.host.id, cadence_tier='off').json()
+        self.assertEqual(r, {'status': True, 'message': 'cadence set to off'})
+        self.host.refresh_from_db()
+        self.assertEqual((self.host.cadence_tier, self.host.enrichment['cadence_explicit']), ('off', True))
 
     def test_needs_scan_permission(self):
         r = self._post(self.auditor, asset_id=self.root.id, cadence_tier='off')

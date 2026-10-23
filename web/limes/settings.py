@@ -36,6 +36,14 @@ ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
 ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
+# Expand owned ranges and ASNs into per-IP child assets (PTR + InternetDB lookups). Off by default.
+# InternetDB is free for non-commercial use only; commercial use needs a Shodan enterprise license.
+# NOTE: its terms are only partly published and 1 req/s is Limes's own throttle. Upgrade path: a paid key or Limes's own scanner.
+RANGE_ENUMERATION = env.bool('LIMES_RANGE_ENUMERATION', default=False)
+# NOTE: per-project owned address cap, clamped to 1..65536 (0 or negative would silently refuse every range); raising it raises lookup volume.
+RANGE_ADDRESS_CAP = max(1, min(env.int('LIMES_RANGE_ADDRESS_CAP', default=4096), 65536))
+INTERNETDB_DAILY_BUDGET = env.int('LIMES_INTERNETDB_DAILY_BUDGET', default=5000)
+PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
 
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
@@ -226,11 +234,13 @@ CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks')
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
     'dispatch-due-scans': {'task': 'dispatch_due_scans', 'schedule': 60.0, 'options': {'expires': 55}},
+    'enumerate-ranges': {'task': 'enumerate_ranges', 'schedule': 60.0, 'options': {'expires': 55}},
+    'monitor-assets': {'task': 'monitor_assets', 'schedule': 60.0, 'options': {'expires': 55}},
     'age-assets': {'task': 'age_assets', 'schedule': 3600.0},
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
