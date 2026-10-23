@@ -282,18 +282,41 @@ class DueTest(Base):
                                    scan_status=RUNNING_TASK, start_scan_date=self.now)
         self.assertEqual(monitor.due_assets(self.now), [outside])  # b.x.com waits for the scan in progress
 
-    def test_range_swept_ips_are_left_to_the_sweep(self):
+    def test_range_swept_ips_are_left_to_a_live_sweep_only(self):
         from limes.tasks import inventory
         cidr = self.asset('cidr', '93.184.216.0/24')
         swept = self.asset('ip', PUBLIC, parent=cidr)
-        tagged = self.asset('ip', '93.184.216.35')
+        tagged = self.asset('ip', '93.184.216.35')  # a 'cidr' source but no range above it any more
         inventory._append_source(tagged, 'cidr', '93.184.216.0/24')
         tagged.save()
         manual = self.asset('ip', '93.184.216.36')
         inventory._append_source(manual, 'manual', 'added by u')
         manual.save()
-        self.assertEqual(monitor.due_assets(self.now), [manual])
-        self.assertEqual(set(monitor.monitored(self.p)), {manual})
+        with override_settings(RANGE_ENUMERATION=True):
+            self.assertEqual(set(monitor.monitored(self.p)), {tagged, manual})  # the live sweep owns `swept`
+            self.assertNotIn(swept, monitor.due_assets(self.now))
+            Asset.objects.filter(pk=cidr.pk).update(enrichment={'enum': {'status': 'refused', 'reason': 'x'}})
+            self.assertIn(swept, monitor.monitored(self.p))  # refused range: handed back to the monitor
+            Asset.objects.filter(pk=cidr.pk).update(enrichment={}, cadence_tier='off')
+            self.assertNotIn(swept, monitor.monitored(self.p))  # the user stopped the range: its IPs stop too
+            Asset.objects.filter(pk=cidr.pk).update(cadence_tier='standard')
+        with override_settings(RANGE_ENUMERATION=False):
+            self.assertIn(swept, monitor.monitored(self.p))  # enumeration switched off: the monitor covers it
+            self.assertIn(swept, monitor.due_assets(self.now))
+
+    def test_owned_host_root_with_a_scan_target_is_monitored(self):
+        from limes import continuous
+        from targetApp.models import Domain
+        Domain.objects.create(name='hosted.com', project=self.p, insert_date=timezone.now())
+        Domain.objects.create(name='scanned.com', project=self.p, insert_date=timezone.now())
+        hosted = self.asset('root_domain', 'hosted.com')  # added as a host, later scanned once from Targets
+        scanned = self.asset('root_domain', 'scanned.com', tier='owned_root')
+        self.assertNotIn(hosted, continuous.due_roots(self.now))  # the continuous scans only take owned_root
+        self.assertEqual(set(monitor.monitored(self.p)), {hosted})  # so the monitor must
+        self.assertEqual(monitor.due_assets(self.now), [hosted])
+        self.assertIsNotNone(monitor._ours(hosted))
+        self.assertIsNone(monitor._ours(scanned))
+        self.assertEqual(monitor.monitor_state(hosted)['interval'], '30d')  # the monitor's rule, not the scan's
 
     def test_limit(self):
         for i in range(3):
@@ -382,3 +405,27 @@ class BeatTest(SimpleTestCase):
         self.assertEqual(celery_routing.TASK_PLAN['monitor_assets'], (celery_routing.IO, 15 * celery_routing.MIN))
         self.assertIn('limes.monitor', settings.CELERY_IMPORTS)
         self.assertEqual((monitor.MAX_PER_TICK, monitor.TICK_BUDGET), (20, timedelta(seconds=50)))
+
+
+class ScanPathRefusalTest(Base):
+    """A host the scan path refuses (no longer resolves, or private) is never contacted, but its rows still advance:
+    the old fails are superseded with the no-answer result, as before pinning."""
+    def test_refused_host_supersedes_old_fails_without_contact(self):
+        from limes import scoring, safe_fetch
+        from limes.checks import run
+        from startScan.models import IpAddress
+        root = self.asset('root_domain', 'x.com', tier='owned_root')
+        h = self.asset('hostname', 'gone.x.com', parent=root)
+        h.ip_addresses.add(IpAddress.objects.create(address=PUBLIC))
+        old = self.now - 2 * DAY
+        for check in ('web.hsts_missing', 'tls.cert_expired'):
+            RiskCheck.objects.create(asset=h, check_id=check, status='fail', severity=3, last_checked=old)
+        self.assertTrue(any(p['issue'] == 'web.hsts_missing' for p in scoring.project_score(self.p)['top_penalties']))
+        with mock.patch.object(safe_fetch, 'resolve_vetted', return_value=(None, 'gone.x.com does not resolve')):
+            run.run_checks(self.p, root, now=self.now, observers=observers(self.calls))
+        self.assertEqual(self.calls, [])  # never contacted
+        rows = {r.check_id: r for r in h.risk_checks.all()}
+        self.assertEqual((rows['web.hsts_missing'].status, rows['tls.cert_expired'].status), ('not_applicable', 'error'))
+        self.assertTrue(all(r.last_checked == self.now for r in rows.values()))  # it rotates behind live hosts
+        self.assertEqual(len([c for c in rows if c.startswith('web.')]), 8)
+        self.assertFalse(any(p['asset'] == 'gone.x.com' for p in scoring.project_score(self.p)['top_penalties']))

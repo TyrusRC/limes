@@ -17,6 +17,7 @@ import dns.exception
 import dns.resolver
 import dns.reversename
 import validators
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -24,14 +25,16 @@ from django.utils import timezone
 from limes import scope
 from limes.alerts import events
 from limes.alerts.deliver import deliver_immediate
+from limes.alerts.issues import sync_issues
 from limes.celery import app
-from limes.checks import collect
+from limes.checks import collect, network, run
 from limes.continuous import CADENCE_INTERVALS, tick_lock
 from limes.intel import domains, http, internetdb, ratelimit, ripestat
 from limes.tasks import inventory
 from limes.tasks.intel import _store
 from startScan.inventory_migrate import normalize_host
 from dashboard.models import Project
+from dashboard.stats import invalidate
 from startScan.models import Asset, ChangeEvent
 
 logger = logging.getLogger(__name__)
@@ -263,6 +266,8 @@ def _step(asset, idb_budget, ptr_budget, get, resolve, now):
                 child.save(update_fields=['sources'])
                 child.mark_missing_or_seen(True)
                 _store(child, 'internetdb', data or {'no_data': True}, now)
+                # DB-only network checks (no contact): a range-only project has no root scan to evaluate its IPs
+                run._write(child, network.evaluate(*collect.ports_for_ip(child, now)), now)
                 if created:
                     used['new'] += 1
                     if enum['pass'] >= 1:  # a range's first sweep is silent
@@ -342,6 +347,7 @@ def _tick():
     idb_left = ratelimit.per_tick(settings.INTERNETDB_DAILY_BUDGET)
     ptr_left = ratelimit.per_tick(settings.PTR_DAILY_BUDGET)
     out = {'refreshed': 0, 'internetdb': 0, 'ptr': 0, 'new': 0}
+    touched = set()
     due = due_ranges(now)
     asn = next((a for a in due if a.kind == 'asn'), None)  # RIPEstat only: runs whatever RANGE_ENUMERATION says
     if asn is not None:
@@ -355,11 +361,24 @@ def _tick():
         if idb_left <= 0 or ptr_left <= 0:
             break
         used, finished = _step(a, idb_left, ptr_left, http.get_json, collect._resolve, now)
+        touched.add(a.project_id)
         idb_left, ptr_left = idb_left - used['internetdb'], ptr_left - used['ptr']
         for k in used:
             out[k] += used[k]
         if not finished:
             break  # budget spent, a provider failed or take_daily said no: stop for this tick
-    for pid in set(ChangeEvent.objects.filter(id__gt=last_event, kind='asset_new').values_list('project_id', flat=True)):
-        deliver_immediate(Project.objects.get(pk=pid))  # safe to repeat: each event is claimed once (notified_at)
+    # every project a step touched gets its issues synced (a range's first sweep stays silent: see issues._bucket),
+    # and every project with new events gets them delivered
+    events_for = set(ChangeEvent.objects.filter(id__gt=last_event, kind='asset_new').values_list('project_id', flat=True))
+    for pid in sorted(touched | events_for):
+        project = Project.objects.get(pk=pid)
+        for job in ((sync_issues,) if pid in touched else ()) + (deliver_immediate,):
+            try:
+                job(project)  # deliver is safe to repeat: each event is claimed once (notified_at)
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception:
+                logger.exception('enumerate_ranges %s failed for project %s', job.__name__, pid)
+        if pid in touched:
+            invalidate(pid)
     return out

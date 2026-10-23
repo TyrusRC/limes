@@ -39,14 +39,22 @@ def _pinned(ip, deadline):
             'tls': lambda host: collect.observe_tls(host, connect=safe_fetch.pinned_tls_connect(ip, deadline=deadline))}
 
 
-def _host_checks(asset, holder, now, observers, resolve, done):
+def _no_answer(asset, now):
+    """What a host that never answered gets, written without contacting it: web not_applicable (no server) and tls
+    'error' (unknown), as an unresolvable name produced before pinning. Old fails are superseded and the host
+    rotates behind live ones."""
+    return (web.evaluate({'host': asset.value, 'https': None, 'http': None})
+            + tls.evaluate({'cert': 'error', 'legacy': {}}, now))
+
+
+def _host_checks(asset, holder, now, observers, resolve, done, refused_rows=False):
     """web + tls results for one host, through observers pinned to its vetted IP. Resolves exactly once.
-    None when the host is refused: nothing is contacted and no row is written, so old rows go stale."""
+    A refused host is never contacted: it gets the no-answer rows when refused_rows (the scan path), else none."""
     ip, reason = safe_fetch.resolve_vetted(asset.value, resolve=resolve)
     if reason:
         done['refused'] = reason
-        log.info('risk checks skipped for %s: %s', asset.value, reason)
-        return None
+        log.info('risk checks: %s not contacted: %s', asset.value, reason)
+        return _no_answer(asset, now) if refused_rows else None
     deadline = safe_fetch.Deadline()
     obs = {**_pinned(ip, deadline), **(observers or {})}
     http = obs['http'](asset.value, ScanIdentity.for_domain(holder))
@@ -114,7 +122,7 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
         if clock() - start > RUN_BUDGET.total_seconds():
             break
         holder = a if a.request_headers else root
-        step(a, lambda a=a, holder=holder: _host_checks(a, holder, now, observers, resolve, {}))
+        step(a, lambda a=a, holder=holder: _host_checks(a, holder, now, observers, resolve, {}, refused_rows=True))
 
     if root.kind == 'root_domain':
         # DNS only, no contact: not capped or scope-gated

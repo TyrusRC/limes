@@ -1,6 +1,6 @@
 from datetime import timedelta
 from unittest import mock
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
 from dashboard.views import on_user_logged_in
@@ -160,10 +160,14 @@ class AssetListApiTest(TestCase):
         Asset.objects.create(project=self.p, kind='ip', value='203.0.113.10', scope_tier='owned_host',
                              sources=[{'source': 'cidr', 'evidence': 'x'}])
         Asset.objects.create(project=self.p, kind='ip', value='198.51.100.1', scope_tier='owned_host')
-        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
-        for v in ('203.0.113.9', '203.0.113.10'):
-            self.assertEqual((rows[v]['status'], rows[v]['interval']), ('range_sweep', None))
-        self.assertEqual(rows['198.51.100.1']['interval'], '30d')
+        with override_settings(RANGE_ENUMERATION=True):
+            rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}
+        self.assertEqual((rows['203.0.113.9']['status'], rows['203.0.113.9']['interval']), ('range_sweep', None))
+        # no live range above it: the monitor covers it, like any other IP
+        for v in ('203.0.113.10', '198.51.100.1'):
+            self.assertEqual(rows[v]['interval'], '30d', v)
+        rows = {r['value']: r['monitor'] for r in self._get(project='p1').json()}  # enumeration off
+        self.assertEqual(rows['203.0.113.9']['interval'], '30d')
 
     def test_no_n_plus_one(self):
         # session + user + asset(+parent join, vuln count) + 3 prefetches

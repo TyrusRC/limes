@@ -99,13 +99,13 @@ def monitor_state(asset):
         stamp = (info.get('refreshed_at') or info.get('checked_at')) if asset.kind == 'asn' else info.get('last_pass_at')
         last = last or (parse_datetime(stamp) if isinstance(stamp, str) else None)
         interval = CADENCE_INTERVALS.get(asset.cadence_tier)
-    elif asset.kind == 'ip' and (any(isinstance(x, dict) and x.get('source') == 'cidr' for x in asset.sources or [])
-                                 or (asset.parent_id is not None and asset.parent.kind == 'cidr')):
+    elif asset.kind == 'ip' and asset.parent_id is not None and range_owns(asset.parent):
         out['status'] = 'range_sweep'  # owned_ranges refreshes it, the light monitor does not (see monitored())
         interval = None
     elif asset.kind in KINDS:
         has_target = getattr(asset, 'has_target', None)
-        if asset.kind == 'root_domain' and (has_scan_target(asset) if has_target is None else has_target):
+        if asset.kind == 'root_domain' and asset.scope_tier == 'owned_root' and (
+                has_scan_target(asset) if has_target is None else has_target):
             interval = CADENCE_INTERVALS.get(asset.cadence_tier)  # the root scans' cadence
         else:
             interval = effective_interval(asset)
@@ -120,18 +120,32 @@ def monitor_state(asset):
     return out
 
 
+def range_owns(rng):
+    """True when a range is responsible for the IPs under it: it is being swept (enumeration on, owned, not retired,
+    not refused, its ASN too), or the user stopped it, so its IPs stop with it. A refused range, or one whose sweep
+    the operator switched off, hands its IPs back to the light monitor."""
+    if rng is None or rng.kind != 'cidr':
+        return False
+    chain = [rng] + ([rng.parent] if rng.parent_id is not None else [])
+    if any(r.cadence_tier == 'off' for r in chain):
+        return True
+    return (settings.RANGE_ENUMERATION and all(r.scope_tier in OWNED and r.state != 'retired' for r in chain)
+            and ((rng.enrichment or {}).get('enum') or {}).get('status') != 'refused')
+
+
 def monitored(project=None):
-    """Owned hostnames, IPs and roots, cadence not off. Roots with a scan target are left to the root scans
-    (the same test as scan_target.has_scan_target, as one subquery)."""
+    """Owned hostnames, IPs and roots, cadence not off. Owned roots with a scan target are left to the continuous
+    root scans (the same test as scan_target.has_scan_target, as one subquery); an owned_host root is never scanned
+    continuously, so the monitor keeps it even when it has a Domain. IPs under a range that owns them (range_owns)
+    are left to owned_ranges, which owns their refresh and their InternetDB/PTR budget.
+    NOTE: loads every cidr row to apply range_owns in Python. Upgrade path: store the sweep state in a column."""
     target = Domain.objects.filter(project_id=OuterRef('project_id'), name=OuterRef('value'))
     rows = Asset.objects.filter(scope_tier__in=OWNED, kind__in=KINDS).exclude(cadence_tier='off')
-    # NOTE: IPs a range sweep found (a 'cidr' source or a cidr parent) are left to owned_ranges, which owns their
-    # refresh and their InternetDB/PTR budget; with LIMES_RANGE_ENUMERATION off no such IPs are created. Upgrade
-    # path: hand them back to the monitor if a range stops being swept (set off or refused).
-    rows = rows.exclude(kind='ip', sources__contains=[{'source': 'cidr'}]).exclude(kind='ip', parent__kind='cidr')
+    ranges = Asset.objects.filter(kind='cidr').select_related('parent')
     if project is not None:
-        rows = rows.filter(project=project)
-    return rows.annotate(has_target=Exists(target)).exclude(kind='root_domain', has_target=True)
+        rows, ranges = rows.filter(project=project), ranges.filter(project=project)
+    rows = rows.exclude(kind='ip', parent_id__in=[r.id for r in ranges if range_owns(r)])
+    return rows.annotate(has_target=Exists(target)).exclude(kind='root_domain', scope_tier='owned_root', has_target=True)
 
 
 def due_assets(now, limit=MAX_PER_TICK):
@@ -159,8 +173,10 @@ def _ours(asset):
     a = Asset.objects.filter(pk=asset.pk).first()
     if a is None or a.scope_tier not in OWNED or a.kind not in KINDS or a.cadence_tier not in CADENCE_INTERVALS:
         return None
-    if a.kind == 'root_domain' and has_scan_target(a):
-        return None  # gained a scan target since it was picked: the root scans cover it
+    if a.kind == 'root_domain' and a.scope_tier == 'owned_root' and has_scan_target(a):
+        return None  # gained a scan target since it was picked: the continuous root scans cover it
+    if a.kind == 'ip' and a.parent_id is not None and range_owns(a.parent):
+        return None  # a range sweep took it over since it was picked
     return a
 
 

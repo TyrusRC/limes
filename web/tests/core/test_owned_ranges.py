@@ -387,6 +387,18 @@ class TaskTest(Base):
         _, d = self.run_task(get=Get(idb={'203.0.114.0': {'ports': [3389]}}))
         d.assert_called_once_with(self.p)
 
+    def test_swept_ip_gets_network_checks_and_issues_in_a_range_only_project(self):
+        from startScan.models import RiskCheck, TrackedIssue
+        self.root.delete()  # a project made of ranges only: no root scan will ever evaluate these IPs
+        c = self.cidr('203.0.114.0/30')
+        Asset.objects.filter(pk=c.pk).update(enrichment={'enum': {'cursor': 0, 'pass': 1, 'status': 'running'}})
+        self.run_task(get=Get(idb={'203.0.114.1': {'ports': [3389]}}))
+        ip = Asset.objects.get(project=self.p, kind='ip', value='203.0.114.1')
+        row = RiskCheck.objects.get(asset=ip, check_id='net.exposed_rdp')
+        self.assertEqual(row.status, 'fail')
+        self.assertTrue(TrackedIssue.objects.filter(asset=ip, key='net.exposed_rdp', status='open').exists())
+        self.assertEqual(Asset.objects.filter(project=self.p, kind='ip').count(), 1)  # quiet addresses stay out
+
     def test_disabled(self):
         with override_settings(CONTINUOUS_SCANS=False):
             self.assertEqual(r.enumerate_ranges()['reason'], 'disabled')
