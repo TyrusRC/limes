@@ -64,3 +64,15 @@ def _reputation(changed):
         raise
     except Exception:  # noqa: BLE001 - the downloads are done; a failed evaluation retries next tick
         logger.exception('reputation evaluation failed')
+
+
+def refresh_one(name, force=False):
+    """Operator path (manage.py refresh_feeds): fetch one feed now. The daily budget and the tick lock still apply;
+    `force` skips only the shrink and count checks."""
+    feed = sources.FEEDS[name]
+    with tick_lock('refresh_feeds') as got:
+        if not got:
+            return 'locked'
+        if not ratelimit.take_daily(f'feed:{feed.name}', _daily_limit(feed)):
+            return 'budget'
+        return store.fetch(feed, timezone.now(), SESSION, force=force)

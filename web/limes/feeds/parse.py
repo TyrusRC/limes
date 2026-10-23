@@ -37,6 +37,11 @@ def _clean(value, limit):
     return _PRINTABLE.sub('', value)[:limit] if isinstance(value, str) else ''
 
 
+# NOTE: whether Spamhaus's trailer `records` counts its own metadata line was not verifiable offline (the live
+# sample was read once, not saved), so a count equal to the entries OR the entries plus one is accepted.
+_TRAILER_SLACK = 1
+
+
 def _count(value):
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
@@ -130,7 +135,7 @@ def spamhaus_drop(blob):
         if len(out) > MAX_JSON_ROWS:
             raise ParseError('too many rows')
     return out, _meta(len(out), dropped, source_date=meta.get('source_date'), copyright=meta.get('copyright', ''),
-                      declared=meta.get('declared'))
+                      declared=meta.get('declared'), slack=_TRAILER_SLACK)
 
 
 def spamhaus_asndrop(blob):
@@ -149,7 +154,7 @@ def spamhaus_asndrop(blob):
                 dropped += 1
         if len(out) > MAX_JSON_ROWS:
             raise ParseError('too many rows')
-    return out, _meta(len(out), dropped, source_date=source_date, declared=declared)
+    return out, _meta(len(out), dropped, source_date=source_date, declared=declared, slack=_TRAILER_SLACK)
 
 
 def feodo(blob):
@@ -194,8 +199,10 @@ def kev(blob):
             continue
         out[cve] = {'added': _date(rec.get('dateAdded')), 'due': _date(rec.get('dueDate')),
                     'ransomware': rec.get('knownRansomwareCampaignUse') == 'Known'}
-    return out, _meta(len(out), dropped, source_date=_ts(data.get('dateReleased')),
-                      declared=_count(data.get('count')))
+    meta = _meta(len(out), dropped, source_date=_ts(data.get('dateReleased')), seen=len(vulns))
+    if _count(data.get('count')) is not None:  # a dropped `count` field must not lock the feed out
+        meta['declared'] = data['count']  # CISA's count is the number of vulnerability records, duplicates included
+    return out, meta
 
 
 def _gunzip_lines(blob):

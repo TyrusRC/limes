@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+import socket
 import threading
 import time
 from datetime import timedelta
@@ -21,9 +22,10 @@ logger = logging.getLogger(__name__)
 MAX_BYTES = 50 * 1024 * 1024
 CHUNK = 64 * 1024
 TIMEOUT = 30
-DEADLINE = 180  # seconds for the whole download, so a slow drip cannot hold a worker
+DEADLINE = 180  # seconds for the whole download (a module value so tests can shorten it)
 SHRINK_FLOOR = 50  # below this many previous entries a smaller copy is not treated as a collapse
 SHRINK_RATIO = 0.5
+SHRINK_ACCEPT_AFTER = 3  # identical shrunk copies rejected in a row before the smaller one is believed
 MAX_REDIRECTS = 3
 HEADERS = {'User-Agent': 'Limes-ASM'}
 _REDIRECTS = (301, 302, 303, 307, 308)
@@ -112,10 +114,10 @@ def _download(feed, state, session):
                 continue
             if code != 200:
                 return code, resp.headers, b''
-            body = bytearray()
-            # The deadline is total wall-clock: the timer closes the connection even while a read is blocked on a
-            # server that drips one byte at a time (the per-chunk check alone would never fire).
-            timer = threading.Timer(DEADLINE, resp.close)
+            body, expired = bytearray(), threading.Event()
+            # The deadline is total wall-clock. close() does not wake a read blocked on a slow server, so the
+            # timer shuts the socket down (the blocked recv returns at once) and then closes the response.
+            timer = threading.Timer(DEADLINE, _abort, (resp, _socket_of(resp), expired))
             timer.daemon = True
             timer.start()
             try:
@@ -123,20 +125,51 @@ def _download(feed, state, session):
                     body += chunk
                     if len(body) > MAX_BYTES:
                         raise FetchError('TooLarge')
-                    if time.monotonic() - started > DEADLINE:
+                    if expired.is_set() or time.monotonic() - started > DEADLINE:
                         raise FetchError('Timeout')
-            except FetchError:
+            except (FetchError, SoftTimeLimitExceeded):
                 raise
             except Exception:
-                if time.monotonic() - started >= DEADLINE:
+                if expired.is_set() or time.monotonic() - started >= DEADLINE:
                     raise FetchError('Timeout') from None
                 raise
             finally:
                 timer.cancel()
+            if expired.is_set():  # a close-delimited body ends quietly when the socket is shut down
+                raise FetchError('Timeout')
             return code, resp.headers, bytes(body)
         finally:
             resp.close()
     raise FetchError('TooManyRedirects')
+
+
+def _socket_of(resp):
+    """The socket under a streamed requests response, or None (a fake). urllib3 2.x detaches it from
+    raw.connection once headers are read, so walk http.client's buffered reader: raw._fp.fp.raw._sock."""
+    for path in (('raw', '_fp', 'fp', 'raw', '_sock'), ('raw', 'connection', 'sock')):
+        obj = resp
+        try:
+            for attr in path:
+                obj = getattr(obj, attr)
+        except AttributeError:
+            continue
+        if isinstance(obj, socket.socket):
+            return obj
+    return None
+
+
+def _abort(resp, sock, expired):
+    expired.set()
+    if sock is not None:
+        try:
+            # socket.socket.shutdown directly: SSLSocket.shutdown would drop its SSL object under the reader
+            socket.socket.shutdown(sock, socket.SHUT_RDWR)
+        except OSError:
+            pass
+    try:
+        resp.close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _write(path, blob):
@@ -147,19 +180,31 @@ def _write(path, blob):
     os.replace(tmp, path)
 
 
-def _problem(feed, state, meta):
-    """Why a parsed copy must not replace the last good one, or ''."""
+def _problem(feed, state, meta, sha, force=False):
+    """Why a parsed copy must not replace the last good one, or ''. Counts consecutive identical shrunk copies on
+    `state`. `force` skips the structure and shrink checks only; garbage and empty pages stay refused."""
     rows, dropped = meta['rows'], meta['dropped']
     if rows == 0 and (dropped > 0 or not feed.allow_empty):
         return 'EmptyFeed'  # also an error page of garbage lines on feeds that may legitimately be empty
-    if 'declared' in meta and meta['declared'] != rows + dropped:
-        return 'CountMismatch'  # truncated, or the publisher's trailer/count is missing
-    if state.entries >= SHRINK_FLOOR and state.last_good_at and rows < SHRINK_RATIO * state.entries:
-        return 'shrank'
+    if force:
+        return ''
+    declared = meta.get('declared', 'absent')
+    if declared != 'absent':
+        seen = meta.get('seen', rows + dropped)
+        if declared is None or not 0 <= declared - seen <= meta.get('slack', 0):
+            return 'CountMismatch'  # truncated, or the publisher's trailer is missing
+    if not feed.allow_empty and state.entries >= SHRINK_FLOOR and state.last_good_at \
+            and rows < SHRINK_RATIO * state.entries:
+        prior = state.shrank_count if state.shrank_sha256 == sha else 0
+        if prior < SHRINK_ACCEPT_AFTER:
+            state.shrank_count, state.shrank_sha256 = prior + 1, sha
+            return 'shrank'
+        # NOTE: a feed that really shrank is believed after the same copy was served on 4 fetches in a row (3 days
+        # for 24 h feeds). Operator override: `manage.py refresh_feeds <name> --force`.
     return ''
 
 
-def fetch(feed, now, session=requests):
+def fetch(feed, now, session=requests, force=False):
     """One conditional GET of `feed`; returns and records the status (ok|not_modified|error|rejected)."""
     state, _ = FeedState.objects.get_or_create(name=feed.name, defaults={'url': feed.url})
     state.url, state.fetched_at = feed.url, now
@@ -173,13 +218,15 @@ def fetch(feed, now, session=requests):
             raise FetchError(f'HTTP {code}')
         else:
             data, meta = parse.PARSERS[feed.parser](body)
-            problem = _problem(feed, state, meta)
+            sha = hashlib.sha256(body).hexdigest()
+            problem = _problem(feed, state, meta, sha, force)
             if problem:
                 state.status, state.error = 'rejected', problem
             else:
                 _write(feed_path(feed.name), body)
                 tag = lambda k: headers.get(k, '') if _HEADER_VALUE.match(headers.get(k, '')) else ''  # noqa: E731
-                state.sha256, state.entries = hashlib.sha256(body).hexdigest(), meta['rows']
+                state.sha256, state.entries = sha, meta['rows']
+                state.shrank_count, state.shrank_sha256 = 0, ''
                 state.etag, state.last_modified = tag('ETag'), tag('Last-Modified')
                 state.source_date, state.last_good_at = meta.get('source_date'), now
                 state.status, state.error = 'ok', ''

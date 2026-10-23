@@ -1,13 +1,18 @@
 import gzip
+import http.server
+import json
 import logging
 import os
 import shutil
 import tempfile
+import threading
+import time
 from datetime import timedelta
 from unittest import mock
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
@@ -165,6 +170,16 @@ class ParserTests(SimpleTestCase):
         self.assertEqual(meta['declared'], 3)
         self.assertIsNone(parse.spamhaus_drop(b'{"cidr":"1.19.0.0/16","sblid":"SBL4"}\n')[1]['declared'])
         self.assertEqual(parse.kev(fixture('kev.json'))[1]['declared'], 3)
+
+
+def kev_blob(n, count=None, dup=0):
+    vulns = [{'cveID': f'CVE-2020-{1000 + i}', 'dateAdded': '2024-01-01', 'dueDate': '2024-02-01',
+              'knownRansomwareCampaignUse': 'Unknown'} for i in range(n)]
+    vulns += vulns[:dup]
+    doc = {'dateReleased': '2026-10-22T14:30:00.000Z', 'vulnerabilities': vulns}
+    if count is not False:
+        doc['count'] = len(vulns) if count is None else count
+    return json.dumps(doc).encode()
 
 
 class FeedFixtureCase(TestCase):
@@ -325,21 +340,6 @@ class FetchTests(FeedFixtureCase):
         s = FakeSession({k.url: (200, {}, fixture('kev.json').replace(b'"count": 3', b'"count": 30'))})
         self.assertEqual(store.fetch(k, self.now, s), 'rejected')
         self.assertIsNone(store.read('kev'))
-        # a sudden shrink of a big feed
-        b = self.feed('blocklist_de')
-        big = '\n'.join(f'8.8.{i // 250}.{i % 250 + 1}' for i in range(100)).encode()
-        small = '\n'.join(f'8.8.{i // 250}.{i % 250 + 1}' for i in range(49)).encode()
-        s = FakeSession({b.url: [(200, {}, big), (200, {}, small), (200, {}, big[:len(big) // 2 + 20])]})
-        self.assertEqual(store.fetch(b, self.now, s), 'ok')
-        self.assertEqual(store.fetch(b, self.now, s), 'rejected')
-        st = FeedState.objects.get(name='blocklist_de')
-        self.assertEqual((st.entries, st.error), (100, 'shrank'))
-        self.assertEqual(store.fetch(b, self.now, s), 'ok')  # 50+ of 100 is not a collapse
-        # small feeds (below 50 entries) are exempt: Feodo may go from 2 to 0
-        fe = self.feed('feodo')
-        s = FakeSession({fe.url: [(200, {}, b'[{"ip_address":"8.8.8.8"}]'), (200, {}, b'[]')]})
-        store.fetch(fe, self.now, s)
-        self.assertEqual(store.fetch(fe, self.now, s), 'ok')
 
     def test_not_modified_counts_as_fresh(self):
         f = self.feed('kev')
@@ -497,3 +497,173 @@ class ModelTests(TestCase):
         DomainBreach.objects.create(project=p, root=root, breach_name='B', addresses=3)
         with self.assertRaises(IntegrityError), transaction.atomic():
             DomainBreach.objects.create(project=p, root=root, breach_name='B', addresses=4)
+
+
+class ShrinkRecoveryTests(FeedFixtureCase):
+    def seq(self, *bodies):
+        f = self.feed('kev')
+        return f, FakeSession({f.url: [(200, {}, b) for b in bodies]})
+
+    def test_identical_shrunk_copy_accepted_after_three_rejections(self):
+        f, s = self.seq(kev_blob(100), *[kev_blob(20)] * 4)
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+        for i in range(3):
+            self.assertEqual(store.fetch(f, self.now, s), 'rejected')
+        st = FeedState.objects.get(name='kev')
+        self.assertEqual((st.entries, st.error, st.shrank_count), (100, 'shrank', 3))
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+        st = FeedState.objects.get(name='kev')
+        self.assertEqual((st.entries, st.shrank_count, st.shrank_sha256), (20, 0, ''))
+
+    def test_a_different_copy_or_an_ok_resets_the_count(self):
+        f, s = self.seq(kev_blob(100), kev_blob(20), kev_blob(20), kev_blob(21), kev_blob(21), kev_blob(21),
+                        kev_blob(21), kev_blob(90), kev_blob(20))
+        store.fetch(f, self.now, s)
+        store.fetch(f, self.now, s)
+        store.fetch(f, self.now, s)
+        self.assertEqual(FeedState.objects.get(name='kev').shrank_count, 2)
+        store.fetch(f, self.now, s)  # different sha: starts again at 1
+        self.assertEqual(FeedState.objects.get(name='kev').shrank_count, 1)
+        store.fetch(f, self.now, s)
+        store.fetch(f, self.now, s)
+        self.assertEqual(FeedState.objects.get(name='kev').shrank_count, 3)
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')  # 4th identical
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')  # 90 of 21 grows
+        self.assertEqual(FeedState.objects.get(name='kev').shrank_count, 0)
+
+    def test_allow_empty_feeds_are_exempt_from_the_ratio_rule(self):
+        fe = self.feed('feodo')
+        sixty = json.dumps([{'ip_address': f'8.8.{i // 250}.{i % 250 + 1}'} for i in range(60)]).encode()
+        s = FakeSession({fe.url: [(200, {}, sixty), (200, {}, b'[]')]})
+        self.assertEqual(store.fetch(fe, self.now, s), 'ok')
+        self.assertEqual(store.fetch(fe, self.now, s), 'ok')
+        self.assertEqual(FeedState.objects.get(name='feodo').entries, 0)
+
+    def test_small_feeds_below_the_floor_are_exempt(self):
+        f, s = self.seq(kev_blob(49), kev_blob(5))
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+
+    def test_force_bypasses_shrink_and_count_but_not_garbage_or_size(self):
+        f, s = self.seq(kev_blob(100), kev_blob(20), kev_blob(20, count=99), b'<html>\nnope\n</html>')
+        store.fetch(f, self.now, s)
+        self.assertEqual(store.fetch(f, self.now, s, force=True), 'ok')
+        self.assertEqual(store.fetch(f, self.now, s, force=True), 'ok')  # count mismatch skipped when forced
+        self.assertEqual(store.fetch(f, self.now, s, force=True), 'error')  # not JSON at all
+        with mock.patch.object(store, 'MAX_BYTES', 100):
+            s2 = FakeSession({f.url: (200, {}, kev_blob(20))})
+            self.assertEqual(store.fetch(f, self.now, s2, force=True), 'error')
+        g = self.feed('blocklist_de')
+        s3 = FakeSession({g.url: (200, {}, b'<html>\n<body>x</body>\n</html>')})
+        self.assertEqual(store.fetch(g, self.now, s3, force=True), 'rejected')
+
+    def test_kev_without_count_or_with_duplicates_is_not_locked_out(self):
+        f, s = self.seq(kev_blob(10, count=False), kev_blob(10, dup=2))
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')
+        self.assertEqual(store.fetch(f, self.now, s), 'ok')  # count 12 raw records, 10 distinct CVEs
+        f, s = self.seq(kev_blob(10, count=50))
+        self.assertEqual(store.fetch(f, self.now, s), 'rejected')
+
+    def test_spamhaus_trailer_may_or_may_not_count_itself(self):
+        f = self.feed('drop_v4')
+        for records in (3, 4):
+            FeedState.objects.all().delete()
+            body = fixture('drop_v4.json').replace(b'"records":2', b'"records":%d' % records)
+            body = body.replace(b'"records":3', b'"records":%d' % records)
+            s = FakeSession({f.url: (200, {}, body)})
+            self.assertEqual(store.fetch(f, self.now, s), 'ok', records)
+        body = fixture('drop_v4.json').replace(b'"records":3', b'"records":5')
+        self.assertEqual(store.fetch(f, self.now, FakeSession({f.url: (200, {}, body)})), 'rejected')
+
+    def test_refresh_feeds_command_force(self):
+        g = self.feed('kev')
+        s = FakeSession({g.url: [(200, {}, kev_blob(100)), (200, {}, kev_blob(20))]})
+        with mock.patch.object(tasks, 'SESSION', s):
+            call_command('refresh_feeds', 'kev')
+            self.assertEqual(FeedState.objects.get(name='kev').entries, 100)
+            cache.clear()  # a new day's budget
+            FeedState.objects.update(fetched_at=self.now - timedelta(days=2))
+            with self.assertRaises(CommandError):  # shrank: non-zero exit for the operator
+                call_command('refresh_feeds', 'kev')
+            self.assertEqual(FeedState.objects.get(name='kev').entries, 100)
+            cache.clear()
+            s.routes[g.url] = [(200, {}, kev_blob(20))]
+            call_command('refresh_feeds', 'kev', '--force')
+        self.assertEqual(FeedState.objects.get(name='kev').entries, 20)
+        with self.assertRaises(CommandError):
+            call_command('refresh_feeds', 'nope')
+
+
+class Drip(http.server.BaseHTTPRequestHandler):
+    """Sends headers, then one byte every 0.2 s for up to 8 s. mode: length | close | chunked."""
+    mode = 'length'
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        mode = self.server.mode
+        try:
+            self.send_response(200)
+            if mode == 'length':
+                self.send_header('Content-Length', '1000000')
+            elif mode == 'chunked':
+                self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            self.wfile.flush()
+            for _ in range(40):
+                time.sleep(0.2)
+                self.wfile.write(b'1\r\nx\r\n' if mode == 'chunked' else b'x')
+                self.wfile.flush()
+        except OSError:
+            pass
+
+
+class RealDeadlineTests(FeedFixtureCase):
+    """Real sockets on 127.0.0.1: the production https-only and same-host rules stay as they are; only the
+    session handed to fetch() rewrites the scheme."""
+
+    def serve(self, mode):
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Drip)
+        srv.daemon_threads, srv.mode = True, mode
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        self.addCleanup(srv.server_close)
+        return srv
+
+    def test_total_deadline_stops_a_blocked_read(self):
+        import requests
+
+        class HttpSession:
+            def get(self, url, **kw):
+                return requests.get(url.replace('https://', 'http://', 1), **kw)
+
+        for mode in ('length', 'close', 'chunked'):
+            srv = self.serve(mode)
+            f = self.feed('kev')._replace(url=f'https://127.0.0.1:{srv.server_address[1]}/kev.json')
+            t = time.monotonic()
+            with mock.patch.object(store, 'DEADLINE', 1.0):
+                status = store.fetch(f, self.now, HttpSession())
+            took = time.monotonic() - t
+            self.assertEqual(status, 'error', mode)
+            self.assertLess(took, 2.5, mode)
+            self.assertEqual(FeedState.objects.get(name='kev').error, 'Timeout', mode)
+            self.assertIsNone(store.read('kev'))
+            for th in [x for x in threading.enumerate() if isinstance(x, threading.Timer)]:
+                th.join(1)
+            self.assertEqual([x for x in threading.enumerate() if isinstance(x, threading.Timer) and x.is_alive()], [])
+
+    def test_soft_time_limit_after_the_deadline_is_not_a_timeout(self):
+        class Slow(Resp):
+            def iter_content(self, chunk_size=1):
+                yield b'x'
+                raise SoftTimeLimitExceeded()
+
+        class S:
+            def get(self, *a, **k):
+                return Slow(200, {}, b'')
+
+        ticks = iter(range(0, 10 ** 6, 100))
+        with mock.patch.object(store.time, 'monotonic', lambda: next(ticks)), \
+                self.assertRaises(SoftTimeLimitExceeded):
+            store.fetch(self.feed('kev'), self.now, S())

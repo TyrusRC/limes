@@ -21,6 +21,9 @@ class FeedState(models.Model):
     entries = models.IntegerField(default=0)
     status = models.CharField(max_length=16, default='never')  # never|ok|not_modified|error|rejected
     error = models.CharField(max_length=300, blank=True)
+    # consecutive 'shrank' rejections of the same copy (store._problem); 3 in a row and the copy is accepted
+    shrank_count = models.IntegerField(default=0)
+    shrank_sha256 = models.CharField(max_length=64, blank=True)
 
 
 class CveIntel(models.Model):
