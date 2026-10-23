@@ -6,11 +6,12 @@ import sys
 
 def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'limes.settings')
-    # show limes artwork
-    f = open('art/Limes.txt', 'r')
-    file_contents = f.read()
-    print (file_contents)
-    f.close()
+    # show limes artwork (never for mcp_stdio: its stdout carries the protocol)
+    if sys.argv[1:2] != ['mcp_stdio']:
+        f = open('art/Limes.txt', 'r')
+        file_contents = f.read()
+        print (file_contents)
+        f.close()
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
