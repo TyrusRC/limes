@@ -102,9 +102,14 @@ class SyncTest(TestCase):
         (fixed,) = self.sync({self.a.id: {'t1': 1}})
         self.assertEqual((fixed.kind, fixed.immediate), ('issue_fixed', False))
         self.assertEqual(TrackedIssue.objects.get(key='t2').status, 'fixed')
+        self.assertIsNone(TrackedIssue.objects.get(key='t2').reopened_at)
+        before = timezone.now()
         (back,) = self.sync({self.a.id: {'t1': 1, 't2': 3}})
         self.assertEqual((back.kind, back.immediate), ('issue_regressed', True))
-        self.assertEqual(TrackedIssue.objects.get(key='t2').reopened, 1)
+        row = TrackedIssue.objects.get(key='t2')
+        self.assertEqual(row.reopened, 1)
+        self.assertGreaterEqual(row.reopened_at, before)
+        self.assertEqual(row.reopened_at, row.last_seen)  # both are the regressing sync's now
 
     def test_severity_rise_is_new(self):
         self.sync({self.a.id: {'t1': 1}})

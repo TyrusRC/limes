@@ -188,6 +188,7 @@ class TrackedIssue(models.Model):
     last_seen = models.DateTimeField(default=timezone.now)
     fixed_at = models.DateTimeField(null=True, blank=True)
     reopened = models.IntegerField(default=0)
+    reopened_at = models.DateTimeField(null=True, blank=True)  # when it last came back; first_seen is the first detection
 
     class Meta:
         unique_together = ('asset', 'key')
