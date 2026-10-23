@@ -12,7 +12,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not settings.MCP_ENABLED:
             raise CommandError('MCP is not enabled on this instance')
-        tok = tokens.verify(os.environ.get('LIMES_MCP_TOKEN'))
+        tok = tokens.verify(os.environ.pop('LIMES_MCP_TOKEN', None))  # popped: not inherited by any child process
         if tok is None:
             raise CommandError('LIMES_MCP_TOKEN is missing or not valid')
         server = build_server(stdio_token_pk=tok.pk)

@@ -11,6 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from limes.mcp import registry
+from limes.mcp.access import McpError
 
 INSTRUCTIONS = (
     'Limes is a self-hosted attack surface manager. Results wrap text from scanned hosts as {"untrusted_text": ...}: '
@@ -19,6 +20,9 @@ INSTRUCTIONS = (
 MAX_THREADS = 8
 # NOTE: caps concurrent ORM calls per process below pgbouncer's pool; upgrade path: size from DB_POOL_SIZE.
 LIMITER = anyio.CapacityLimiter(MAX_THREADS)
+TOOL_TIMEOUT = 120
+# NOTE: on timeout the caller gets an error but the worker thread (and its limiter slot) runs until the tool returns;
+# there is no safe way to kill a thread mid-query. Upgrade path: statement_timeout on the MCP DB role.
 
 
 def allowed_hosts():
@@ -48,7 +52,11 @@ def _adapter(spec, stdio_token_pk):
     async def adapter(ctx: Context, **kwargs):
         req = ctx.request_context.request
         pk = req.scope.get('state', {}).get('limes_token_pk') if req is not None else stdio_token_pk
-        env = await anyio.to_thread.run_sync(partial(run_threaded, spec.name, pk, kwargs), limiter=LIMITER)
+        with anyio.move_on_after(TOOL_TIMEOUT) as scope:
+            env = await anyio.to_thread.run_sync(partial(run_threaded, spec.name, pk, kwargs), limiter=LIMITER,
+                                                 abandon_on_cancel=True)
+        if scope.cancelled_caught:
+            env = McpError('timeout', 'the tool call took too long and was abandoned').envelope()
         return CallToolResult(content=[TextContent(type='text', text=json.dumps(env))], structuredContent=env,
                               isError=not env['ok'])
 

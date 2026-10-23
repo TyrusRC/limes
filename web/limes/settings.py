@@ -368,6 +368,11 @@ LOGGING = {
             'handlers': ['null'],
             'propagate': False,
         },
+        # uvicorn creates these before Django configures logging; without a name here disable_existing_loggers
+        # silences them, and a crash in the MCP app would leave no traceback.
+        'uvicorn': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
+        'uvicorn.error': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
+        'uvicorn.access': {'handlers': ['brief'], 'level': 'INFO', 'propagate': False},
         'django.server': {
             'handlers': ['console'],
             'propagate': False

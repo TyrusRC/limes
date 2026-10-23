@@ -20,6 +20,7 @@ from rolepermissions.roles import assign_role
 from starlette.testclient import TestClient
 from dashboard.models import McpCallLog, Project
 from dashboard.views import on_user_logged_in
+from startScan.asset_models import Asset
 from limes.mcp import registry, tokens
 from limes.mcp.tokens import create_token
 
@@ -87,7 +88,8 @@ class McpHttpTests(TransactionTestCase):
             self.assertEqual(r.status_code, 401)
             self.assertIn('error="invalid_token"', r.headers['www-authenticate'])
             self.assertEqual(r.json(), {'error': 'unauthorized'})
-            r = self.call(c, 'list_projects', raw=None, url=f'/mcp?token={self.raw}')
+            _, leaked = create_token(self.admin, 'leaked', 90, 'read')
+            r = self.call(c, 'list_projects', raw=None, url=f'/mcp?token={leaked}')
             self.assertEqual(r.status_code, 401)
             r = self.call(c, 'list_projects')
             self.assertEqual(r.status_code, 200, r.text)
@@ -119,16 +121,17 @@ class McpHttpTests(TransactionTestCase):
 
     def test_errors_are_tool_errors(self):
         other = Project.objects.create(name='h3', slug='h3', insert_date=timezone.now())
+        foreign = Asset.objects.create(project=other, kind='root_domain', value='z.com', scope_tier='owned_root')
         with TestClient(self.app()) as c:
-            r = self.call(c, 'get_asset', {'project': 'h1', 'asset_id': 999999})
-            res = r.json()['result']
-            self.assertTrue(res['isError'])
-            self.assertEqual(res['structuredContent']['error']['code'], 'not_found')
+            for aid in (999999, foreign.id):  # missing, and another project's real asset: same answer
+                r = self.call(c, 'get_asset', {'project': 'h1', 'asset_id': aid})
+                res = r.json()['result']
+                self.assertTrue(res['isError'])
+                self.assertEqual(res['structuredContent']['error']['code'], 'not_found')
             r = self.call(c, 'list_assets', {'project': 'h1', 'limit': 500})
             self.assertNotIn('Traceback', r.text)
             body = r.json()
             self.assertTrue('error' in body or body['result']['isError'])
-        del other
 
     def test_revocation_applies_to_next_http_call(self):
         with TestClient(self.app()) as c:
@@ -168,9 +171,11 @@ class McpHttpTests(TransactionTestCase):
     def test_disabled_server_404(self):
         with override_settings(MCP_ENABLED=False), TestClient(self.app()) as c:
             for path in ('/mcp', '/anything'):
-                r = c.post(path, json={}, headers=HEADERS)
-                self.assertEqual(r.status_code, 404)
-                self.assertIn('MCP is not enabled on this instance', r.text)
+                for method in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'):
+                    r = c.request(method, path, headers=HEADERS)
+                    self.assertEqual(r.status_code, 404, (method, path))
+                    if method != 'HEAD':
+                        self.assertIn('MCP is not enabled on this instance', r.text)
 
     def test_stdio_command(self):
         env = {k: v for k, v in os.environ.items() if k != 'LIMES_MCP_TOKEN'}
@@ -187,6 +192,7 @@ class McpHttpTests(TransactionTestCase):
                 mock.patch('dashboard.management.commands.mcp_stdio.anyio.run') as run, \
                 mock.patch('dashboard.management.commands.mcp_stdio.build_server') as bs:
             call_command('mcp_stdio')
+            self.assertNotIn('LIMES_MCP_TOKEN', os.environ)  # not left for child processes
         bs.assert_called_once_with(stdio_token_pk=self.tok.pk)
         run.assert_called_once()
         with override_settings(MCP_ENABLED=False), self.assertRaises(CommandError):
@@ -199,3 +205,124 @@ class McpHttpTests(TransactionTestCase):
         self.assertNotEqual(p.returncode, 0)
         self.assertEqual(p.stdout, b'')
         self.assertIn(b'not valid', p.stderr)
+
+    # --- review fixes ---
+    def test_token_in_url_is_burned(self):
+        with self.assertLogs('limes.mcp.asgi', level='WARNING') as cm, TestClient(self.app()) as c:
+            r = self.call(c, 'list_projects', raw=None, url=f'/mcp?access_token={self.raw}')
+            self.assertEqual(r.status_code, 401)
+            self.assertEqual(self.call(c, 'list_projects').status_code, 401)  # the leaked token is now revoked
+        self.tok.refresh_from_db()
+        self.assertIsNotNone(self.tok.revoked_at)
+        text = ' '.join(rec.getMessage() for rec in cm.records)
+        self.assertIn(self.tok.token_id, text)
+        self.assertNotIn(self.raw.rsplit('_', 1)[1], text)
+
+    def test_unauthenticated_floods_are_bounded_by_the_limiter(self):
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from limes.mcp import server
+        lock, state = threading.Lock(), {'now': 0, 'max': 0}
+
+        def slow_verify(raw):
+            with lock:
+                state['now'] += 1
+                state['max'] = max(state['max'], state['now'])
+            time.sleep(0.3)
+            with lock:
+                state['now'] -= 1
+            return None
+        with mock.patch('limes.mcp.asgi.tokens.verify', slow_verify), TestClient(self.app()) as c:
+            with ThreadPoolExecutor(30) as ex:
+                list(ex.map(lambda _: self.call(c, 'list_projects', raw='lmk_bad'), range(30)))
+        self.assertLessEqual(state['max'], server.MAX_THREADS)
+
+    def test_authenticated_requests_are_rate_limited_and_streams_capped(self):
+        with override_settings(MCP_RATE_PER_MIN=2), TestClient(self.app()) as c:
+            codes = [self.rpc(c, 'tools/list').status_code for _ in range(8)]
+        self.assertIn(429, codes)
+        self.assertEqual(codes[0], 200)
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from limes.mcp.asgi import MAX_OPEN, BearerAuth
+        from mcp.server.transport_security import TransportSecurityMiddleware
+        from limes.mcp.server import transport_security
+        state = {'now': 0, 'max': 0}
+        lock = threading.Lock()
+
+        async def slow(scope, receive, send):
+            import anyio
+            if scope['type'] == 'lifespan':
+                while True:
+                    m = await receive()
+                    await send({'type': 'lifespan.' + m['type'].split('.')[1] + '.complete'})
+                    if m['type'] == 'lifespan.shutdown':
+                        return
+            with lock:
+                state['now'] += 1
+                state['max'] = max(state['max'], state['now'])
+            await anyio.sleep(0.4)
+            with lock:
+                state['now'] -= 1
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+        app = BearerAuth(slow, TransportSecurityMiddleware(transport_security()))
+        with override_settings(MCP_RATE_PER_MIN=1000), TestClient(app) as c:
+            with ThreadPoolExecutor(12) as ex:
+                codes = list(ex.map(lambda _: self.rpc(c, 'tools/list').status_code, range(12)))
+        self.assertIn(429, codes, (codes, state))
+        self.assertLessEqual(state['max'], MAX_OPEN)
+
+    def test_tool_call_time_limit(self):
+        from limes.mcp import server
+        import time
+        with mock.patch.object(server, 'TOOL_TIMEOUT', 0.2), \
+                mock.patch.object(server, 'run_threaded', lambda *a: time.sleep(1) or {'ok': True}), \
+                TestClient(self.app()) as c:
+            res = self.call(c, 'list_projects').json()['result']
+        self.assertTrue(res['isError'])
+        self.assertEqual(res['structuredContent']['error']['code'], 'timeout')
+
+    def test_non_http_scopes_fail_closed(self):
+        import anyio
+        from limes.mcp.asgi import BearerAuth
+        from mcp.server.transport_security import TransportSecurityMiddleware
+        from limes.mcp.server import transport_security
+        seen = []
+
+        async def inner(scope, receive, send):
+            seen.append(scope['type'])
+        app = BearerAuth(inner, TransportSecurityMiddleware(transport_security()))
+        sent = []
+
+        async def go():
+            async def recv():
+                return {'type': 'websocket.connect'}
+
+            async def send(m):
+                sent.append(m['type'])
+            await app({'type': 'lifespan'}, recv, send)
+            await app({'type': 'websocket', 'path': '/mcp', 'headers': [], 'query_string': b''}, recv, send)
+        anyio.run(go)
+        self.assertEqual(seen, ['lifespan'])
+        self.assertEqual(sent, ['websocket.close'])
+
+    def test_uvicorn_loggers_survive_django_logging(self):
+        code = ("import logging, sys\nlogging.getLogger('uvicorn.error'); logging.getLogger('uvicorn.access')\n"
+                "import limes\nl = logging.getLogger('uvicorn.error')\nassert not l.disabled\n"
+                "assert not logging.getLogger('uvicorn.access').disabled\n"
+                "try:\n    1/0\nexcept ZeroDivisionError:\n    l.exception('Exception in ASGI application')\n")
+        p = subprocess.run([sys.executable, '-c', code], capture_output=True, timeout=60,
+                           env={**os.environ, 'PYTHONPATH': str(WEB), 'DJANGO_SETTINGS_MODULE': 'limes.settings'})
+        self.assertEqual(p.returncode, 0, p.stderr[-800:])
+        self.assertIn(b'Traceback', p.stdout + p.stderr)
+
+    def test_deploy_config(self):
+        root = WEB.parent
+        nginx = (root / 'config/nginx/limes.conf').read_text()
+        self.assertIn('error_page                                  502 = @mcp_off', nginx)
+        self.assertNotIn('502 504', nginx)
+        self.assertRegex(nginx, r'log_format\s+mcp\s+[^;]*\$uri')
+        self.assertNotRegex(re.search(r'log_format\s+mcp[^;]*;', nginx).group(0), r'\$request\b|\$request_uri|\$args')

@@ -53,6 +53,8 @@ Either through stdio, with the token in the environment of the client process:
 docker compose exec -T -e LIMES_MCP_TOKEN mcp python3 manage.py mcp_stdio
 ```
 
+Do not type the token into `docker compose exec -e LIMES_MCP_TOKEN=...` on a shell: it lands in shell history and `ps`. Export it from a file or secret store (`-e LIMES_MCP_TOKEN` alone passes the variable already set in your environment). The command removes the variable from its own environment after reading it.
+
 (run it as the command of a stdio server entry, with `LIMES_MCP_TOKEN` set in that entry's `env`), or add a remote HTTP connector pointing at `https://<host>/mcp` if your Claude Desktop version supports custom bearer headers.
 
 ## Self-signed certificates
@@ -81,4 +83,4 @@ NODE_EXTRA_CA_CERTS=<path to limes_chain.pem>
 
 ## Limits and upgrade path
 
-Authentication is a static personal token, not OAuth 2.1. That is enough for Claude Code and stdio; a browser-based connector that requires OAuth will not work yet. The upgrade path is an OAuth authorization server in front of the same `BearerAuth` check, with these tokens kept for headless use. Rate limits count tool calls only, not raw requests.
+Authentication is a static personal token, not OAuth 2.1. That is enough for Claude Code and stdio; a browser-based connector that requires OAuth will not work yet. The upgrade path is an OAuth authorization server in front of the same `BearerAuth` check, with these tokens kept for headless use. Tool calls have their own rate limit; every authenticated request also draws on a looser per-token request budget, and at most 4 requests per token run at once. A token sent in a URL is revoked on sight, because proxies and clients log URLs.
