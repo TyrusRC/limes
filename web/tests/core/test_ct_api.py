@@ -15,7 +15,7 @@ from django_redis import get_redis_connection
 
 from dashboard.models import Project
 from limes import celery_routing
-from limes.ct import api, health
+from limes.ct import api
 from startScan.models import Asset, CertSighting, ChangeEvent
 
 KEY = 'sk-test-SECRET'

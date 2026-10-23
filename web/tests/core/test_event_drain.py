@@ -1,12 +1,10 @@
-import contextlib
 import itertools
 from datetime import timedelta
 from unittest import mock
 
 import dns.resolver
 from django.conf import settings
-from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import override_settings
 from django.utils import timezone
 from django_redis import get_redis_connection
 from rest_framework.test import APIClient
@@ -18,7 +16,7 @@ from limes.continuous import IN_PROGRESS
 from startScan.models import Asset, ChangeEvent, IpAddress, ScanHistory, TrackedIssue
 from scanEngine.models import EngineType
 from targetApp.models import Domain
-from tests.core.test_monitor import Base as MonitorBase, Get, observers, public
+from tests.core.test_monitor import Base as MonitorBase, Get, public
 from tests.core.test_safe_fetch import PUBLIC, stub
 
 HOUR = timedelta(hours=1)

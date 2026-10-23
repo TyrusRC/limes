@@ -12,7 +12,7 @@ from django.utils import timezone
 from django_redis import get_redis_connection
 
 from dashboard.models import Project
-from limes.ct import hook, ingest, match, watch
+from limes.ct import hook, ingest, watch
 from startScan.models import Asset, CertSighting
 
 TBS = 'ab' * 32

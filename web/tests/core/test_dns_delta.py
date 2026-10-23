@@ -1,14 +1,13 @@
 from datetime import timedelta
-from unittest import mock
 
 import dns.resolver
 from django.test import SimpleTestCase
 
-from limes import dns_delta, monitor
+from limes import dns_delta
 from limes.tasks import inventory
-from startScan.models import Asset, ChangeEvent
+from startScan.models import ChangeEvent
 from tests.core.test_monitor import Base, public
-from tests.core.test_safe_fetch import PUBLIC, stub
+from tests.core.test_safe_fetch import PUBLIC
 
 
 def rec(a=(), aaaa=(), cname=()):

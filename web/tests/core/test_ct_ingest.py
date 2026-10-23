@@ -9,8 +9,7 @@ from django_redis import get_redis_connection
 
 from dashboard.models import Project
 from limes import continuous, event_queue as eq
-from limes.alerts import events
-from limes.ct import ingest, lookalikes, match
+from limes.ct import ingest, lookalikes
 from limes.monitor import found_by
 from limes.tasks import intel
 from startScan.models import Asset, CertSighting, ChangeEvent

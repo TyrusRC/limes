@@ -3,7 +3,7 @@ alert, and the card data the dashboard shows. The heartbeat and everything in it
 import json
 import logging
 import math
-from datetime import datetime, timedelta, timezone as dt_tz
+from datetime import timedelta, timezone as dt_tz
 
 from django.conf import settings
 from django.utils import timezone

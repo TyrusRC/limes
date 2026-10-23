@@ -57,7 +57,7 @@ Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under No
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Build and start / stop the stack. `make up LLM=1` adds the optional local LLM. |
+| `make up` / `make down` | Build and start / stop the stack. `make up LLM=1` adds the optional local LLM; `make up REALTIME=1` adds the certificate watch. |
 | `make username` | Create the first admin user |
 | `make logs` | Tail service logs |
 | `make test` | Run the core test suite in containers |
@@ -104,14 +104,19 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - `manage.py reclassify_roots` converts old hostname rows that are really registrable roots (for
   example `example.co.uk`). It is idempotent and logs every change. Run it once after upgrading.
 - Scheduled tasks `monitor_assets` and `enumerate_ranges` run on the `io` queue; the scheduler locks
-  live in Redis.
+  live in Redis. So do `poll_ct_api` (every 60 s; it only calls Cert Spotter when `LIMES_CERTSPOTTER_API_KEY`
+  is set) and the `drain-events` tick (`monitor_assets` with `events_only`, every 15 s), which drains the
+  event-driven check queue.
+- The certificate watch is off by default. `make up REALTIME=1` with `LIMES_CT_WATCH=true` starts it and
+  downloads about 157 GB/day (inferred, not measured); read [docs/realtime.md](docs/realtime.md) first.
 
 ## Status
 
 Built and merged: inventory and discovery, continuous tracking of added assets, the risk score and
 checks, change alerts, waivers, notes and the fix forecast, and the portal in light and dark themes.
 The Overview shows the score by category, exposure, certificates, technologies, remediation, discovery,
-coverage, top risks and what changed.
+coverage, top risks and what changed. Also built: near-real-time monitoring (opt-in certificate watch,
+event-driven checks, DNS change detection, live Overview); see [docs/realtime.md](docs/realtime.md).
 
 Designed, not built yet (spec in [`docs/superpowers/specs`](docs/superpowers/specs)):
 
