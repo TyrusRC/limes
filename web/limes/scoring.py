@@ -227,8 +227,8 @@ def category_of(key):
 
 def category_q(category):
     """TrackedIssue filter for one category, or None for an unknown value."""
-    if category == 'vulnerabilities':
-        return Q(source='finding')
+    if category == 'vulnerabilities':  # a check key no longer in the catalogue falls here too, as in category_of
+        return Q(source='finding') | Q(source='check') & ~Q(key__in=list(CHECKS))
     if category in CATEGORIES:
         return Q(source='check', key__in=[c.id for c in CHECKS.values() if c.group == category])
     return None
@@ -255,7 +255,7 @@ def category_scores(project, now=None):
             split[category_of(key)].setdefault(asset_id, {})[key] = severity
     out = {}
     for c in CATEGORIES:
-        ids = checked[c]
+        ids = checked[c] | split[c].keys()  # never ignore an asset the headline counts
         live = p10([_score(_live(a, split[c].get(a, {}), waived)) for a in ids])
         raw = p10([_score(split[c].get(a, {})) for a in ids])
         out[c] = {'label': CATEGORY_LABELS[c], 'score': live, 'grade': grade(live), 'raw_score': raw,
@@ -309,13 +309,14 @@ def snapshot_scores():
     today = timezone.localdate()
     for project in Project.objects.all():
         try:
-            s = project_score(project)
+            now = timezone.now()
+            s = project_score(project, now)
             # snapshot and event commit together: a failed event leaves no row, so the next run retries it
             with transaction.atomic():
                 snap, created = ScoreSnapshot.objects.update_or_create(project=project, date=today, defaults={
                     'version': s['version'], 'score': s['score'], 'grade': s['grade'], 'raw_score': s['raw_score'],
                     'coverage': s['coverage'],
-                    'categories': {c: v['score'] for c, v in category_scores(project).items()},
+                    'categories': {c: v['score'] for c, v in category_scores(project, now).items()},
                     'asset_count': s['asset_count'], 'top_penalties': s['top_penalties']})
                 if created:  # a same-day rerun updates the row and must not alert twice
                     prev = ScoreSnapshot.objects.filter(project=project, date__lt=today).order_by('-date').first()

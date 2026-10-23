@@ -124,3 +124,39 @@ class CategoryTest(CategoryBase):
         self.assertEqual(snap.version, 'limes-score-v3')
         old = ScoreSnapshot.objects.create(project=self.p, date=snap.date - timedelta(days=1), version='v', grade='A')
         self.assertIsNone(old.categories)
+
+
+class CategoryEdgeTest(CategoryBase):
+    def test_penalised_asset_outside_checked_set_still_counts(self):
+        # an IP has no owned root, so it is not in the vulnerabilities `checked` set, but the headline scores it
+        s = self.scan()
+        ip = Asset.objects.create(project=self.p, kind='ip', value='10.0.0.1', scope_tier='owned_host')
+        self.check(ip, 'web.hsts_missing', 'pass')
+        self.vuln(s, ip, 4)
+        self.assertEqual(scoring.project_score(self.p)['score'], 599)
+        cats = scoring.category_scores(self.p)
+        self.assertEqual((cats['vulnerabilities']['score'], cats['vulnerabilities']['assessed']), (599, 2))
+
+    def test_orphan_check_key_counts_as_vulnerabilities(self):
+        p = self.reconcile_project()
+        TrackedIssue.objects.create(project=p, asset=self.a, key='web.removed_check', source='check', severity=1)
+        counts = scoring.category_issue_counts(p)
+        self.assertEqual(counts['vulnerabilities']['open'], 4)
+        self.assertEqual(sum(v['open'] for v in counts.values()), TrackedIssue.objects.filter(project=p, status='open').count())
+
+    def test_exactly_one_category_matches_each_row(self):
+        a = self.host('a.x.com')
+        keys = [(k, 'check') for k in CHECKS] + [('CVE-1', 'finding'), ('web.removed_check', 'check')]
+        for key, source in keys:
+            row = TrackedIssue.objects.create(project=self.p, asset=a, key=key, source=source, severity=1)
+            hits = [c for c in scoring.CATEGORIES if TrackedIssue.objects.filter(pk=row.pk).filter(scoring.category_q(c)).exists()]
+            self.assertEqual(hits, [scoring.category_of(key)], key)
+
+    def test_snapshot_shares_one_now(self):
+        from unittest import mock
+        self.reconcile_project()
+        with mock.patch.object(scoring, 'category_scores', wraps=scoring.category_scores) as cs, \
+                mock.patch.object(scoring, 'project_score', wraps=scoring.project_score) as ps:
+            scoring.snapshot_scores()
+        self.assertIsNotNone(cs.call_args.args[1:] or cs.call_args.kwargs.get('now'))
+        self.assertEqual(cs.call_args.args[1:] or cs.call_args.kwargs['now'], ps.call_args.args[1:] or ps.call_args.kwargs['now'])
