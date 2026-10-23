@@ -77,13 +77,16 @@ def change_tags(project, asset_ids, add=None, remove=None):
         if Asset.objects.filter(project=project, id__in=ids).count() != len(ids):
             raise AssetNotFound('asset not found')
         tags = dict(Tag.objects.filter(project=project).values_list('name', 'id'))
-        if len(tags.keys() | set(add)) > MAX_PER_PROJECT:
+        # Limits refuse only a call that adds something new: removing must work on data that is already over them.
+        # Tags no asset carries do not count (they are invisible and get reused or removed).
+        used = set(Tag.objects.filter(project=project).annotate(n=Count('assets')).filter(n__gt=0).values_list('name', flat=True))
+        if set(add) - used and len(used | set(add)) > MAX_PER_PROJECT:
             raise TagError(f'a project holds at most {MAX_PER_PROJECT} tags')
         have = {}
         for asset_id, name in Through.objects.filter(asset_id__in=ids).values_list('asset_id', 'tag__name'):
             have.setdefault(asset_id, set()).add(name)
         for asset_id in ids:
-            if len((have.get(asset_id, set()) - set(remove)) | set(add)) > MAX_PER_ASSET:
+            if set(add) - have.get(asset_id, set()) and len((have.get(asset_id, set()) - set(remove)) | set(add)) > MAX_PER_ASSET:
                 raise TagError(f'an asset carries at most {MAX_PER_ASSET} tags (asset {asset_id})')
         Tag.objects.bulk_create([Tag(project=project, name=n) for n in add if n not in tags], ignore_conflicts=True)
         tags = dict(Tag.objects.filter(project=project, name__in=add + remove).values_list('name', 'id'))
@@ -97,6 +100,6 @@ def change_tags(project, asset_ids, add=None, remove=None):
 
 
 def tag_counts(project):
-    """[{'name', 'assets'}] of the project's tags, most used first."""
-    rows = Tag.objects.filter(project=project).annotate(n=Count('assets')).order_by('-n', 'name')
+    """[{'name', 'assets'}] of the project's tags that some asset carries, most used first."""
+    rows = Tag.objects.filter(project=project).annotate(n=Count('assets')).filter(n__gt=0).order_by('-n', 'name')
     return [{'name': t.name, 'assets': t.n} for t in rows]

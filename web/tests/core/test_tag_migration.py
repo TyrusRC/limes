@@ -36,3 +36,14 @@ class TagMigrationTest(TransactionTestCase):
         self.assertEqual(tags('a.y.com'), [('p2', 'prod')])  # never p1's row
         self.assertEqual(tags('b.y.com'), [('p2', 'prod')])
         self.assertEqual(Tag.objects.get(project__slug='p2', name='prod').assets.count(), 2)
+
+    def test_names_with_nothing_usable_keep_their_assignment(self):
+        old = self.migrate(BEFORE)
+        Project, Asset, Tag = (old.get_model(a, m) for a, m in (('dashboard', 'Project'), ('startScan', 'Asset'), ('startScan', 'Tag')))
+        p = Project.objects.create(name='p1', slug='p1', insert_date='2026-01-01T00:00:00Z')
+        a = Asset.objects.create(project=p, kind='hostname', value='a.x.com')
+        olds = [Tag.objects.create(name=n) for n in ('!!!', '___', '\u751f\u4ea7', 'ok')]
+        a.tags.add(*olds)
+        new = self.migrate(AFTER)
+        names = sorted(new.get_model('startScan', 'Asset').objects.get(value='a.x.com').tags.values_list('name', flat=True))
+        self.assertEqual(names, sorted([f'tag-{olds[0].pk}', f'tag-{olds[1].pk}', f'tag-{olds[2].pk}', 'ok']))
