@@ -13,9 +13,9 @@ Read tools (all take a `project` slug where relevant; lists are paginated, 50 by
 - `list_scans`, `get_scan`, `get_scan_logs`, `list_changes`: scans, their stages and redacted logs, and the change feed.
 - `get_system_status`: workers, queues and versions. System administrators only.
 
-Write tools (off unless enabled, see below): `add_assets` (candidates only, 50 entries at most), `start_asm_scan`, `set_asset_cadence`, `waive_issue`, `revoke_waiver`, `add_issue_note`. They call the same services as the web UI and take explicit ids or values, never a filter.
+Write tools (off unless enabled, see below): `add_assets` (candidates only by default, 50 entries at most), `start_asm_scan`, `set_asset_cadence`, `waive_issue`, `revoke_waiver`, `add_issue_note`. They call the same services as the web UI and take explicit ids or values, never a filter.
 
-Free text that came from scanned hosts, scan tools or users is returned as `{"untrusted_text": "..."}` with control characters removed and a length cap, and every result carries a notice to treat it as data only. Read tools declare `readOnlyHint`; `revoke_waiver` and `set_asset_cadence` also declare `destructiveHint`.
+Free text that came from scanned hosts, scan tools or users is returned as `{"untrusted_text": "..."}` with control characters removed and a length cap, and every result carries a notice to treat it as data only. Read tools declare `readOnlyHint`. Write tools declare `destructiveHint` on `add_assets`, `set_asset_cadence`, `waive_issue` and `revoke_waiver`, and `openWorldHint` on `add_assets` and `start_asm_scan` (they reach the internet).
 
 ## Enable
 
@@ -29,7 +29,10 @@ LIMES_MCP_ALLOWED_ORIGINS=https://claude.ai
 LIMES_MCP_ALLOWED_HOSTS=limes.example.com
 LIMES_MCP_RATE_PER_MIN=60
 LIMES_MCP_WRITE_RATE_PER_MIN=10
+# LIMES_MCP_ADD_TIER=candidate
 ```
+
+**Warning about `LIMES_MCP_ADD_TIER`.** The default, `candidate`, means `add_assets` only proposes assets for a human to confirm. Setting it to `owned_host` or `owned_root` makes every asset an agent adds an owned, actively scanned target at once, so a prompt injection (or a wrong guess) can enroll a third party's domain as a scan target. Leave it at `candidate` unless you accept that.
 
 Then `make build`, `make up MCP=1` and `make migrate`. Both switches are needed: `MCP=1` starts the `mcp` service, and `LIMES_MCP_ENABLED` turns the feature on (token page, menu link, `/mcp`). Requests with an `Origin` header must match `LIMES_MCP_ALLOWED_ORIGINS`; requests with no `Origin` (CLI clients) are allowed. The accepted `Host` values are `DOMAIN_NAME` plus `LIMES_MCP_ALLOWED_HOSTS`.
 
@@ -47,7 +50,7 @@ The token goes in the `Authorization` header, never in the URL.
 
 ## Connect Claude Desktop
 
-Either through stdio, with the token in the environment of the client process:
+Either through stdio, run as the command of a stdio server entry with `LIMES_MCP_TOKEN` set in that entry's `env`:
 
 ```
 docker compose exec -T -e LIMES_MCP_TOKEN mcp python3 manage.py mcp_stdio
@@ -55,7 +58,7 @@ docker compose exec -T -e LIMES_MCP_TOKEN mcp python3 manage.py mcp_stdio
 
 Do not type the token into `docker compose exec -e LIMES_MCP_TOKEN=...` on a shell: it lands in shell history and `ps`. Export it from a file or secret store (`-e LIMES_MCP_TOKEN` alone passes the variable already set in your environment). The command removes the variable from its own environment after reading it.
 
-(run it as the command of a stdio server entry, with `LIMES_MCP_TOKEN` set in that entry's `env`), or add a remote HTTP connector pointing at `https://<host>/mcp` if your Claude Desktop version supports custom bearer headers.
+Or add a remote HTTP connector pointing at `https://<host>/mcp`, if your Claude Desktop version supports custom bearer headers.
 
 ## Self-signed certificates
 
@@ -70,7 +73,7 @@ NODE_EXTRA_CA_CERTS=<path to limes_chain.pem>
 - **Per-call authority.** Every call re-checks the token (not revoked, not expired), that the user is active, and the user's role permission for that tool. Deactivating a user or revoking a token takes effect on the next call. Limes has no per-project access control, so any active user reads any project, as in the UI.
 - **Writes need three keys:** the server setting `LIMES_MCP_WRITES_ENABLED`, a token with `read_write` scope, and the user's own permission for that action. When the setting is off the write tools are not registered and are also refused per call.
 - **Rate limits.** Per token, 60 `tools/call` per minute and 10 write calls per minute (`LIMES_MCP_RATE_PER_MIN`, `LIMES_MCP_WRITE_RATE_PER_MIN`). Over the limit a call returns `rate_limited` with `retry_after_seconds`.
-- **Audit log.** Every call is recorded (user, token id, tool, project, arguments cut to 1 KB with secrets scrubbed, outcome, duration). Rows older than 90 days are purged. Changes made by a write tool show "via MCP" in the issue history.
+- **Audit log.** Every call is recorded (user, token id, tool, project, arguments cut to 1 KB with secrets scrubbed, outcome, duration). Rows older than 90 days are purged. The reasons and notes a write tool saves end in "(via MCP)", so the issue history shows where that text came from.
 - **Never exposed:** credentials and API keys, configuration secrets, token hashes, session data. Request/response bodies and scan logs pass through a best-effort redactor; treat them as potentially sensitive. There is no tool that runs commands, fetches URLs or reads files.
 - **Prompt injection.** Scanned hosts control some of the text an agent reads (banners, page titles, finding names). Keep your client's confirmation prompt on for write tools, and prefer `read` tokens unless you need writes.
 
@@ -78,7 +81,7 @@ NODE_EXTRA_CA_CERTS=<path to limes_chain.pem>
 
 - A new dependency (the MCP SDK): rebuild the image (`make build`).
 - A new migration (`dashboard 0005`): run `make migrate`.
-- The nginx config changed: recreate the proxy (`docker compose up -d --force-recreate proxy`).
+- The nginx config changed (a `/mcp` location, an access-log format without the query string, and a request-rate limit of 20 per second per address): recreate the proxy (`docker compose up -d --force-recreate proxy`).
 - With the `mcp` profile off, `/mcp` answers 404.
 
 ## Limits and upgrade path

@@ -12,7 +12,8 @@ from limes.mcp.results import Cursor, Limit, RowId, Slug, iso, page, untrusted
 from limes.mcp.tools.inventory import issue_title, waived_exists
 from startScan.asset_models import IssueNote, IssueWaiver, ScoreSnapshot, TrackedIssue
 
-DETAIL_CAP = 50
+DETAIL_CAP = 20  # 20 waivers + 20 notes at 1000 characters each stay far inside the result budget
+TEXT_CAP = 1000
 FORECAST_MAX = 500
 
 
@@ -65,12 +66,12 @@ def get_issue(caller, project: Slug, issue_id: RowId):
     notes = IssueNote.objects.filter(issue=issue).select_related('author').order_by('created_at', 'id')[:DETAIL_CAP]
     active = {w.id for w in issue.live_waivers}
     return {**_issue_item(issue),
-            'waivers': [{'kind': w.kind, 'reason': untrusted(w.reason),
+            'waivers': [{'kind': w.kind, 'reason': untrusted(w.reason, TEXT_CAP),
                          'created_by': w.created_by.username if w.created_by else None,
                          'created_at': iso(w.created_at), 'expires_at': iso(w.expires_at),
                          'revoked_at': iso(w.revoked_at), 'revoked_by': w.revoked_by.username if w.revoked_by else None,
                          'active': w.id in active} for w in waivers],
-            'notes': [{'author': n.author.username if n.author else None, 'text': untrusted(n.text),
+            'notes': [{'author': n.author.username if n.author else None, 'text': untrusted(n.text, TEXT_CAP),
                        'created_at': iso(n.created_at)} for n in notes]}
 
 

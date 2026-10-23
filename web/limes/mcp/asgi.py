@@ -14,7 +14,7 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 import limes  # noqa: F401  (limes/celery.py runs django.setup())
 from limes.mcp import ratelimit, tokens
-from limes.mcp.server import LIMITER, build_server, transport_security
+from limes.mcp.server import build_server, transport_security
 
 # NOTE: _open is per process (uvicorn --workers N gives N times MAX_OPEN); upgrade path: a Redis counter.
 # NOTE: static personal tokens instead of OAuth 2.1 (spec SHOULD for HTTP); upgrade path: RFC 9728 protected-resource
@@ -29,8 +29,11 @@ REQ_BURST = 3  # raw requests allowed per tool-call budget: initialize + tools/l
 _open = {}
 
 
+AUTH_LIMITER = anyio.CapacityLimiter(4)  # apart from the tool pool: a flood of bad tokens cannot starve real calls
+
+
 async def _threaded(fn, *args):
-    return await anyio.to_thread.run_sync(fn, *args, limiter=LIMITER)  # unauthenticated floods share the tool pool
+    return await anyio.to_thread.run_sync(fn, *args, limiter=AUTH_LIMITER)
 
 
 def _verify(raw):
@@ -88,8 +91,9 @@ class BearerAuth:
         tok = None
         if in_url:
             for v in in_url[:3]:
-                await _threaded(_burn, v)
-        elif raw:
+                if tokens.TOKEN_RE.match(v):  # malformed input never costs a thread or a query
+                    await _threaded(_burn, v)
+        elif raw and tokens.TOKEN_RE.match(raw):
             tok = await _threaded(_verify, raw)
         if tok is None:
             m = tokens.TOKEN_RE.match(raw) if raw else None

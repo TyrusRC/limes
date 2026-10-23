@@ -64,12 +64,14 @@ def add_assets(caller, project: Slug,
 def start_asm_scan(caller, project: Slug, asset_id: RowId):
     """Start an ASM scan of one owned root domain. This scans the real target on the internet."""
     asset = _asset(caller, project, asset_id)
+    # NOTE: the in-progress check and the start are not atomic, so two simultaneous calls can both pass. Upgrade
+    # path: a DB-level guard (a partial unique index on one active scan per project, or select_for_update on the project row).
     if ScanHistory.objects.filter(domain__project_id=asset.project_id, scan_status__in=(INITIATED_TASK, RUNNING_TASK)).exists():
         raise McpError('invalid', 'a scan is already in progress for this project; wait for it to finish')
     ok, message = continuous.start_asm_scan(asset, initiated_by_id=caller.user.id)
     if not ok:
         raise McpError('invalid', message)
-    return {'message': message}
+    return {'message': 'ASM scan started', 'asset': untrusted(asset.value)}  # the value is target text: wrapped
 
 
 @tool(title='Set asset cadence', write=True, perm=PERM_INITATE_SCANS_SUBSCANS, destructive=True)

@@ -326,3 +326,46 @@ class McpHttpTests(TransactionTestCase):
         self.assertNotIn('502 504', nginx)
         self.assertRegex(nginx, r'log_format\s+mcp\s+[^;]*\$uri')
         self.assertNotRegex(re.search(r'log_format\s+mcp[^;]*;', nginx).group(0), r'\$request\b|\$request_uri|\$args')
+
+    # --- final review ---
+    def test_wrong_typed_call_is_audited_rate_limited_and_does_not_echo_input(self):
+        secret = 'SECRETVALUE' + 'z' * 20
+        with TestClient(self.app()) as c:
+            r = self.call(c, 'get_asset', {'project': 'h1', 'asset_id': secret})
+            res = r.json()['result']
+            self.assertTrue(res['isError'])
+            self.assertEqual(res['structuredContent']['error']['code'], 'invalid')
+            self.assertNotIn(secret, r.text)
+            r = self.call(c, 'get_asset', {'project': 'h1'})  # missing argument
+            self.assertEqual(r.json()['result']['structuredContent']['error']['code'], 'invalid')
+        rows = McpCallLog.objects.filter(tool='get_asset')
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual({r.outcome for r in rows}, {'invalid'})
+        # the per-call limit counts them
+        with override_settings(MCP_RATE_PER_MIN=2), TestClient(self.app()) as c:
+            codes = [self.call(c, 'get_asset', {'project': 'h1', 'asset_id': 'x'}).json()['result']['structuredContent']
+                     ['error']['code'] for _ in range(4)]
+        self.assertIn('rate_limited', codes)
+
+    def test_tools_list_still_strict_after_permissive_arguments(self):
+        with TestClient(self.app()) as c:
+            tools = {t['name']: t for t in self.rpc(c, 'tools/list').json()['result']['tools']}
+        props = tools['get_asset']['inputSchema']
+        self.assertEqual(props['properties']['asset_id']['type'], 'integer')
+        self.assertIn('asset_id', props['required'])
+
+    def test_auth_has_its_own_limiter_and_nginx_limits_requests(self):
+        from limes.mcp import asgi, server
+        self.assertIsNot(asgi.AUTH_LIMITER, server.LIMITER)
+        nginx = (WEB.parent / 'config/nginx/limes.conf').read_text()
+        self.assertRegex(nginx, r'limit_req_zone\s+\$binary_remote_addr\s+zone=mcp:\d+m\s+rate=\d+r/s')
+        self.assertRegex(nginx, r'limit_req\s+zone=mcp\s+burst=\d+')
+
+    def test_docs_state_the_risky_settings(self):
+        docs = (WEB.parent / 'docs/mcp.md').read_text()
+        self.assertIn('candidates only by default', docs)
+        self.assertNotIn('(candidates only,', docs)
+        self.assertRegex(docs, r'(?s)LIMES_MCP_ADD_TIER.{0,800}(active|scan target)')
+        env = (WEB.parent / '.env.example').read_text()
+        self.assertRegex(env, r'(?is)WARNING.{0,400}LIMES_MCP_ADD_TIER|LIMES_MCP_ADD_TIER.{0,10}\n?.*WARNING')
+        self.assertRegex(docs, r'destructiveHint[^.]*add_assets[^.]*waive_issue|add_assets[^.]*waive_issue[^.]*destructive')

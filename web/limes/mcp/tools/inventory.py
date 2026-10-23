@@ -1,5 +1,6 @@
 """Read tools: projects, summary, assets and the review queue. Text that came from scans or targets goes out only
 through results.untrusted()."""
+import ipaddress
 from typing import Annotated, Literal
 from django.db.models import Count, Exists, F, OuterRef, Q
 from django.utils import timezone
@@ -20,6 +21,15 @@ STATES = tuple(k for k, _ in ASSET_STATES)
 SOURCES = ('manual', 'scan', 'CT', 'InternetDB', 'CIDR', 'ASN', 'attribution', 'target')
 PARENT_DEPTH = 5
 ISSUE_CAP = 50
+LIST_CAP = 50  # sources, addresses and technologies in get_asset
+
+
+def _ip(address):
+    """A real IP address as a plain string; anything else (the column is free text) as untrusted text."""
+    try:
+        return str(ipaddress.ip_address((address or '').strip()))
+    except ValueError:
+        return untrusted(address)
 
 
 def asset_item(a):
@@ -142,10 +152,10 @@ def get_asset(caller, project: Slug, asset_id: RowId):
         'parent_chain': _parent_chain(a),
         'sources': [{'source': untrusted(s.get('source')), 'evidence': untrusted(s.get('evidence')),
                      'seen_at': clean(str(s['seen_at']), 64) if s.get('seen_at') else None}
-                    for s in a.sources or [] if isinstance(s, dict)],
+                    for s in (a.sources or [])[:LIST_CAP] if isinstance(s, dict)],
         'tracking': tracking,
-        'ip_addresses': [ip.address for ip in a.ip_addresses.all()],
-        'technologies': [untrusted(t.name) for t in a.technologies.all()],
+        'ip_addresses': [_ip(ip.address) for ip in list(a.ip_addresses.all())[:LIST_CAP]],
+        'technologies': [untrusted(t.name) for t in list(a.technologies.all())[:LIST_CAP]],
         'issues': issues, 'issues_truncated': truncated,
         'risk': _risk(a),
     }
