@@ -6,6 +6,8 @@ from django.db import migrations, models
 def backfill(apps, schema_editor):
     """Open issues that came back get reopened_at from their newest issue_regressed event (inline logic on
     historical models; rows whose events were pruned stay null and fall back to first_seen)."""
+    # NOTE: a regression announced while the issue was waived records no event, so the backfill may pick an older
+    # regression or none (the row then falls back to first_seen).
     TrackedIssue = apps.get_model('startScan', 'TrackedIssue')
     ChangeEvent = apps.get_model('startScan', 'ChangeEvent')
     rows = list(TrackedIssue.objects.filter(status='open', reopened__gt=0, reopened_at__isnull=True))

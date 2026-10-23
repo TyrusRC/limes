@@ -308,6 +308,7 @@ function issues_init() {
 	var query = new URLSearchParams(location.search);
 	['severity', 'category', 'source', 'waived'].forEach(function(k) {
 		var sel = document.getElementById('f_' + k), v = query.get(k);
+		if (!sel) return;
 		if (v && Array.prototype.some.call(sel.options, function(o) { return o.value === v; })) sel.value = v;
 	});
 	var table = $('#issue_results').DataTable({

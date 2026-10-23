@@ -189,7 +189,7 @@ Overview
           <tr>
             <td class="ov-asset">{{ r.host }}</td>
             <td class="text-nowrap ov-hide-sm ov-hide-md"><time datetime="{{ r.not_after|date:'c' }}">{{ r.not_after|date:'Y-m-d' }}</time></td>
-            <td class="ov-num" title="{{ r.not_after|date:'Y-m-d' }}">{% if r.expired %}<span class="sev-critical">Expired</span>{% else %}{{ r.days_left }}{% endif %}</td>
+            <td class="ov-num" title="{{ r.not_after|date:'Y-m-d' }}">{% if r.expired %}<span class="ov-tag">Expired</span>{% else %}{{ r.days_left }}{% endif %}</td>
             <td>{% if r.severity %}<span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span>{% else %}<span class="ov-muted" title="The check passed">—</span>{% endif %}</td>
           </tr>
         {% endfor %}
@@ -225,10 +225,8 @@ Overview
     <div class="ov-card-head"><h2 id="h-remediation">Remediation</h2><a class="ov-meta" href="{{ issues_url }}">All issues</a></div>
     {% if remediation.fixed_30 or remediation.opened_30 %}
     <div class="ov-mini">
-      <div><span class="ov-mini-label">Fixed · 7 days</span><span class="ov-mini-value">{{ remediation.fixed_7|intcomma }}</span></div>
-      <div><span class="ov-mini-label">Fixed · 30 days</span><span class="ov-mini-value">{{ remediation.fixed_30|intcomma }}</span></div>
-      <div><span class="ov-mini-label">Opened · 7 days</span><span class="ov-mini-value">{{ remediation.opened_7|intcomma }}</span></div>
-      <div><span class="ov-mini-label">Opened · 30 days</span><span class="ov-mini-value">{{ remediation.opened_30|intcomma }}</span></div>
+      {% for label, value in remediation.tiles %}<div><span class="ov-mini-label">{{ label }}</span><span class="ov-mini-value">{{ value|intcomma }}</span></div>
+      {% endfor %}
     </div>
     {% else %}
     <p class="ov-note ov-empty-note ov-pad">Nothing fixed or opened yet in the last 30 days.</p>
@@ -301,8 +299,8 @@ Overview
         {% for r in top_risks %}
           <tr>
             <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span></td>
-            <td class="ov-hide-sm"><span class="ov-tag">{% for c in categories %}{% if c.key == r.category %}{{ c.label }}{% endif %}{% endfor %}</span></td>
-            <td>{% if r.severity == 'unrated' %}<span class="sev-info">Unrated</span>{% else %}<span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span>{% endif %}</td>
+            <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
+            <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
             <td class="ov-num">−{{ r.points }}</td>
             <td class="ov-muted text-nowrap ov-hide-sm">{% if r.detected_at %}<time datetime="{{ r.detected_at|date:'c' }}">{{ r.detected_at|date:'Y-m-d' }}</time> · {{ r.age_days }} d{% else %}—{% endif %}</td>
           </tr>

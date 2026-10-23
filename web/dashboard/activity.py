@@ -15,7 +15,7 @@ OLDEST_LIMIT = 5
 TOP_RISKS = 10
 SAMPLE_LIMIT = 5
 WINDOWS = (30, 90)
-GONE_STATES = ('missing', 'stale', 'retired')
+GONE_STATES = ('missing', 'stale')  # 'retired' only follows 90 days unseen, past every window
 DISCOVERY_NAMES = {'manual': 'Added by hand', 'CT': 'Certificate transparency', 'scan': 'Scan',
                    'InternetDB': 'Passive intel (InternetDB)', 'ASN': 'ASN', 'CIDR': 'IP range', 'attribution': 'Attribution',
                    'target': 'Scan target', 'other': 'Other'}
@@ -44,6 +44,8 @@ def remediation(project, now):
         counts[f'fixed_{n}'] = Count('id', filter=Q(status='fixed', fixed_at__gte=since))
         counts[f'opened_{n}'] = Count('id', filter=Q(detected__gte=since))
     out = issues.aggregate(**counts)
+    out['tiles'] = [('Fixed · 7 days', out['fixed_7']), ('Fixed · 30 days', out['fixed_30']),
+                    ('Opened · 7 days', out['opened_7']), ('Opened · 30 days', out['opened_30'])]
     waived = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
     oldest = (issues.filter(status='open', severity__gte=3).exclude(Exists(waived)).select_related('asset')
               .order_by('detected', 'asset__value', 'key')[:OLDEST_LIMIT])
@@ -67,7 +69,8 @@ def top_risks(project, live, now):
             t = tracked.get((asset.id, scoring.issue_key(key)))
             when = t['detected'] if t else None
             rows.append({'id': t['id'] if t else None, 'asset': asset.value, 'title': CHECKS[key].title if key in CHECKS else key,
-                         'key': key, 'category': scoring.category_of(key), 'severity': scoring.SEVERITY_NAMES.get(sev, 'unrated'),
+                         'key': key, 'category': scoring.category_of(key),
+                         'category_label': scoring.CATEGORY_LABELS.get(scoring.category_of(key), scoring.category_of(key)), 'severity': scoring.SEVERITY_NAMES.get(sev, 'unrated'),
                          'points': scoring.PENALTY.get(sev, 0), 'detected_at': when,
                          'age_days': _age(now, when) if when else None})
     rows.sort(key=lambda r: (-r['points'], r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
@@ -88,6 +91,8 @@ def what_changed(project, now, score):
         new = owned.filter(first_seen__gte=since)
         # NOTE: the model keeps no timestamp for going missing or retired; last_seen (the last sighting) is the closest honest field.
         gone = owned.filter(state__in=GONE_STATES, last_seen__gte=since)
+        # NOTE: the score baseline is the latest snapshot on or before `since` with no lower bound, so after a gap in
+        # snapshots it can be much older than the window; score_from_date shows which day it is. Upgrade path: cap its age.
         snap = (ScoreSnapshot.objects.filter(project=project, date__lte=timezone.localtime(since).date(), score__isnull=False)
                 .order_by('-date').values_list('score', 'date').first())
         snap, snap_date = snap or (None, None)

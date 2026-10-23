@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from unittest import mock
 from django.test import TestCase
@@ -255,10 +256,10 @@ class IssuePageTest(TestCase):
     def test_category_select_rendered(self):
         html = self.page('sys_admin')
         self.assertIn('id="f_category"', html)
-        self.assertIn('<option value="vulnerabilities">Vulnerabilities</option>', html)
         from limes import scoring  # the hand-written options must not drift from the category model
-        for key in scoring.CATEGORIES:
-            self.assertIn(f'<option value="{key}">{scoring.CATEGORY_LABELS[key]}</option>', html)
+        block = re.search(r'<select[^>]*id="f_category".*?</select>', html, re.S).group(0)
+        options = re.findall(r'<option value="([^"]*)">([^<]*)</option>', block)
+        self.assertEqual(options, [('', 'All categories')] + [(k, scoring.CATEGORY_LABELS[k]) for k in scoring.CATEGORIES])
 
     def test_forms_follow_write_permission(self):
         html = self.page('sys_admin')

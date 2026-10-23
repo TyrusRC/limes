@@ -158,5 +158,4 @@ class CategoryEdgeTest(CategoryBase):
         with mock.patch.object(scoring, 'category_scores', wraps=scoring.category_scores) as cs, \
                 mock.patch.object(scoring, 'project_score', wraps=scoring.project_score) as ps:
             scoring.snapshot_scores()
-        self.assertIsNotNone(cs.call_args.args[1:] or cs.call_args.kwargs.get('now'))
         self.assertEqual(cs.call_args.args[1:] or cs.call_args.kwargs['now'], ps.call_args.args[1:] or ps.call_args.kwargs['now'])

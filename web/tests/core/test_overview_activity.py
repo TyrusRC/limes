@@ -53,7 +53,8 @@ class RemediationTest(ActivityBase):
 
     def test_oldest_limit_and_empty(self):
         self.assertEqual(activity.remediation(self.p, self.now),
-                         {'fixed_7': 0, 'fixed_30': 0, 'opened_7': 0, 'opened_30': 0, 'oldest': []})
+                         {'fixed_7': 0, 'fixed_30': 0, 'opened_7': 0, 'opened_30': 0, 'oldest': [],
+                          'tiles': [('Fixed · 7 days', 0), ('Fixed · 30 days', 0), ('Opened · 7 days', 0), ('Opened · 30 days', 0)]})
         a = self.host('a.x.com')
         for i in range(8):
             self.issue(a, f'k{i}', 3, first=i + 1)
@@ -93,6 +94,7 @@ class TopRisksTest(ActivityBase):
         self.assertEqual([(r['key'], r['points'], r['severity']) for r in rows],
                          [('crit', 200, 'critical'), ('hi-old', 80, 'high'), ('hi-new', 80, 'high')])
         self.assertEqual(rows[1]['age_days'], 40)
+        self.assertEqual(rows[0]['category_label'], 'Vulnerabilities')
         self.assertEqual(rows[0]['category'], 'vulnerabilities')
 
     def test_check_title_category_and_untracked(self):
@@ -128,7 +130,7 @@ class WhatChangedTest(ActivityBase):
         Asset.objects.create(project=self.p, kind='hostname', value='n60.x.com', scope_tier='owned_host', first_seen=self.now - days(60))
         Asset.objects.create(project=self.p, kind='hostname', value='gone.x.com', scope_tier='owned_host', state='missing',
                              first_seen=self.now - days(200), last_seen=self.now - days(20))
-        Asset.objects.create(project=self.p, kind='hostname', value='old-gone.x.com', scope_tier='owned_host', state='retired',
+        Asset.objects.create(project=self.p, kind='hostname', value='old-gone.x.com', scope_tier='owned_host', state='stale',
                              first_seen=self.now - days(200), last_seen=self.now - days(60))
         Asset.objects.create(project=self.p, kind='hostname', value='cand.x.com', scope_tier='candidate', first_seen=self.now - days(1))
         a = Asset.objects.get(value='n10.x.com')
@@ -149,6 +151,18 @@ class WhatChangedTest(ActivityBase):
         self.assertEqual((w30['score_from'], w30['score_to'], w30['score_delta']), (700, 765, 65))
         self.assertEqual((w90['score_from'], w90['score_delta']), (600, 165))
         self.assertEqual((w30['score_from_date'], w90['score_from_date']), (today - days(31), today - days(91)))
+
+    def test_window_boundary_is_inclusive(self):
+        # documented rule: fixed_at/first_seen exactly now - N days is inside the N-day window
+        self.root.delete()
+        a = self.host('edge.x.com')
+        self.issue(a, 'edge-fixed', 2, first=100, status='fixed', fixed=7)
+        self.issue(a, 'edge-open', 2, first=7)
+        self.issue(a, 'just-outside', 2, first=8, status='fixed', fixed=8)
+        r = activity.remediation(self.p, self.now)
+        self.assertEqual((r['fixed_7'], r['opened_7']), (1, 1))
+        w30, _ = activity.what_changed(self.p, self.now, None)
+        self.assertEqual((w30['introduced'], w30['resolved']), (2, 2))
 
     def test_no_snapshot_or_score(self):
         self.root.delete()
@@ -224,8 +238,6 @@ class CoverageTest(ActivityBase):
         c = activity.coverage(self.p, self.now)
         self.assertEqual((c['oldest']['value'], c['oldest']['why']), ('late.x.com', 'overdue'))
         self.assertEqual(c['oldest']['last_checked'], late.last_resolved_at)
-        ok.delete()
-        late.delete()
 
     def test_empty(self):
         self.root.delete()
