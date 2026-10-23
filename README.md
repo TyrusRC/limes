@@ -54,7 +54,6 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 | `LIMES_RANGE_ENUMERATION` | `false` | Expand owned ranges and ASNs into per-IP assets with reverse DNS and InternetDB lookups. See [Passive providers](#passive-providers). |
 | `LIMES_RANGE_ADDRESS_CAP` | `4096` | Owned addresses allowed per project across ranges and ASNs (1 to 65536). |
 | `LIMES_INTERNETDB_DAILY_BUDGET` / `LIMES_PTR_DAILY_BUDGET` | `5000` / `10000` | Daily lookup budgets for range enumeration, shared by all ranges. |
-
 | `LIMES_LOOKALIKE_ENABLED` | `true` | Generate and check lookalike domains of owned roots. |
 | `LIMES_LOOKALIKE_DNS_DAILY_BUDGET` / `LIMES_RDAP_DAILY_BUDGET` | `5000` / `500` | Daily DNS and RDAP lookups for lookalikes, shared by all projects. |
 | `LIMES_LOOKALIKE_HTTP` | `false` | One HTTPS GET per registered lookalike a week (title, login form, brand mention). It tells the lookalike's operator someone is watching. |
@@ -90,6 +89,8 @@ publisher cadence, never redistributed, and shown with their credit and date on 
 | CISA KEV | Known-exploited CVE markers, CC0 |
 | EPSS | Exploit-probability markers by FIRST.org / Empirical Security; attribution requested ([terms](https://www.first.org/epss/faq)) |
 | IANA RDAP bootstrap + registry RDAP | Registrar, creation date and abuse contact of lookalike domains (IANA data is CC0) |
+| dnstwist (library, Apache-2.0) | Generates lookalike name variants only; none of its web or screenshot features are used |
+| Registry RDAP servers | Looked up per domain at the registry named by the IANA bootstrap, within each registry's terms of use (rate-limited, daily budget) |
 | Have I Been Pwned (optional, key) | Domain breach counts, CC BY 4.0 |
 | Spamhaus DQS (optional, key) | Per-IP ZEN lookups |
 
@@ -130,7 +131,7 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - Scheduled tasks `monitor_assets` and `enumerate_ranges` run on the `io` queue; the scheduler locks
   live in Redis. So do the new `refresh_feeds`, `generate_lookalikes`, `lookalike_tick` and `hibp_sync`.
 - The first run of each new feed and the first lookalike sweep of each root are silent baselines: they
-  record what exists and send no alerts. IP reputation and the leak checks are provisional: they
+  record what exists and send no alerts. IP reputation, exposed AI services and the leak checks are provisional: they
   appear as issues but do not change any score.
 
 ## Status

@@ -426,6 +426,7 @@ class TickTest(Base):
         self.assertGreater(Lookalike.objects.count(), 100)
         self.assertEqual(Lookalike.objects.filter(source='ct').count(), 1)
         self.assertEqual(len([c for c in get.calls if 'crt.sh' in c[0]]), 1)
+        self.assertEqual([c[1].get('max_bytes') for c in get.calls if 'crt.sh' in c[0]], [http.MAX_BODY])  # the %label% query is capped
         self.assertFalse(Lookalike.objects.filter(domain='www.example.com').exists())
         self.tick(Resolver({}))
         self.assertEqual(Asset.objects.count(), before)
@@ -608,6 +609,32 @@ class CappedFetchTest(TestCase):
         out, took = self.get('/slow', max_bytes=1024 * 1024, deadline=0.8)
         self.assertEqual(out, (None, None))
         self.assertLess(took, 2.5)  # not retried: three attempts would take longer
+
+    def test_watchdog_shuts_down_through_socket_not_ssl_wrapper(self):
+        # an SSLSocket's own shutdown() drops its SSL object under the reader; the watchdog must bypass it
+        import socket
+        wrong = []
+
+        class Wrapped(socket.socket):
+            def shutdown(self, how):
+                wrong.append(how)
+
+        a, b = socket.socketpair()
+        sock = Wrapped(fileno=a.detach())
+        self.addCleanup(sock.close)
+        self.addCleanup(b.close)
+        resp = mock.Mock()
+        resp.raw._connection.sock = sock
+
+        def slow(chunk_size):
+            time.sleep(0.4)
+            yield b'x'
+        resp.iter_content = slow
+        with self.assertRaises(http._Refused):
+            http._read_capped(resp, 1024, 0.05)
+        self.assertEqual(wrong, [])
+        b.settimeout(2)
+        self.assertEqual(b.recv(1), b'')  # the real shutdown reached the peer
 
     def test_callers_pass_the_cap(self):
         get = FakeGet({'/domain/': (404, {})})

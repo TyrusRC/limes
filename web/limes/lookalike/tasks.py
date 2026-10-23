@@ -72,7 +72,7 @@ def _ct_keyword(root, owned, now):
     label = generate._EXTRACT(root.value).domain
     if len(label) < MIN_CT_LABEL:
         return [], False
-    status, rows = http.get_json(crtsh.keyword_url(label), provider='crtsh', max_wait=10)
+    status, rows = http.get_json(crtsh.keyword_url(label), provider='crtsh', max_wait=10, max_bytes=http.MAX_BODY)
     if status != 200 or not isinstance(rows, list):
         return [], False  # no data is not "no lookalikes": retry on the next run
     first = 'ct_baseline_at' not in state

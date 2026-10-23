@@ -764,6 +764,8 @@ class AddAssets(APIView):
 					_append_source(asset, 'manual', reason or f'added by {request.user.get_username()}')
 					asset.save()
 					added += 1
+					if c['kind'] in ('hostname', 'root_domain'):  # the user confirmed a lookalike's "This is ours"
+						Lookalike.objects.filter(project=project, domain=value).update(status='ours')
 					roots.append(asset)
 		for asset in roots:
 			warning = ensure_scan_target(asset)[1]

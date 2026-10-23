@@ -136,6 +136,15 @@ class ScanArtifactsTest(TestCase):
             leak.scan_artifacts(self.dir, {'h.js': 'https://www.x.com/h.js', 'a.js': 'https://app.x.com/a.js'}, self.p, self.now)
         self.assertEqual(RiskCheck.objects.get(asset=self.app, check_id='leak.supabase_secret_key').status, 'fail')
 
+    def test_soft_time_limit_propagates_from_scan_and_decode(self):
+        self.put('a.js', f'"{SB}"')
+        with mock.patch.object(leak, 'scan_text', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                leak.scan_artifacts(self.dir, {'a.js': 'https://app.x.com/a.js'}, self.p, self.now)
+        with mock.patch.object(leak.json, 'loads', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                leak._service_role(jwt())
+
     def test_mjs_scanned(self):
         self.put('m.mjs', f'"{SB}"')
         leak.scan_artifacts(self.dir, {'m.mjs': 'https://app.x.com/m.mjs'}, self.p, self.now)

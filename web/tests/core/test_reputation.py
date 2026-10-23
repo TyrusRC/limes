@@ -233,6 +233,12 @@ class FixRoundTests(FeedBase):
             with self.assertRaises(SoftTimeLimitExceeded):
                 run.run_asset_checks(ip, now=self.now)
 
+    def test_soft_time_limit_propagates_from_feed_parse(self):
+        self.feeds()
+        with mock.patch.object(reputation.store, 'load', side_effect=SoftTimeLimitExceeded()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                reputation.index(self.now)
+
     def test_index_is_built_once_and_rebuilt_when_a_feed_changes(self):
         self.feeds()
         a, b = self.asset('ip', '45.10.1.5'), self.asset('ip', '45.11.0.1')

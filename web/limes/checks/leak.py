@@ -10,6 +10,8 @@ import re
 
 from urllib.parse import urlsplit
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from limes import scope
 from limes.checks.catalogue import CHECKS
 from limes.tasks import intel
@@ -46,6 +48,8 @@ def _service_role(token):
     try:
         payload = token.split('.')[1]
         data = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:  # noqa: BLE001 - hostile input (RecursionError, bad UTF-8, ...) is simply not a key
         return False
     return isinstance(data, dict) and data.get('role') == 'service_role'
@@ -107,6 +111,8 @@ def scan_artifacts(art_dir, mapping, project, now):
         for name, url in by_host[host]:
             try:
                 found = scan_text(_read(os.path.join(art_dir, os.path.basename(name))))
+            except SoftTimeLimitExceeded:
+                raise
             except Exception as e:  # noqa: BLE001 - one bad file never stops the others; type only, never the text
                 log.warning('leak scan: skipped an artifact (%s)', type(e).__name__)
                 continue

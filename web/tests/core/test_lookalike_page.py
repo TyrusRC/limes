@@ -110,7 +110,11 @@ class DecideApiTest(LookalikeBase):
         row.refresh_from_db()
         self.assertTrue(r['add_url'].endswith('?add=xn--exmple-cua.com'), r)
         self.assertEqual(r['add_url'], reverse('assets', kwargs={'slug': 'p'}) + '?add=xn--exmple-cua.com')
-        self.assertEqual((Asset.objects.count(), row.status), (before, 'ours'))
+        self.assertEqual((Asset.objects.count(), row.status, row.decided_by), (before, 'registered', self.admin))  # nothing yet
+        # the status flips only when the user confirms the add
+        r = self.c.post('/api/add/assets/', {'project': 'p', 'entries': 'xn--exmple-cua.com'}, format='json').json()
+        row.refresh_from_db()
+        self.assertEqual((r['status'], row.status), (True, 'ours'))
         from limes.lookalike import check
         self.assertEqual(check.due_rows(self.now + timedelta(days=400), 50), [])  # never due again
 

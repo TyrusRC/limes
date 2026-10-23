@@ -113,7 +113,8 @@ def _changes(project, now):
 
 def _findings(live):
     """Open issues (findings and failed checks) on assessed assets, actively waived ones left out."""
-    return _sev_counts(sev for cats in live.values() for sev in cats.values())
+    from limes.checks.catalogue import PROVISIONAL
+    return _sev_counts(sev for cats in live.values() for k, sev in cats.items() if k not in PROVISIONAL)  # 0 points: not counted
 
 
 def _monitoring(project, now):

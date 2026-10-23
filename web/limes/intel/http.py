@@ -38,7 +38,8 @@ def _read_capped(resp, max_bytes, deadline):
     def expire():
         fired.append(1)
         try:
-            sock.shutdown(socket.SHUT_RDWR)
+            # socket.socket.shutdown directly: SSLSocket.shutdown would drop its SSL object under the reader
+            socket.socket.shutdown(sock, socket.SHUT_RDWR)
         except (OSError, AttributeError):
             pass
     timer = threading.Timer(deadline, expire)

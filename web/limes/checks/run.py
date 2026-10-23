@@ -193,6 +193,8 @@ def run_checks(project, root, now=None, observers=None, clock=time.monotonic, re
         idx = None
         # oldest-checked first (never-checked leading), inside the same wall-clock budget as the web phase: AI
         # probes can take up to a host deadline per IP; unreached IPs keep their rows and go first next run
+        # NOTE: this phase shares RUN_BUDGET, so on a huge estate unmonitored IPs can go stale between runs. They are
+        # taken oldest-checked first across runs, so none starves; monitor.py covers the watched IPs on its own cadence.
         ips = _owned(project).filter(kind='ip').annotate(last=Max('risk_checks__last_checked')).order_by(
             F('last').asc(nulls_first=True), 'id')
         for ip in ips:

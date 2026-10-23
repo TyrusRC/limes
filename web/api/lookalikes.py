@@ -90,13 +90,16 @@ class DecideLookalike(APIView):
         decision, note = request.data.get('decision'), request.data.get('note')
         if not isinstance(decision, str) or decision not in DECISIONS:
             return Response({'status': False, 'message': 'decision must be watch, ignore or ours'})
-        row.status = DECISIONS[decision]
         row.decided_by, row.decided_at = request.user, timezone.now()
         if isinstance(note, str):
             row.note = note[:1000]
-        row.save(update_fields=['status', 'decided_by', 'decided_at', 'note'])
+        fields = ['decided_by', 'decided_at', 'note']
+        if decision != 'ours':  # "ours" becomes the status only once the user confirms the add (api.views.AddAssets)
+            row.status = DECISIONS[decision]
+            fields.append('status')
+        row.save(update_fields=fields)
         invalidate(row.project_id)
-        out = {'status': True, 'message': row.status}
+        out = {'status': True, 'message': row.status}  # unchanged for "ours"
         if decision == 'ours':  # nothing is created: the user confirms through the manual add flow
             out['add_url'] = reverse('assets', kwargs={'slug': row.project.slug}) + '?add=' + quote(row.domain, safe='')
         return Response(out)

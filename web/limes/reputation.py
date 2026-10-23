@@ -86,6 +86,8 @@ def _good(name, states, now, idx):
         return None
     try:
         loaded = store.load(name)
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:  # noqa: BLE001 - a corrupt stored file is a missing feed, never a pass
         log.exception('feed %s unreadable', name)
         return None
