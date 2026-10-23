@@ -1,10 +1,7 @@
 """The abuse-report text for a lookalike. Text only: Limes never contacts a registrar or registrant; the user sends it.
 Every value is stored third-party data, so control characters are stripped and lengths capped before it is placed."""
-import re
-
 from limes.lookalike.check import defang  # noqa: F401 - re-exported: titles and reports share one defanging rule
-
-CTRL = re.compile(r'[\x00-\x1f\x7f]+')
+from limes.lookalike.rdap import CTRL
 
 
 def _t(value, limit=200):

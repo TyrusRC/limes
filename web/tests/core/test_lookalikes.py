@@ -2,6 +2,9 @@ import json
 import os
 import socket
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import timedelta
 from unittest import mock
 
@@ -181,7 +184,7 @@ class RdapTest(SimpleTestCase):
         get = FakeGet({'/domain/a.com': (200, rdap_fixture())})
         state, info = rdap.lookup('a.com', BOOTSTRAP, get)
         self.assertEqual((state, info['abuse_email']), ('registered', 'abuse@registrar.example'))
-        self.assertEqual(get.calls[0][1], {'provider': 'rdap:rdap.verisign.com', 'max_wait': 10})
+        self.assertEqual(get.calls[0][1], {'provider': 'rdap:rdap.verisign.com', 'max_wait': 10, 'max_bytes': http.MAX_BODY})
         self.assertEqual(rdap.lookup('b.com', BOOTSTRAP, FakeGet({'/domain/b.com': (404, {})}))[0], 'unregistered')
         self.assertEqual(rdap.lookup('b.com', BOOTSTRAP, FakeGet({'/domain/b.com': (503, {})}))[0], 'unknown')
         self.assertEqual(rdap.lookup('b.com', BOOTSTRAP, FakeGet())[0], 'unknown')
@@ -272,7 +275,7 @@ class CheckRowTest(Base):
         self.run_check(com, Resolver({('examp1e.com', 'NS'): ['ns.x.']}), get)
         calls = [c for c in get.calls if 'rdap' in c[0]]
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1], {'provider': 'rdap:rdap.verisign.com', 'max_wait': 10})
+        self.assertEqual(calls[0][1], {'provider': 'rdap:rdap.verisign.com', 'max_wait': 10, 'max_bytes': http.MAX_BODY})
 
     def test_rdap_provider_prefix_gets_its_own_spacing(self):
         self.assertEqual(http.MIN_INTERVAL['rdap'], 2.0)
@@ -543,3 +546,218 @@ class ReportTest(Base):
         self.assertIn('u2', out['body'])
         self.assertNotIn('\n', out['subject'])
         self.assertEqual(report.defang('a.b.com'), 'a[.]b[.]com')
+
+
+class _Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        if self.path == '/ok':
+            body = b'[1, 2]'
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        total = 40 * 1024 * 1024 if self.path == '/huge' else 1000
+        self.send_response(200)
+        self.send_header('Content-Length', str(total))
+        self.end_headers()
+        try:
+            if self.path == '/huge':
+                chunk = b'1,' * 32768
+                while self.server.sent < total:
+                    self.wfile.write(chunk)
+                    self.server.sent += len(chunk)
+            else:
+                for _ in range(100):
+                    self.wfile.write(b'1')
+                    self.wfile.flush()
+                    time.sleep(0.2)
+        except OSError:
+            pass
+
+
+class CappedFetchTest(TestCase):
+    """http.get_json against a real local server: a huge body and a slow trickle are errors, never parsed."""
+    def setUp(self):
+        cache.clear()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), _Handler)
+        self.srv.sent = 0
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.server_close)
+        self.addCleanup(self.srv.shutdown)
+
+    def get(self, path, **kw):
+        start = time.monotonic()
+        out = http.get_json(f'http://127.0.0.1:{self.srv.server_port}{path}', provider='t' + path.strip('/'),
+                            sleep=lambda s: None, **kw)
+        return out, time.monotonic() - start
+
+    def test_small_body_parses(self):
+        self.assertEqual(self.get('/ok', max_bytes=1000)[0], (200, [1, 2]))
+
+    def test_oversize_body_is_an_error_not_a_truncated_parse(self):
+        out, took = self.get('/huge', max_bytes=1024 * 1024)
+        self.assertEqual(out, (None, None))
+        self.assertLess(took, 10)
+        self.assertLess(self.srv.sent, 35 * 1024 * 1024)
+
+    def test_slow_trickle_hits_the_overall_deadline_once(self):
+        out, took = self.get('/slow', max_bytes=1024 * 1024, deadline=0.8)
+        self.assertEqual(out, (None, None))
+        self.assertLess(took, 2.5)  # not retried: three attempts would take longer
+
+    def test_callers_pass_the_cap(self):
+        get = FakeGet({'/domain/': (404, {})})
+        rdap.lookup('a.com', BOOTSTRAP, get)
+        self.assertEqual(get.calls[0][1]['max_bytes'], http.MAX_BODY)
+
+
+class HostileTextTest(SimpleTestCase):
+    def test_page_regexes_are_linear(self):
+        for page in ('<input ' * 40000, '<title ' * 40000, '<input type=' * 20000, '<title>' + 'x' * 250000):
+            start = time.monotonic()
+            check.analyse(page.encode().decode(), 'example')
+            self.assertLess(time.monotonic() - start, 1)
+        title, password, brand = check.analyse('<html><title> A  B </title><input type="password">example', 'example')
+        self.assertEqual((title, password, brand), ('A B', True, True))
+        self.assertEqual(check.analyse('x' * 20000 + '<title>late</title>', 'e')[0], '')  # only the head is searched
+
+    def test_abuse_email_is_conservative(self):
+        def mail(addr):
+            obj = {'entities': [{'roles': ['abuse'], 'vcardArray': ['vcard', [['email', {}, 'text', addr]]]}]}
+            return rdap.parse(obj)['abuse_email']
+        self.assertEqual(mail('abuse@registrar.example'), 'abuse@registrar.example')
+        self.assertEqual(mail('a.b+c@sub.registrar.co.uk'), 'a.b+c@sub.registrar.co.uk')
+        for bad in ('x?bcc=attacker@evil.com', 'a&b@x.com', 'a#b@x.com', 'a%b@x.com', 'a..b@x.com', '.a@x.com', 'a@x', 'a@-x.com',
+                    'a@x.com\nBcc: z@evil.com', 'a b@x.com'):
+            self.assertEqual(mail(bad), '', bad)
+
+    def test_invisible_and_control_characters_stripped(self):
+        nasty = 'Bank\u202eEvil\u2066\u200b\u2028\x85\ufeff\u200fOK\x1b[31m'
+        obj = {'entities': [{'roles': ['registrar'], 'vcardArray': ['vcard', [['fn', {}, 'text', nasty]]]}]}
+        got = rdap.parse(obj)['registrar']
+        for ch in ('\u202e', '\u2066', '\u200b', '\u2028', '\x85', '\ufeff', '\u200f', '\x1b'):
+            self.assertNotIn(ch, got)
+        self.assertTrue(got.startswith('Bank'))
+        self.assertTrue(report.CTRL.search(nasty))
+        self.assertIsNone(report.CTRL.search(report._t(nasty)))
+
+
+class FixRoundTest(Base):
+    def test_dns_errors_back_off_exponentially(self):
+        row = self.row()
+        err = Resolver({('examp1e.com', 'NS'): dns.resolver.NoNameservers()})
+        seen = []
+        now = self.now
+        for _ in range(8):
+            self.run_check(row, err, now=now)
+            row.refresh_from_db()
+            seen.append(row.next_check - now)
+            now = row.next_check
+        hours = [d.total_seconds() / 3600 for d in seen]
+        self.assertEqual(hours, [1, 2, 4, 8, 16, 24, 24, 24])
+        ok = Resolver({('examp1e.com', 'NS'): ['ns.x.']})
+        self.run_check(row, ok, now=now)
+        row.refresh_from_db()
+        self.assertNotIn('fails', row.dns)
+
+    def test_first_failed_check_then_registration_is_silent(self):
+        row = self.row()
+        self.run_check(row, Resolver({('examp1e.com', 'NS'): dns.resolver.NoNameservers()}))
+        row.refresh_from_db()
+        events = self.run_check(row, Resolver({('examp1e.com', 'NS'): ['ns.x.']}), now=self.now + timedelta(hours=2))
+        self.assertEqual(events, [])
+        row.refresh_from_db()
+        self.assertEqual(row.status, 'registered')
+
+    def test_http_skips_ignored_and_charges_dns_budget(self):
+        row = self.row(registered=True, status='ignored', dns={'ns': ['ns.x.'], 'a': ['9.9.9.9']})
+        factory = mock.Mock()
+        with override_settings(LOOKALIKE_HTTP=True):
+            self.assertIsNone(check.check_http(row, self.now, get_factory=factory, resolve=Resolver()))
+            row.status = 'registered'
+            spent = []
+            resolve = Resolver({('examp1e.com', 'A'): ['9.9.9.9'], ('examp1e.com', 'AAAA'): []})
+            factory.return_value.return_value = mock.Mock(status_code=200, headers={}, **{'iter_content.return_value': iter([b''])})
+            check.check_http(row, self.now, get_factory=factory, resolve=resolve, spend=lambda k: spent.append(k) or True)
+            self.assertEqual(spent, ['dns', 'dns'])
+            row.http = None
+            with self.assertRaises(check.Stop):
+                check.check_http(row, self.now, get_factory=factory, resolve=resolve, spend=lambda k: False)
+
+
+@override_settings(LOOKALIKE_ENABLED=True, CONTINUOUS_SCANS=True, LOOKALIKE_DNS_DAILY_BUDGET=BIG_BUDGET, RDAP_DAILY_BUDGET=BIG_BUDGET)
+class FixTickTest(Base):
+    def tick(self, resolve=None, get=None):
+        with mock.patch.object(collect, '_resolve', resolve or Resolver()), \
+                mock.patch.object(http, 'get_json', get or FakeGet()), \
+                mock.patch('limes.feeds.store.load', return_value=(BOOTSTRAP, {})):
+            return tasks.lookalike_tick.run()
+
+    def generate(self, get, candidates=()):
+        with mock.patch.object(http, 'get_json', get), mock.patch.object(generate, 'candidates', return_value=list(candidates)):
+            return tasks.generate_lookalikes.run()
+
+    def test_first_successful_ct_run_after_baseline_is_silent(self):
+        self.baseline()
+        ct = FakeGet({'crt.sh': (200, [{'id': 1, 'name_value': 'examp1e-login.net'}])})
+        self.generate(ct)
+        self.assertEqual(Lookalike.objects.filter(source='ct').count(), 1)
+        table = {('examp1e-login.net', 'NS'): ['ns.x.'], ('examp1e-login.net', 'MX'): ['10 m.x.']}
+        out = self.tick(Resolver(table), FakeGet({'/domain/': (200, rdap_fixture(self.now - timedelta(days=2)))}))
+        self.assertEqual((out['checked'], out['events']), (1, 0))
+        self.assertEqual(Lookalike.objects.get(source='ct').status, 'registered')
+        # a later CT run finds a new name: that one is news
+        from limes.tasks import intel
+        self.root.refresh_from_db()
+        old = (self.now - timedelta(days=2)).isoformat()
+        tasks._state(self.root, ct_at=old)
+        self.generate(FakeGet({'crt.sh': (200, [{'id': 2, 'name_value': 'examp1e-pay.net'}])}))
+        table = {('examp1e-pay.net', 'NS'): ['ns.x.']}
+        out = self.tick(Resolver(table), FakeGet({'/domain/': (200, rdap_fixture(self.now - timedelta(days=200)))}))
+        self.assertEqual(out['events'], 1)
+
+    def test_owned_now_is_ours_and_not_checked(self):
+        self.baseline()
+        a = self.row('examp1e.com')
+        b = self.row('www.examp1e.net')
+        Asset.objects.create(project=self.p, kind='hostname', value='examp1e.com', scope_tier='owned_host', parent=self.root)
+        Asset.objects.create(project=self.p, kind='root_domain', value='examp1e.net', scope_tier='owned_root')
+        resolve = Resolver({('examp1e.com', 'NS'): ['ns.x.'], ('www.examp1e.net', 'NS'): ['ns.x.']})
+        out = self.tick(resolve)
+        self.assertEqual(resolve.calls, [])
+        self.assertEqual(out['events'], 0)
+        for r in (a, b):
+            r.refresh_from_db()
+            self.assertEqual(r.status, 'ours')
+
+    def test_generate_stops_cleanly_and_resumes_least_recent_first(self):
+        roots = [self.root] + [Asset.objects.create(project=self.p, kind='root_domain', value=f'r{i}.com', scope_tier='owned_root')
+                               for i in (1, 2)]
+        clock = [0.0]
+        order = []
+
+        def slow(root, keywords=(), exclude=frozenset()):
+            order.append(root)
+            clock[0] += 400
+            return []
+        with mock.patch.object(tasks, '_clock', lambda: clock[0]), mock.patch.object(generate, 'candidates', slow), \
+                mock.patch.object(http, 'get_json', FakeGet()):
+            first = tasks.generate_lookalikes.run()
+            ran_first = list(order)
+            clock[0] = 0
+            del order[:]
+            second = tasks.generate_lookalikes.run()
+        self.assertEqual((len(ran_first), first['deferred']), (2, 1))
+        skipped = ({r.value for r in roots} - set(ran_first)).pop()
+        self.assertEqual(order[0], skipped)  # the root that never got its turn goes first
+        self.assertEqual(second['deferred'], 1)
+
+    def test_soft_time_limit_still_propagates(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+        with mock.patch.object(generate, 'candidates', side_effect=SoftTimeLimitExceeded), mock.patch.object(http, 'get_json', FakeGet()):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                tasks.generate_lookalikes.run()

@@ -5,10 +5,16 @@ from urllib.parse import quote, urlsplit
 
 from django.utils.dateparse import parse_datetime
 
+from limes.intel import http
+
 MAX_STR = 200
 MAX_STATUSES = 10
 MAX_ENTITIES = 50
-EMAIL_RE = re.compile(r'[^@\s<>"\',;()]{1,64}@[A-Za-z0-9.-]{1,150}\.[A-Za-z]{2,24}')
+# Deliberately narrower than RFC 5322 atext: no ? & = # % and friends, which could smuggle mailto: parameters.
+EMAIL_RE = re.compile(r'[A-Za-z0-9](?:(?:[A-Za-z0-9+_-]|\.(?!\.)){0,62}[A-Za-z0-9])?@'
+                      r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){1,6}[A-Za-z]{2,24}')
+# C0 and C1 controls, line/paragraph separators, bidi overrides and isolates, zero-width and BOM characters
+CTRL = re.compile('[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]+')
 WAIT = 10
 
 
@@ -24,7 +30,7 @@ def server_for(domain, bootstrap):
 
 
 def _text(v):
-    return re.sub(r'[\x00-\x1f\x7f]', ' ', v).strip()[:MAX_STR] if isinstance(v, str) else ''
+    return CTRL.sub(' ', v).strip()[:MAX_STR] if isinstance(v, str) else ''
 
 
 def _vcard(entity, prop):
@@ -82,7 +88,7 @@ def lookup(domain, bootstrap, get):
     if not base:
         return 'unknown', {}
     host = urlsplit(base).hostname
-    status, body = get(f'{base}domain/{quote(domain, safe="")}', provider=f'rdap:{host}', max_wait=WAIT)
+    status, body = get(f'{base}domain/{quote(domain, safe="")}', provider=f'rdap:{host}', max_wait=WAIT, max_bytes=http.MAX_BODY)
     if status == 404:
         return 'unregistered', {}
     if status == 200 and isinstance(body, dict):

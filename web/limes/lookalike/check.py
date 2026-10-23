@@ -14,8 +14,9 @@ from django.conf import settings
 from limes import safe_fetch
 from limes.checks import collect
 from limes.identity import ScanIdentity
-from limes.intel import crtsh, ratelimit
+from limes.intel import crtsh, http, ratelimit
 from limes.lookalike import generate, rdap
+from limes.lookalike.rdap import CTRL
 from startScan.models import Lookalike
 
 log = logging.getLogger(__name__)
@@ -32,8 +33,12 @@ BODY_CAP = 256 * 1024
 FRESH = 30 * D  # RDAP creation this recent makes a registration "phishing ready" when it also has mail or a certificate
 DECIDED = ('watching', 'ignored', 'ours', 'reported')
 MAX_LIST, MAX_STR, MAX_CERTS = 10, 253, 10
-TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.I | re.S)
-PASSWORD_RE = re.compile(r'<input[^>]+type\s*=\s*["\']?password', re.I)
+HEAD_BYTES = 16 * 1024  # the title is searched for in the head of the page only
+FORM_BYTES = 64 * 1024
+# bounded quantifiers: a hostile page of repeated "<input " or "<title " must not make the search quadratic
+TITLE_RE = re.compile(r'<title[^>]{0,200}>(.{0,1000}?)</title>', re.I | re.S)
+PASSWORD_RE = re.compile(r'<input[^>]{0,300}?type\s{0,10}=\s{0,10}["\']?password', re.I)
+BACKOFF_CAP = 24 * 3600
 
 
 class Stop(Exception):
@@ -78,6 +83,19 @@ def _ct_summary(rows, domain):
             'certs': certs[:MAX_CERTS]}
 
 
+def covered(domain, owned):
+    """True when `domain` is an owned value or a name under one."""
+    labels = domain.lower().split('.')
+    return any('.'.join(labels[i:]) in owned for i in range(len(labels) - 1))
+
+
+def analyse(text, label):
+    """(title, has password field, brand label present) of a fetched page; every search is bounded."""
+    m = TITLE_RE.search(text[:HEAD_BYTES])
+    title = CTRL.sub('', re.sub(r'\s+', ' ', html.unescape(m.group(1))).strip()) if m else ''
+    return title[:200], bool(PASSWORD_RE.search(text[:FORM_BYTES])), label in text.lower()
+
+
 def _due(stamp, now, every):
     return stamp is None or now - stamp >= every
 
@@ -92,6 +110,8 @@ def check_row(row, now, resolve, get, bootstrap, spend):
         row.save(update_fields=['next_check', 'last_checked'])
         return []
     was_registered, was_status = row.registered, row.status
+    # an earlier attempt failed before any answer: the registration is part of the baseline, not news
+    silent = row.last_checked is not None and was_registered is None
     had = {'mx': row.has_mx, 'a': bool((row.dns or {}).get('a')), 'cert': bool((row.ct or {}).get('count'))}
 
     ns = _query(resolve, row.domain, 'NS', spend)
@@ -100,8 +120,14 @@ def check_row(row, now, resolve, get, bootstrap, spend):
         for rdtype in ('A', 'AAAA', 'MX'):
             answers[rdtype] = _query(resolve, row.domain, rdtype, spend)
     if ns == 'error' or 'error' in answers.values():
-        row.next_check, row.last_checked = now + DNS_RETRY, now
-        row.save(update_fields=['next_check', 'last_checked'])
+        try:
+            fails = int((row.dns or {}).get('fails', 0)) + 1
+        except (TypeError, ValueError):
+            fails = 1
+        delay = min(DNS_RETRY.total_seconds() * 2 ** min(fails - 1, 10), BACKOFF_CAP)
+        row.dns = {**(row.dns or {}), 'fails': fails}
+        row.next_check, row.last_checked = now + timedelta(seconds=delay), now
+        row.save(update_fields=['dns', 'next_check', 'last_checked'])
         return []
 
     registered = bool(ns)
@@ -126,7 +152,7 @@ def check_row(row, now, resolve, get, bootstrap, spend):
         registered = registered or not gone  # an unknown answer or no RDAP server never flips a known registration
     ct, ct_at = row.ct, row.ct_checked_at
     if registered and not gone and not stop and _due(ct_at, now, CT_WATCHING if row.status == 'watching' else CT_OTHER):
-        status, body = get(crtsh.exact_url(row.domain), provider='crtsh', max_wait=rdap.WAIT)
+        status, body = get(crtsh.exact_url(row.domain), provider='crtsh', max_wait=rdap.WAIT, max_bytes=http.MAX_BODY)
         if status == 200 and isinstance(body, list):
             ct, ct_at = _ct_summary(body, row.domain), now
 
@@ -147,7 +173,9 @@ def check_row(row, now, resolve, get, bootstrap, spend):
     events = []
     title_domain = defang(row.domain)
     cert = bool((ct or {}).get('count'))
-    if row.registered and was_registered is not True and was_status != 'ignored':
+    if silent:
+        pass
+    elif row.registered and was_registered is not True and was_status != 'ignored':
         created = None
         try:
             from django.utils.dateparse import parse_datetime
@@ -180,10 +208,10 @@ def _body(resp):
     return b''.join(chunks)[:BODY_CAP].decode('utf-8', 'replace')
 
 
-def check_http(row, now, get_factory=safe_fetch.pinned_get, resolve=collect._resolve):
+def check_http(row, now, get_factory=safe_fetch.pinned_get, resolve=collect._resolve, spend=None):
     """Opt-in (LOOKALIKE_HTTP): one GET https://<domain>/ at most weekly for a registered row with an A record, through
     a vetted public IP, no redirects, no scan identity headers beyond the User-Agent. Never contacts anything else."""
-    if not settings.LOOKALIKE_HTTP or not row.registered or not (row.dns or {}).get('a'):
+    if not settings.LOOKALIKE_HTTP or row.status in ('ignored', 'ours') or not row.registered or not (row.dns or {}).get('a'):
         return None
     try:
         from django.utils.dateparse import parse_datetime
@@ -195,7 +223,11 @@ def check_http(row, now, get_factory=safe_fetch.pinned_get, resolve=collect._res
     if not ratelimit.take_daily('lookalike_http', HTTP_DAILY):
         return None
     record = _http_record(now)
-    ip, reason = safe_fetch.resolve_vetted(row.domain, resolve)
+    def metered(name, rdtype):  # the vetting lookups spend the same DNS budget as every other lookalike query
+        if spend is not None and not spend('dns'):
+            raise Stop
+        return resolve(name, rdtype)
+    ip, reason = safe_fetch.resolve_vetted(row.domain, metered)
     if reason:
         log.info('lookalike http: address refused, not contacted')
     else:
@@ -208,9 +240,7 @@ def check_http(row, now, get_factory=safe_fetch.pinned_get, resolve=collect._res
                 allow_redirects=False, stream=True)
             try:
                 text = _body(resp)
-                m = TITLE_RE.search(text)
-                title = re.sub(r'\s+', ' ', html.unescape(m.group(1))).strip() if m else ''
-                title = re.sub(r'[\x00-\x1f\x7f]', '', title)
+                title, password, brand = analyse(text, generate._EXTRACT(row.root.value).domain)
                 location = None
                 if 300 <= resp.status_code < 400:
                     try:
@@ -218,8 +248,7 @@ def check_http(row, now, get_factory=safe_fetch.pinned_get, resolve=collect._res
                     except ValueError:
                         host = None
                     location = host.lower()[:253] if host else None
-                brand = generate._EXTRACT(row.root.value).domain in text.lower()
-                record = _http_record(now, resp.status_code, title, brand, bool(PASSWORD_RE.search(text)), location)
+                record = _http_record(now, resp.status_code, title, brand, password, location)
             finally:
                 resp.close()
         except (requests.RequestException, OSError, ValueError):
