@@ -40,6 +40,15 @@ class ScopingTests(McpBase):
         for name, spec in registry.REGISTRY.items():
             self.assertTrue('project' in inspect.signature(spec.raw).parameters or name in UNSCOPED, name)
 
+    def test_every_id_parameter_is_swept(self):
+        found = {p for spec in registry.REGISTRY.values() for p in inspect.signature(spec.raw).parameters
+                 if p.endswith('_id') or p.endswith('_ids')}
+        self.assertEqual(found - set(ID_PARAMS), {'issue_ids'}, 'a new id parameter needs a sweep case')
+        a = {**self.ids}
+        mine = self.call('forecast_score', project='p1', issue_ids=[a['issue_id']])
+        gone = self.call('forecast_score', project='p1', issue_ids=[10**9])
+        self.assertEqual(mine, gone)  # another project's issue id is ignored exactly like a missing one
+
     def test_no_tool_crosses_projects(self):
         valid = {'kind': 'false_positive', 'reason': 'r', 'text': 't', 'cadence_tier': 'off',
                  'entries': ['z.x.com'], 'issue_ids': None}
@@ -85,5 +94,5 @@ class ScopingTests(McpBase):
             a = registry.annotations(spec)
             self.assertEqual(a['readOnlyHint'], name not in writes, name)
             if name in writes:
-                self.assertEqual(a['destructiveHint'], name in ('revoke_waiver', 'set_asset_cadence'), name)
-            self.assertEqual(a['openWorldHint'], name == 'start_asm_scan', name)
+                self.assertEqual(a['destructiveHint'], name in ('revoke_waiver', 'set_asset_cadence', 'waive_issue', 'add_assets'), name)
+            self.assertEqual(a['openWorldHint'], name in ('start_asm_scan', 'add_assets'), name)

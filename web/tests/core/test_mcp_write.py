@@ -5,6 +5,7 @@ from django.utils import timezone
 from api import asset_add
 from limes.mcp import registry
 from scanEngine.models import EngineType
+from rolepermissions.roles import clear_roles
 from startScan.models import Asset, IssueNote, IssueWaiver, ScanHistory, TrackedIssue
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
@@ -62,7 +63,8 @@ class WriteToolTests(WriteBase):
         self.assertEqual((d['added'], d['existing'], d['skipped']), (2, 0, 0))
         a = Asset.objects.get(project=self.p1, value='n1.x.com')
         self.assertEqual(a.added_by, self.admin)
-        self.assertEqual(a.scope_tier, 'owned_host')
+        self.assertEqual(a.scope_tier, 'candidate')  # the default: nothing the agent adds becomes owned
+        self.assertFalse(Domain.objects.filter(name__in=['n1.x.com', 'n2.x.com']).exists())
         self.assertTrue(str(a.sources).count('(via MCP)') >= 1, a.sources)
         before = Asset.objects.count()
         self.assertEqual(self.err(self.call('add_assets', project='p1', entries=[f'h{i}.x.com' for i in range(51)],
@@ -72,6 +74,62 @@ class WriteToolTests(WriteBase):
         self.assertEqual(w['skipped'], 1)
         self.assertTrue(all(set(x) == {'untrusted_text'} for x in w['warnings']), w)
 
+    def test_add_assets_tier_comes_from_the_setting(self):
+        for tier in ('owned_host', 'owned_root'):
+            with override_settings(MCP_ADD_TIER=tier):
+                self.data(self.call('add_assets', project='p1', entries=[f'{tier[6:]}.y.com'], reason='r'))
+            self.assertEqual(Asset.objects.get(value=f'{tier[6:]}.y.com').scope_tier, tier)
+        with override_settings(MCP_ADD_TIER='co_brand'):  # a bad value falls back to the safe one
+            self.data(self.call('add_assets', project='p1', entries=['bad.y.com'], reason='r'))
+        self.assertEqual(Asset.objects.get(value='bad.y.com').scope_tier, 'candidate')
+        self.assertNotIn('tier', registry.REGISTRY['add_assets'].raw.__annotations__)
+
+    def test_add_assets_never_touches_existing_rows(self):
+        def mk(value, tier, reason):
+            return Asset.objects.create(project=self.p1, kind='hostname', value=value, scope_tier=tier,
+                                        decision_reason=reason, state='active')
+        rows = [mk('dep.x.com', 'dependency', 'dep why'), mk('cd.x.com', 'candidate', 'cand why'),
+                mk('own.x.com', 'owned_host', 'own why'), mk('rej.x.com', 'rejected', 'rej why')]
+        before = [(a.pk, a.scope_tier, a.decision_reason, a.state, a.added_by_id, a.sources) for a in rows]
+        for tier in ('candidate', 'owned_host', 'owned_root'):
+            with override_settings(MCP_ADD_TIER=tier):
+                d = self.data(self.call('add_assets', project='p1', reason='agent says so',
+                                        entries=[a.value for a in rows]))
+            self.assertEqual(d['added'], 0, tier)
+        after = [(a.pk, a.scope_tier, a.decision_reason, a.state, a.added_by_id, a.sources)
+                 for a in Asset.objects.filter(pk__in=[r.pk for r in rows]).order_by('pk')]
+        self.assertEqual(after, before)
+
+    def test_agent_text_is_stripped_before_the_suffix(self):
+        self.data(self.call('add_assets', project='p1', entries=['s.x.com'], reason='  why \n'))
+        self.assertEqual(Asset.objects.get(value='s.x.com').decision_reason, 'why (via MCP)')
+        a = dict(project='p1', issue_id=self.issue.id)
+        self.data(self.call('add_issue_note', text=' \n note \t', **a))
+        self.data(self.call('waive_issue', kind='false_positive', reason='\n r  ', **a))
+        self.assertEqual(IssueNote.objects.get().text, 'note (via MCP)')
+        self.assertEqual(IssueWaiver.objects.get().reason, 'r (via MCP)')
+        self.assertEqual(self.err(self.call('add_issue_note', text='   ', **a)), 'invalid')
+
+    def test_nul_is_refused(self):
+        a = dict(project='p1', issue_id=self.issue.id)
+        self.assertEqual(self.err(self.call('add_issue_note', text='a\x00b', **a)), 'invalid')
+        self.assertEqual(self.err(self.call('add_assets', project='p1', entries=['q.x.com', 'b\x00.x.com'],
+                                            reason='r')), 'invalid')
+        self.assertEqual(self.err(self.call('search', project='p1', query='ab\x00cd')), 'invalid')
+        self.assertEqual(IssueNote.objects.count(), 0)
+        self.assertFalse(Asset.objects.filter(value='q.x.com').exists())
+
+    def test_removed_role_and_read_token_cannot_write(self):
+        a = dict(project='p1', issue_id=self.issue.id, text='t')
+        self.assertEqual(self.err(self.call('add_issue_note', self.t_admin_ro, **a)), 'forbidden')
+        self.data(self.call('add_issue_note', **a))
+        clear_roles(self.admin)  # the token was minted while the user was an admin
+        self.assertEqual(self.err(self.call('add_issue_note', **a)), 'forbidden')
+        self.assertEqual(IssueNote.objects.count(), 1)
+        self.admin.is_active = False
+        self.admin.save()
+        self.assertEqual(self.err(self.call('add_issue_note', **a)), 'unauthorized')
+
     def test_start_asm_scan(self):
         Domain.objects.create(project=self.p1, name='x.com', insert_date=timezone.now())
         EngineType.objects.create(engine_name='d', yaml_configuration='{}', default_engine=True)
@@ -79,11 +137,29 @@ class WriteToolTests(WriteBase):
             self.data(self.call('start_asm_scan', project='p1', asset_id=self.root.id))
             m.assert_called_once()
             self.assertEqual(ScanHistory.objects.get().initiated_by, self.admin)
+            ScanHistory.objects.update(scan_status=2)
             self.assertEqual(self.err(self.call('start_asm_scan', self.t_aud, project='p1', asset_id=self.root.id)),
                              'forbidden')
             e = self.call('start_asm_scan', project='p1', asset_id=self.host.id)
             self.assertEqual(self.err(e), 'invalid')
             self.assertIn('not supported', e['error']['message'])
+            self.assertEqual(m.call_count, 1)
+
+    def test_start_asm_scan_refuses_while_a_scan_runs(self):
+        from limes.definitions import RUNNING_TASK, SUCCESS_TASK
+        dom = Domain.objects.create(project=self.p1, name='x.com', insert_date=timezone.now())
+        EngineType.objects.create(engine_name='d', yaml_configuration='{}', default_engine=True)
+        eng = EngineType.objects.first()
+        other = Domain.objects.create(project=self.p2, name='y.com', insert_date=timezone.now())
+        ScanHistory.objects.create(domain=other, scan_type=eng, scan_status=RUNNING_TASK, start_scan_date=timezone.now())
+        done = ScanHistory.objects.create(domain=dom, scan_type=eng, scan_status=SUCCESS_TASK,
+                                          start_scan_date=timezone.now())
+        with mock.patch('limes.continuous.initiate_scan.apply_async') as m:
+            self.data(self.call('start_asm_scan', project='p1', asset_id=self.root.id))  # another project's scan: fine
+            ScanHistory.objects.filter(pk=done.pk).update(scan_status=RUNNING_TASK)
+            e = self.call('start_asm_scan', project='p1', asset_id=self.root.id)
+            self.assertEqual(self.err(e), 'invalid')
+            self.assertIn('in progress', e['error']['message'])
             self.assertEqual(m.call_count, 1)
 
     def test_set_asset_cadence(self):

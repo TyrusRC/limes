@@ -63,6 +63,16 @@ def _invalid(e):
     return McpError('invalid', 'invalid arguments: ' + '; '.join(parts))
 
 
+def _has_nul(v):
+    if isinstance(v, str):
+        return '\x00' in v
+    if isinstance(v, dict):
+        return any(_has_nul(k) or _has_nul(x) for k, x in v.items())
+    if isinstance(v, (list, tuple)):
+        return any(_has_nul(x) for x in v)
+    return False
+
+
 def _run(name, token_pk, args, now, state):
     state['caller'] = caller = access.resolve_caller(token_pk, now)
     spec = REGISTRY.get(name)  # only after authentication: a stranger learns nothing about tool names
@@ -75,6 +85,8 @@ def _run(name, token_pk, args, now, state):
         access.require(caller, spec.perm)
     if 'caller' in args:
         raise McpError('invalid', 'invalid arguments: caller: reserved name')
+    if _has_nul(args):  # Postgres cannot store NUL; refuse it up front instead of failing deep in a tool
+        raise McpError('invalid', 'invalid arguments: NUL characters are not allowed')
     try:
         data = spec.fn(caller, **args)
     except ValidationError as e:

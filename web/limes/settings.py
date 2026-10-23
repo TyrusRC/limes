@@ -39,6 +39,8 @@ CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 # MCP server (limes.mcp): off by default; writes need their own switch
 MCP_ENABLED = env.bool('LIMES_MCP_ENABLED', default=False)
 MCP_WRITES_ENABLED = env.bool('LIMES_MCP_WRITES_ENABLED', default=False)
+# Tier of assets an agent adds through MCP add_assets (anything but candidate/owned_host/owned_root counts as candidate).
+MCP_ADD_TIER = env.str('LIMES_MCP_ADD_TIER', default='candidate')
 MCP_ALLOWED_ORIGINS = env.list('LIMES_MCP_ALLOWED_ORIGINS', default=[])
 MCP_ALLOWED_HOSTS = env.list('LIMES_MCP_ALLOWED_HOSTS', default=[])
 MCP_RATE_PER_MIN = max(1, env.int('LIMES_MCP_RATE_PER_MIN', default=60))

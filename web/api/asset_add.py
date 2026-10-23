@@ -99,9 +99,10 @@ def classify_asset_entry(raw):
     return _ok('root_domain' if domains.registrable(value) == value else 'hostname', value)
 
 
-def add_assets(project, raw, tier, reason, user, active_authorized=None):
+def add_assets(project, raw, tier, reason, user, active_authorized=None, create_only=False):
     """Add owned assets by explicit entries (the REST view and the MCP tool both call this). `raw` is a list of
     entries, `tier` one of owned_root/owned_host/co_brand, `active_authorized` None when the caller did not give it.
+    create_only: an existing row of any tier is left exactly as it is (no promotion, no new reason or source).
     Returns {'added', 'existing', 'skipped', 'warnings'}."""
     from django.conf import settings
     from django.db import transaction
@@ -135,7 +136,7 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None):
             # NOTE: one query per CIDR (about 24 per range, 5000 entries per request at most). Upgrade:
             # read the project's cidr tiers once before the loop.
             new_cidrs = []
-            if c['kind'] == 'cidr' and tier != 'co_brand':
+            if c['kind'] == 'cidr' and tier in ('owned_root', 'owned_host'):  # only owned ranges count toward the cap
                 for v in c['values']:
                     row_tier = Asset.objects.filter(project=project, kind='cidr', value=v).values_list(
                         'scope_tier', flat=True).first()
@@ -161,6 +162,9 @@ def add_assets(project, raw, tier, reason, user, active_authorized=None):
                 if not created and asset.scope_tier == 'rejected':
                     skipped += 1
                     warnings.append(f'{asset.value} was rejected; confirm it instead of re-adding')
+                    continue
+                if not created and create_only:
+                    existing += 1
                     continue
                 promote = created or asset.scope_tier in ('candidate', 'dependency')
                 if not promote and not (set_authorized and asset.scope_tier == 'co_brand'):
