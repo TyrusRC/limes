@@ -61,6 +61,13 @@ class CategoryCardsTest(PostureBase):
         self.assertIsNone(d['tls'])
         self.assertIsNone(d['vulnerabilities'])
 
+    def test_boolean_snapshot_value_is_no_trend(self):
+        p = self.reconcile_project()
+        today = timezone.localtime(self.now).date()
+        ScoreSnapshot.objects.create(project=p, date=today - timedelta(days=40), version='v', grade='A',
+                                     categories={'web': True})
+        self.assertIsNone({c['key']: c['delta_30'] for c in posture.category_cards(p, self.now)}['web'])
+
     def test_waived_only_project(self):
         s = self.scan()
         a = self.host('a.x.com')
@@ -144,6 +151,14 @@ class CertificatesTest(PostureBase):
         self.assertEqual((len(out['rows']), out['total']), (posture.CERT_LIMIT, 13))
         self.assertEqual(len([r for r in out['rows'] if r['host'] == 'a.x.com']), 1)
 
+    def test_naive_not_after_is_read_as_utc(self):
+        a = self.cert('a.x.com', timedelta(days=5))
+        from startScan.models import RiskCheck
+        naive = (self.now + timedelta(days=5)).astimezone(timezone.utc).replace(tzinfo=None)
+        RiskCheck.objects.filter(asset=a).update(evidence={'not_after': naive.isoformat()})
+        rows = posture.certificates(self.p, self.now)['rows']
+        self.assertEqual(rows[0]['not_after'], naive.replace(tzinfo=timezone.utc))
+
     def test_garbage_evidence_is_skipped(self):
         a = self.cert('a.x.com', timedelta(days=5))
         from startScan.models import RiskCheck
@@ -190,6 +205,18 @@ class TechnologiesTest(PostureBase):
         self.assertEqual(out[2], {'name': 't00', 'count': 1})
         self.assertEqual(sorted(o['name'] for o in out[2:]), sorted(f't{i:02d}' for i in range(8)))
         self.assertNotIn('only-candidate', [o['name'] for o in posture.technologies(self.p)])
+
+    def test_blank_technology_does_not_hide_the_asset(self):
+        a, b = self.host('a.x.com'), self.host('b.x.com')
+        self.tech(a, 'nginx', '')
+        a.technologies.add(Technology.objects.create(name=None))
+        self.tech(b, 'nginx')
+        self.assertEqual(posture.technologies(self.p), [{'name': 'nginx', 'count': 2}])
+
+    def test_same_name_twice_on_one_asset_counts_once(self):
+        a = self.host('a.x.com')
+        self.tech(a, 'nginx', 'nginx')
+        self.assertEqual(posture.technologies(self.p), [{'name': 'nginx', 'count': 1}])
 
     def test_technologies_empty_and_flat_queries(self):
         self.assertEqual(posture.technologies(self.p), [])

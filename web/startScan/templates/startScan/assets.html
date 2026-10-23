@@ -93,7 +93,7 @@ $(document).ready(function() {
   var filterKeys = ['kind', 'scope_tier', 'state', 'source', 'tag', 'technology'];
   filterKeys.forEach(function(k) {
     var el = document.getElementById('f_' + k), v = query.get(k);
-    if (!v) return;
+    if (!v || !el) return;
     if (el.tagName !== 'SELECT' || Array.prototype.some.call(el.options, function(o) { return o.value === v; })) el.value = v;
   });
   var project = "{{ current_project.slug }}";

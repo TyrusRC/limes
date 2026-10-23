@@ -39,7 +39,7 @@ def category_cards(project, now=None):
         old = before.get(key)
         cards.append({'key': key, 'label': scoring.CATEGORY_LABELS[key], 'score': s['score'], 'grade': s['grade'],
                       'raw_score': s['raw_score'], 'assessed': s['assessed'] > 0, 'open': c['open'], 'waived': c['waived'],
-                      'delta_30': s['score'] - old if s['score'] is not None and isinstance(old, int) else None})
+                      'delta_30': s['score'] - old if s['score'] is not None and isinstance(old, int) and not isinstance(old, bool) else None})
     return cards
 
 
@@ -107,6 +107,6 @@ def certificates(project, now=None):
 def technologies(project):
     from startScan.models import Asset
     rows = (Asset.objects.filter(project=project, scope_tier__in=OWNED).exclude(state='retired')
-            .exclude(technologies__name__isnull=True).exclude(technologies__name='')
+            .filter(technologies__name__gt='')  # NULL and '' both fail this, without dropping the asset's other technologies
             .values('technologies__name').annotate(count=Count('id', distinct=True)).order_by('-count', 'technologies__name'))
     return [{'name': r['technologies__name'], 'count': r['count']} for r in rows[:TECH_LIMIT]]
