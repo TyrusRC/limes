@@ -13,6 +13,11 @@ ifeq ($(LLM), 1)
 SERVICES += ollama
 COMPOSE_ALL_FILES += --profile llm
 endif
+# The certificate watch is opt-in (about 157 GB/day inbound, inferred): make up REALTIME=1 with LIMES_CT_WATCH=true
+ifeq ($(REALTIME), 1)
+SERVICES += ct-watch
+COMPOSE_ALL_FILES += --profile realtime
+endif
 
 # Check if 'docker compose' command is available, otherwise use 'docker-compose'
 DOCKER_COMPOSE := $(shell if command -v docker > /dev/null && docker compose version > /dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)

@@ -36,6 +36,13 @@ ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
 ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
+# Certificate watch (limes.ct.watch): opt-in self-hosted certspotter, `make up REALTIME=1` with LIMES_CT_WATCH=true
+CT_WATCH = env.bool('LIMES_CT_WATCH', default=False)
+CT_WATCH_RESTART_MIN = env.int('LIMES_CT_WATCH_RESTART_MIN', default=300)  # seconds between watchlist-driven restarts
+CT_WATCHLIST_MAX = env.int('LIMES_CT_WATCHLIST_MAX', default=5000)
+CT_INGEST_PER_MIN = env.int('LIMES_CT_INGEST_PER_MIN', default=600)  # spool files ingested per minute
+CT_STATE_DIR = env('LIMES_CT_STATE_DIR', default='/var/lib/ct-watch')
+CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before a silent watcher fails its healthcheck
 # Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
 # share of each monitor tick's budget the queue may take
 EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
