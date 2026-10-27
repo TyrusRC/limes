@@ -5,12 +5,13 @@ from django.test import override_settings
 from django.utils import timezone
 from limes.mcp import registry
 from scanEngine.models import EngineType
+from remediation.models import RemediationRequest
 from startScan.models import (Asset, IssueNote, IssueWaiver, ScanActivity, ScanHistory, TrackedIssue, Vulnerability)
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
 
 UNSCOPED = {'list_projects', 'get_system_status'}
-ID_PARAMS = ('asset_id', 'issue_id', 'scan_id', 'vulnerability_id', 'activity_id')
+ID_PARAMS = ('asset_id', 'issue_id', 'scan_id', 'vulnerability_id', 'activity_id', 'request_id')
 
 
 @override_settings(MCP_WRITES_ENABLED=True)
@@ -28,7 +29,8 @@ class ScopingTests(McpBase):
         vuln = Vulnerability.objects.create(scan_history=scan, name='v', severity=2, open_status=True,
                                             discovered_date=timezone.now(), http_url='http://y.com/')
         self.ids = {'asset_id': self.asset.id, 'issue_id': self.issue.id, 'scan_id': scan.id,
-                    'vulnerability_id': vuln.id, 'activity_id': act.id}
+                    'vulnerability_id': vuln.id, 'activity_id': act.id,
+                    'request_id': RemediationRequest.objects.create(project=self.p2, title='t').id}
 
     def snapshot(self):
         return (IssueWaiver.objects.filter(issue=self.issue).count(),
