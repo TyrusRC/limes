@@ -71,10 +71,11 @@ class WaivedKeys(set):
 def waived_keys(project, now=None):
     """Waived (asset_id, normalized key) pairs; expires_at is honoured at read time."""
     now = now or timezone.now()
-    active = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
-    out = WaivedKeys(TrackedIssue.objects.filter(project=project).filter(Exists(active)).values_list('asset_id', 'key'))
-    out.wide = frozenset(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__isnull=True, project=project)
-                         .values_list('key', flat=True))
+    rows = (IssueWaiver.objects.filter(IssueWaiver.active_q(now)).filter(Q(issue__project=project) | Q(issue__isnull=True, project=project))
+            .values_list('issue_id', 'issue__asset_id', 'issue__key', 'key'))
+    rows = list(rows)
+    out = WaivedKeys((asset_id, issue_key_) for issue_id, asset_id, issue_key_, _ in rows if issue_id is not None)
+    out.wide = frozenset(key for issue_id, _, _, key in rows if issue_id is None)
     return out
 
 

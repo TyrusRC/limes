@@ -56,7 +56,7 @@ Issues
     <div><span id="fc_count"></span><span id="fc_current"></span></div>
   </div>
   <div class="l-banner-actions">
-    {% if user|can:'modify_targets' %}<a class="btn btn-primary" id="fc_remediate" href="{% url 'remediation_new' current_project.slug %}"><i class="fe-check-square" aria-hidden="true"></i> Request remediation</a>{% endif %}
+    {% if user|can:'modify_targets' %}<button type="button" class="btn btn-primary" id="fc_remediate" data-url="{% url 'remediation_new' current_project.slug %}"><i class="fe-check-square" aria-hidden="true"></i> Request remediation</button>{% endif %}
     <button class="btn btn-ghost" type="button" id="fc_clear">Clear selection</button>
   </div>
 </div>

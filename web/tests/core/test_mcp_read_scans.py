@@ -297,8 +297,11 @@ class HostileTextTests(ScansBase):
             cvss_metrics=H, extracted_results=[H, H], discovered_date=timezone.now(),
             tag_names=[H], cwe_names=[H], reference_urls=[H])
         v.cve_ids.add(CveId.objects.create(name=H))
+        from remediation import service
+        req = service.create_request(self.p1, self.admin, H, H, None, [issue.id])
+        service.add_message(req, self.admin, H)
         return {'asset_id': owned.id, 'issue_id': issue.id, 'scan_id': scan.id, 'activity_id': act.id,
-                'vulnerability_id': v.id}
+                'vulnerability_id': v.id, 'request_id': req.id}
 
     def walk(self, obj, found):
         if isinstance(obj, dict):

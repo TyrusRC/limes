@@ -7,6 +7,7 @@
   var el = LimesUx.el, project = root.dataset.project, MAX = Number(root.dataset.maxIssues), MAX_EMAILS = Number(root.dataset.maxEmails);
   var groups = [], picked = new Set(), expanded = {}, names = {}, step = 1, fseq = 0;
   function $(id) { return document.getElementById(id); }
+  function detailUrl(id) { return root.dataset.detail.replace('/0/', '/' + Number(id) + '/'); }
 
   var pre = new URLSearchParams(location.search).get('issues') || '';
   pre.split(',').slice(0, MAX).forEach(function (v) { if (/^[0-9]{1,18}$/.test(v)) picked.add(Number(v)); });
@@ -143,7 +144,7 @@
     if ($('rw_assignee').value) body.assignee = $('rw_assignee').value;
     LimesUx.post('/api/remediation/create/', body).then(function (d) {
       if (!d.status) { b.disabled = false; LimesUx.toast(d.message || 'Could not create the request.', true); return; }
-      location.href = root.dataset.detail.replace('/0/', '/' + Number(d.id) + '/');
+      location.href = detailUrl(d.id);
     }).catch(function () { b.disabled = false; LimesUx.toast('Request failed.', true); });
   });
 
