@@ -584,7 +584,8 @@ class StageTest(TestCase):
         self.addCleanup(p.stop)
         # the provisional extras (bucket probes, dangling DNS) would otherwise reach the network from these tests
         self.extras = [mock.patch('limes.cloud_storage.discover', return_value={'requests': 0}).start(),
-                       mock.patch('limes.dangling.discover', return_value={'requests': 0}).start()]
+                       mock.patch('limes.dangling.discover', return_value={'requests': 0}).start(),
+                       mock.patch('limes.code_search.discover', return_value={'pages': 0}).start()]
         self.addCleanup(mock.patch.stopall)
         self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
 
@@ -599,6 +600,7 @@ class StageTest(TestCase):
         self.assertEqual(stages.risk_checks.status, SUCCESS_TASK)
         self.extras[0].assert_called_once()
         self.extras[1].assert_called_once()
+        self.extras[2].assert_called_once()
 
     def _ctx(self, tier):
         import tempfile
