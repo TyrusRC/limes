@@ -1,5 +1,6 @@
 from limes.tasks.base import *
 from limes.run_urls import RunUrls
+from limes.scope import target_host
 
 #-------------#
 # Utils tasks #
@@ -379,13 +380,25 @@ def save_vulnerability(**vuln_data):
 	return vuln, created
 
 
+def host_in_domain(host, root):
+	"""True when host is the root domain or a real subdomain of it. Not a substring test: `x.com.evil.org`,
+	`notx.com` and `https://evil.org/?q=x.com` all contain `x.com` and are not ours."""
+	host = (host or '').lower().rstrip('.')
+	root = (root or '').lower().rstrip('.')
+	return bool(host and root) and (host == root or host.endswith('.' + root))
+
+
+def url_in_domain(url, root):
+	return host_in_domain(target_host(url), root)
+
+
 def record_url(store, http_url, domain, is_default=False, **fields):
 	"""Record http_url in the run's URL store when it is a valid URL of the scan's domain.
 
 	Returns:
 		tuple: (stored url, created); (None, False) when the URL is refused.
 	"""
-	if domain and domain.name not in http_url:
+	if domain and not url_in_domain(http_url, domain.name):
 		logger.error(f"{http_url} is not a URL of domain {domain.name}. Skipping.")
 		return None, False
 	if not urlparse(http_url).scheme or not validators.url(http_url):
@@ -402,7 +415,7 @@ def probe_url(http_url, ctx, crawl=False, is_default=False):
 	"""
 	domain = Domain.objects.filter(pk=ctx.get('domain_id')).first()
 	if crawl:
-		if domain and domain.name not in http_url:
+		if domain and not url_in_domain(http_url, domain.name):
 			logger.error(f"{http_url} is not a URL of domain {domain.name}. Skipping.")
 			return None, False
 		ctx['track'] = False
@@ -438,7 +451,7 @@ def save_host(name, ctx={}):
 
 	if ctx.get('domain_id'):
 		domain = Domain.objects.get(id=ctx.get('domain_id'))
-		if domain.name not in name:
+		if not host_in_domain(name, domain.name):
 			logger.error(f"{name} is not a subdomain of domain {domain.name}. Skipping.")
 			return None
 

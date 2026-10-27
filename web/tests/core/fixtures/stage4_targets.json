@@ -102,13 +102,6 @@
      "8.8.1.1"
     ]
    ],
-   "hostname:x.com.evil.org": [
-    "owned_host",
-    null,
-    null,
-    [],
-    []
-   ],
    "root_domain:x.com": [
     "owned_root",
     null,
@@ -166,8 +159,7 @@
     "p.x.com",
     "rej.x.com",
     "url.x.com",
-    "x.com",
-    "x.com.evil.org"
+    "x.com"
    ]
   },
   "port_scan_file": [
@@ -355,13 +347,6 @@
      "8.8.1.1"
     ]
    ],
-   "hostname:x.com.evil.org": [
-    "owned_host",
-    null,
-    null,
-    [],
-    []
-   ],
    "root_domain:x.com": [
     "owned_root",
     null,
@@ -449,8 +434,7 @@
     "p.x.com",
     "rej.x.com",
     "url.x.com",
-    "x.com",
-    "x.com.evil.org"
+    "x.com"
    ]
   },
   "port_scan_file": [
@@ -483,17 +467,17 @@
   "vigil": {
    "final": [
     "https://a.x.com",
-    "https://a.x.com:8443",
     "https://a.x.com/api",
     "https://a.x.com/login",
+    "https://a.x.com:8443",
     "https://new.x.com",
     "https://x.com"
    ],
    "raw": [
     "https://a.x.com",
-    "https://a.x.com:8443",
     "https://a.x.com/api",
     "https://a.x.com/login",
+    "https://a.x.com:8443",
     "https://cand.x.com",
     "https://dep.x.com",
     "https://new.x.com",
@@ -503,9 +487,9 @@
   },
   "vigil_file": [
    "https://a.x.com",
-   "https://a.x.com:8443",
    "https://a.x.com/api",
    "https://a.x.com/login",
+   "https://a.x.com:8443",
    "https://new.x.com",
    "https://x.com"
   ]
