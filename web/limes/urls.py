@@ -6,6 +6,7 @@ from django.urls import include, path
 
 from limes.health import healthz
 from limes.views import serve_protected_media
+from sso import views as sso_views
 
 urlpatterns = [
     path('healthz', healthz, name='healthz'),
@@ -29,8 +30,11 @@ urlpatterns = [
         '',
         include('memberships.urls')),
     path(
+        '',
+        include('sso.urls')),
+    path(
         'login/',
-        auth_views.LoginView.as_view(template_name='base/login.html'),
+        sso_views.PasswordLoginView.as_view(),
         name='login'),
     path(
         'logout/',

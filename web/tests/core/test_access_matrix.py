@@ -12,6 +12,7 @@ from tests.core.access_base import AccessBase
 UNSCOPED = {
     'onboarding': 'redirects to a project the user may open',
     'four_oh_four': 'static page',
+    'sso_login': 'anonymous start of SSO; no project data', 'sso_callback': 'anonymous end of SSO; no project data',
     'login': 'anonymous', 'logout': 'own session', 'healthz': 'anonymous health probe',
     'serve_protected_media': 'login only: files are not project-addressed',
     'delete_project': 'resolved to its project by id (policy.EXTRA_RESOLVERS)',

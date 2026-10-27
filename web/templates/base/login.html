@@ -24,6 +24,10 @@
         {% for message in messages %}
         <div class="alert alert-warning" role="alert">{{ message }}</div>
         {% endfor %}
+        {% if sso_enabled %}
+        <a class="btn btn-primary w-100{% if local_login %} mb-3{% endif %}" href="{% url 'sso_login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Sign in with SSO</a>
+        {% endif %}
+        {% if local_login %}
         <form method="POST">
           {% csrf_token %}
           <div class="mb-3">
@@ -44,12 +48,14 @@
           {% endif %}
           <button class="btn btn-primary w-100" type="submit">Log in</button>
         </form>
+        {% endif %}
       </div>
     </div>
     <p class="l-auth-foot">Limes v{{ LIMES_CURRENT_VERSION }} · <a href="https://github.com/TyrusRC/limes/issues">Report an issue</a></p>
   </main>
   <script>
-    document.getElementById('pw-toggle').addEventListener('click', function () {
+    var toggle = document.getElementById('pw-toggle');
+    if (toggle) toggle.addEventListener('click', function () {
       var input = document.getElementById('password');
       var show = input.type === 'password';
       input.type = show ? 'text' : 'password';

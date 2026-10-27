@@ -91,6 +91,21 @@ INTERNETDB_DAILY_BUDGET = env.int('LIMES_INTERNETDB_DAILY_BUDGET', default=5000)
 PTR_DAILY_BUDGET = env.int('LIMES_PTR_DAILY_BUDGET', default=10000)
 # Third-party reputation feeds (limes/feeds). Opt-in names: blocklist_de, cins (terms unclear, off by default).
 FEEDS_OPTIN = env.list('LIMES_FEEDS_OPTIN', default=[])
+# Single sign-on (OpenID Connect). Off unless LIMES_OIDC_ENABLED is true and the issuer, client and redirect base are
+# set (docs/sso.md). The client secret stays in the environment: never in code, logs or pages.
+OIDC_ENABLED = env.bool('LIMES_OIDC_ENABLED', default=False)
+OIDC_ISSUER = env('LIMES_OIDC_ISSUER', default='').strip()
+OIDC_CLIENT_ID = env('LIMES_OIDC_CLIENT_ID', default='').strip()
+OIDC_CLIENT_SECRET = env('LIMES_OIDC_CLIENT_SECRET', default='')
+OIDC_SCOPES = env('LIMES_OIDC_SCOPES', default='openid email profile')
+OIDC_ALLOWED_DOMAINS = env.list('LIMES_OIDC_ALLOWED_DOMAINS', default=[])
+OIDC_AUTO_CREATE = env.bool('LIMES_OIDC_AUTO_CREATE', default=False)
+OIDC_DEFAULT_ROLE = env('LIMES_OIDC_DEFAULT_ROLE', default='read_only').strip()
+OIDC_DEFAULT_PROJECTS = env.list('LIMES_OIDC_DEFAULT_PROJECTS', default=[])
+OIDC_LINK_BY_EMAIL = env.bool('LIMES_OIDC_LINK_BY_EMAIL', default=False)
+OIDC_REDIRECT_BASE = env('LIMES_OIDC_REDIRECT_BASE', default='').strip()
+LOCAL_LOGIN = env.bool('LIMES_LOCAL_LOGIN', default=True)
+
 # Sent only to abuse.ch hosts, never logged. Empty: Feodo is fetched without a key.
 ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
 # Spamhaus DQS key (optional ZEN lookups per owned IP); part of every query name, so never logged. Empty: no lookups.
@@ -180,6 +195,7 @@ INSTALLED_APPS = [
     'startScan.apps.StartscanConfig',
     'remediation.apps.RemediationConfig',
     'memberships.apps.MembershipsConfig',
+    'sso.apps.SsoConfig',
     'django_ace',
     'django_celery_beat',
     'mathfilters',
@@ -272,6 +288,8 @@ STATICFILES_DIRS = [
 LOGIN_REQUIRED_IGNORE_VIEW_NAMES = [
     'login',
     'healthz',
+    'sso_login',
+    'sso_callback',
 ]
 
 LOGIN_URL = 'login'
