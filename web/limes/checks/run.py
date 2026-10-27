@@ -227,6 +227,9 @@ def run_asset_checks(asset, now=None, observers=None, resolve=collect._resolve):
             mail, dns_obs = obs['mail_dns'](asset.value)
             return email.evaluate(mail) + dns.evaluate(dns_obs)
         step(asset, root_checks)
+        if asset.scope_tier == 'owned_root':
+            from limes import mailpolicy  # late: mailpolicy imports this module
+            step(asset, lambda: mailpolicy.results(asset, resolve=resolve))
     if asset.kind == 'ip':
         # reputation reads the stored feeds only: no DNS, no DQS lookup here
         step(asset, lambda: _ip_checks(asset, now, obs, observers, done=done))

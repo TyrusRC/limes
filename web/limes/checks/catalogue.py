@@ -111,6 +111,19 @@ _PROVISIONAL = [
      'Delete the DNS record, or recreate the resource on the provider so the name is yours again.'),
     ('leak.public_code', 'data_leakage', 3, 'Public code mentions the domain next to what looks like a credential.',
      'Revoke and rotate the credential, then remove it from the repository and its history.'),
+    ('email.mta_sts_missing', 'email', 1, 'The domain receives mail but publishes no MTA-STS record (_mta-sts TXT).',
+     'Publish a TXT record at _mta-sts.<domain> ("v=STSv1; id=<new id>") and serve the policy file at '
+     'https://mta-sts.<domain>/.well-known/mta-sts.txt. Start in mode testing, then move to enforce.'),
+    ('email.mta_sts_testing', 'email', 1, 'The MTA-STS policy is not enforced (mode testing or none) or is invalid.',
+     'Fix the policy file (version STSv1, an mx line for every mail server, max_age of at least a day, ideally weeks), '
+     'watch the TLS-RPT reports, then set mode: enforce and change the id in the TXT record.'),
+    ('email.tls_rpt_missing', 'email', 1, 'The domain receives mail but publishes no SMTP TLS reporting record (_smtp._tls TXT).',
+     'Publish a TXT record at _smtp._tls.<domain>, for example "v=TLSRPTv1; rua=mailto:tls-reports@<domain>".'),
+    ('email.bimi_invalid', 'email', 1, 'A BIMI record is published but DMARC is not at quarantine or reject (or the logo URL is not HTTPS).',
+     'Move the DMARC policy to quarantine or reject (pct=100), and make the BIMI l= logo URL an https address; '
+     'mailbox providers ignore BIMI otherwise.'),
+    ('dns.dangling_ns', 'dns', 3, 'A name server listed for the domain no longer exists (NXDOMAIN), so someone could register it and answer for the domain.',
+     'Remove the dead name server from the delegation at the registrar and from the zone, or restore its name.'),
 ]
 for _i, _g, _s, _t, _f in _PROVISIONAL:
     CHECKS[_i] = Check(_i, _g, _s, _t, _f, True)

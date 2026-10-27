@@ -1,9 +1,9 @@
 """SPF, DMARC and MX checks from one observation. Pure: no I/O."""
 import re
 
-from limes.checks.catalogue import CHECKS, Result
+from limes.checks.catalogue import CHECKS, PROVISIONAL, Result
 
-IDS = [i for i in CHECKS if i.startswith('email.')]
+IDS = [i for i in CHECKS if i.startswith('email.') and i not in PROVISIONAL]  # provisional ones: limes.checks.mailpolicy
 
 
 def _first(records, prefix):

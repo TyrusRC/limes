@@ -17,7 +17,8 @@ IDS = {'rep.listed_drop': 'reputation', 'rep.listed_asndrop': 'reputation', 'rep
        'net.exposed_openai_api': 'network', 'net.exposed_triton': 'network', 'net.exposed_gradio': 'network',
        'net.exposed_jupyter': 'network', 'net.exposed_ray': 'network', 'leak.supabase_secret_key': 'data_leakage',
        'leak.hibp_breach': 'data_leakage', 'cloud.open_storage': 'data_leakage', 'dns.dangling_takeover': 'dns',
-       'leak.public_code': 'data_leakage',
+       'leak.public_code': 'data_leakage', 'email.mta_sts_missing': 'email', 'email.mta_sts_testing': 'email',
+       'email.tls_rpt_missing': 'email', 'email.bimi_invalid': 'email', 'dns.dangling_ns': 'dns',
        'api.exposed_docs': 'web', 'api.no_auth_declared': 'web', 'api.unauthenticated_access': 'web'}
 ORIGINAL = ('web', 'tls', 'email', 'dns', 'network', 'vulnerabilities')
 

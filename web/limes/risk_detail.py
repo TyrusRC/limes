@@ -27,6 +27,14 @@ WHY = {
     'reputation': 'Listing on an abuse feed can mean the address is compromised, and it harms mail delivery and trust.',
     'data_leakage': 'Exposed secrets or breached credentials give attackers access without exploiting anything.',
 }
+# Per-check reasons for the checks whose category text is too generic.
+CHECK_WHY = {
+    'email.mta_sts_missing': 'Without MTA-STS, mail servers sending to you can be downgraded to plain text or redirected by an attacker on the network path.',
+    'email.mta_sts_testing': 'A policy in testing or none mode is only reported on: senders still deliver mail over an unencrypted or unverified connection.',
+    'email.tls_rpt_missing': 'TLS reporting is how you learn that other servers fail to deliver to you securely; without it MTA-STS problems stay invisible.',
+    'email.bimi_invalid': 'Mailbox providers show a BIMI logo only for domains with an enforced DMARC policy; an invalid record gives no brand protection and signals a half-finished rollout.',
+    'dns.dangling_ns': 'Anyone who registers the missing name server name can answer DNS queries for your domain and hijack its web and mail.',
+}
 NO_TEXT = 'No description is recorded for this finding. Open the asset to see the scanner output.'
 NO_FIX = 'No remediation text is recorded for this finding. Check the references in the scanner output.'
 
@@ -71,7 +79,7 @@ def build(issue, now=None):
         'category': category, 'category_label': scoring.CATEGORY_LABELS.get(category, category),
         'provisional': bool(check and check.provisional), 'detected': detected_at(issue),
         'detected_text': (check.title if check else (finding and finding['description'])) or NO_TEXT,
-        'why': (finding['impact'] if finding and finding['impact'] else None) or WHY.get(category, ''),
+        'why': (finding['impact'] if finding and finding['impact'] else None) or CHECK_WHY.get(issue.key) or WHY.get(category, ''),
         'action': (check.fix if check else (finding and finding['remediation'])) or NO_FIX,
         'finding_url': finding['http_url'] if finding else None,
     }

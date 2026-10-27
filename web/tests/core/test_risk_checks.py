@@ -21,6 +21,8 @@ SPEC = {
     'net.exposed_jupyter': 4, 'net.exposed_ray': 4, 'leak.supabase_secret_key': 4, 'leak.hibp_breach': 2,
     'cloud.open_storage': 3, 'dns.dangling_takeover': 3, 'leak.public_code': 3,
     'api.exposed_docs': 2, 'api.no_auth_declared': 2, 'api.unauthenticated_access': 3,
+    'email.mta_sts_missing': 1, 'email.mta_sts_testing': 1, 'email.tls_rpt_missing': 1, 'email.bimi_invalid': 1,
+    'dns.dangling_ns': 3,
 }
 PORTS = {'ftp': 21, 'telnet': 23, 'smb': 445, 'rdp': 3389, 'mssql': 1433, 'oracle': 1521,
          'mysql': 3306, 'postgres': 5432, 'redis': 6379, 'elasticsearch': 9200,
@@ -189,7 +191,7 @@ class MailDnsEvalTest(SimpleTestCase):
     def mail(self, txt, dmarc, mx):
         from limes.checks import email as mail_checks
         res = mail_checks.evaluate({'txt': txt, 'dmarc': dmarc, 'mx': mx})
-        self.assertEqual([r.check for r in res], [i for i in CHECKS if i.startswith('email.')])
+        self.assertEqual([r.check for r in res], [i for i in CHECKS if i.startswith('email.') and not CHECKS[i].provisional])
         return {r.check: r for r in res}
 
     def test_spf_and_dmarc_good(self):

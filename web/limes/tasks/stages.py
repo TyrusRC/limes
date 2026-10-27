@@ -5,7 +5,7 @@ from limes.tasks.base import *
 from limes import scope
 from limes.run_urls import RunUrls, is_alive
 from limes.definitions import NOTHING_ASSESSED
-from limes import api_discovery, cloud_storage, code_search, dangling
+from limes import api_discovery, cloud_storage, code_search, dangling, mailpolicy
 from limes.checks import leak, run as checks_run
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
@@ -264,6 +264,7 @@ def risk_checks(self, ctx={}, description=None):
 		logger.exception('API discovery failed, continuing')
 	for name, step in (('Cloud storage', lambda: cloud_storage.discover(project, root)),
 					   ('Dangling DNS', lambda: dangling.discover(project, root)),
+					   ('Mail policy', lambda: mailpolicy.discover(project, root)),
 					   ('Code search', lambda: code_search.discover(project, root))):
 		try:  # provisional extras: their failure never costs the stage
 			logger.info('%s: %s', name, step())
