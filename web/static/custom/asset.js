@@ -97,6 +97,9 @@ function asset_actions(row) {
 	}
 	if (row.kind === 'root_domain') {
 		html += '<button class="btn btn-xs btn-soft-primary me-1" onclick="rescan_asset(' + id + ')">Rescan</button>';
+		if (row.scope_tier === 'owned_root' || (row.scope_tier === 'co_brand' && row.active_authorized)) {
+			html += '<button class="btn btn-xs btn-soft-warning me-1" onclick="full_scan_asset(' + id + ')">Full scan</button>';
+		}
 	}
 	if (asset_owned(row) && ASSET_MONITORABLE.indexOf(row.kind) !== -1 && row.cadence_tier !== 'off') {
 		html += '<button class="btn btn-xs btn-soft-secondary" onclick="stop_monitoring(' + id + ')">Stop monitoring</button>';
@@ -135,6 +138,11 @@ function stop_monitoring(id) {
 
 function rescan_asset(id) {
 	asset_run_action('rescan', id);
+}
+
+function full_scan_asset(id) {
+	if (!confirm('Run a full scan? It port-scans, crawls and actively tests this domain with vigil and mantis.')) return;
+	asset_run_action('fullscan', id);
 }
 
 var ASSET_CADENCES = [['crown_jewel', 'Crown jewel (daily)'], ['standard', 'Standard (weekly)'],

@@ -501,6 +501,56 @@ class RescanAssetApiTest(TestCase):
         self.apply_async.assert_not_called()
 
 
+class FullScanAssetApiTest(RescanAssetApiTest):
+    """The scanner run (port scan, crawl, vigil, mantis) the old wizard started, from the Assets page."""
+
+    def _post(self, user, **body):
+        body.setdefault('project', 'p1')
+        c = APIClient()
+        c.force_login(user)
+        return c.post('/api/action/asset/fullscan/', body, format='json')
+
+    def test_root_domain_enqueues_asm_scan(self):  # overrides the inherited ASM-mode test with the full-mode one
+        r = self._post(self.admin, asset_id=self.root.id, engine_id=self.engine.id)
+        self.assertEqual(r.json(), {'status': True, 'message': 'Full scan started for x.com'})
+        kw = self.apply_async.call_args.kwargs['kwargs']
+        self.assertEqual((kw['scan_mode'], kw['domain_id'], kw['scan_type']), ('full', self.domain.id, 1))
+
+    def test_cross_project_asset_is_404(self):
+        other = Project.objects.create(name='p2', slug='p2', insert_date=timezone.now())
+        foreign = Asset.objects.create(project=other, kind='root_domain', value='y.com', scope_tier='owned_root')
+        for project in ('p1', ''):
+            self.assertEqual(self._post(self.admin, asset_id=foreign.id, project=project).status_code, 404)
+        self.apply_async.assert_not_called()
+
+    def test_missing_asset_is_404(self):
+        self.assertEqual(self._post(self.admin, asset_id='abc').status_code, 404)
+
+    def test_unowned_root_refused(self):
+        r = self._post(self.admin, asset_id=self.cand.id).json()
+        self.assertFalse(r['status'])
+        self.cand.scope_tier = 'co_brand'  # co-brand without active authorisation is still refused
+        self.cand.save()
+        self.assertFalse(self._post(self.admin, asset_id=self.cand.id).json()['status'])
+        self.apply_async.assert_not_called()
+
+    def test_busy_project_refused(self):
+        from startScan.models import ScanHistory
+        ScanHistory.objects.create(domain=self.domain, scan_type=self.engine, scan_status=1,
+                                   start_scan_date=timezone.now())
+        r = self._post(self.admin, asset_id=self.root.id).json()
+        self.assertFalse(r['status'])
+        self.assertIn('already in progress', r['message'])
+        self.apply_async.assert_not_called()
+
+    def test_csrf_enforced(self):
+        c = APIClient(enforce_csrf_checks=True)
+        c.force_login(self.admin)
+        r = c.post('/api/action/asset/fullscan/', {'project': 'p1', 'asset_id': self.root.id}, format='json')
+        self.assertEqual(r.status_code, 403)
+        self.apply_async.assert_not_called()
+
+
 class AssetCadenceApiTest(TestCase):
     def setUp(self):
         from rolepermissions.roles import assign_role

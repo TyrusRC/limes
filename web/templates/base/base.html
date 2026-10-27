@@ -77,7 +77,6 @@
           }
         });
         $(window).on('hashchange', handleHashInUrl);
-        render_search_history('{{current_project.slug}}');
 
         getScanStatusSidebar(project='{{current_project.slug}}', reload=false);
         $('.right-bar-toggle').on('click', function () {
@@ -105,27 +104,6 @@
           }
         });
       });
-
-      function render_search_history(slug){
-        // queries are user-typed: build nodes with text(), never interpolate into HTML
-        fetch('/api/search/history/')
-        .then(response => response.json())
-        .then(function (response) {
-          var box = $('#search-history-items');
-          if (response.status) {
-            response.results.forEach(function (item) {
-              $('<a class="dropdown-item"></a>')
-                .attr('href', '/' + encodeURIComponent(slug) + '/search?query=' + encodeURIComponent(item.query))
-                .text(item.query)
-                .appendTo(box);
-            });
-          }
-          else{
-            $('<span class="dropdown-item-text text-muted"></span>').text('No recent searches.').appendTo(box);
-          }
-        });
-      }
-
     </script>
     {% if messages %}
       {% for message in messages %}

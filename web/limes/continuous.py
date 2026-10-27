@@ -50,12 +50,23 @@ def set_cadence(asset, tier):
     return True, f'cadence set to {tier}'
 
 
-def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
-    """Start the per-root ASM run (discovery, passive intel, screenshots). Returns (ok, message).
+def project_scan_busy(project_id):
+    """True while any scan of the project is queued or running (the cap on manual full scans)."""
+    return ScanHistory.objects.filter(domain__project_id=project_id, scan_status__in=IN_PROGRESS).exists()
+
+
+def start_asm_scan(asset, engine_id=None, initiated_by_id=None, mode='asm'):
+    """Start the per-root run: 'asm' = discovery, passive intel, screenshots; 'full' = the scanner run (port scan,
+    crawl, vigil DAST, mantis) of the old start-scan wizard, actively testing the real target. Returns (ok, message).
+    A full run only starts while the project has no other scan in progress.
     Always LIVE_SCAN: initiate_scan then runs on the ScanHistory written here. SCHEDULED_SCAN would make
     it create a second one and orphan this one in INITIATED."""
+    if mode not in ('asm', 'full'):
+        return False, 'unknown scan mode'
     if asset.kind != 'root_domain' or not asset.is_active_scan_allowed:
         return False, 'Per-asset rescan is not supported yet (owned root domains only in A2).'
+    if mode == 'full' and project_scan_busy(asset.project_id):
+        return False, 'a scan is already in progress for this project; wait for it to finish'
     domain = Domain.objects.filter(project=asset.project, name=asset.value).first()
     if not domain:
         return False, 'no Domain record for this root; add it as a target first.'
@@ -71,7 +82,6 @@ def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
     if not engine:
         return False, 'unknown scan engine; pick an engine or set a default one.'
     scan_history_id = create_scan_object(host_id=domain.id, engine_id=engine.id, initiated_by_id=initiated_by_id)
-    # Mirrors startScan.views.start_scan_ui, plus scan_mode='asm'.
     initiate_scan.apply_async(kwargs={
         'scan_history_id': scan_history_id,
         'domain_id': domain.id,
@@ -81,9 +91,9 @@ def start_asm_scan(asset, engine_id=None, initiated_by_id=None):
         'imported_subdomains': [],
         'out_of_scope_subdomains': [],
         'initiated_by_id': initiated_by_id,
-        'scan_mode': 'asm',
+        'scan_mode': mode,
     })
-    return True, f'ASM scan started for {asset.value}'
+    return True, f"{'Full' if mode == 'full' else 'ASM'} scan started for {asset.value}"
 
 
 def due_roots(now, project=None):

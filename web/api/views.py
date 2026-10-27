@@ -194,72 +194,20 @@ class ListTargetsDatatableViewSet(viewsets.ModelViewSet):
 
 
 
-class SearchHistoryView(APIView):
-	def get(self, request):
-		req = self.request
-
-		response = {}
-		response['status'] = False
-
-		scan_history = SearchHistory.objects.all().order_by('-id')[:5]
-
-		if scan_history:
-			response['status'] = True
-			response['results'] = SearchHistorySerializer(scan_history, many=True).data
-
-		return Response(response)
-
-
 class UniversalSearch(APIView):
+	"""Top-bar search over one project's assets and issues (limes.search). The project is required; JSON only, the
+	page renders every value as text."""
+
 	def get(self, request):
-		req = self.request
-		query = req.query_params.get('query')
-
-		response = {}
-		response['status'] = False
-
-		if not query:
-			response['message'] = 'No query parameter provided!'
-			return Response(response)
-
-		response['results'] = {}
-
-		# search history to be saved
-		SearchHistory.objects.get_or_create(
-			query=query
-		)
-
-		# lookup query in subdomain
-		subdomain = Subdomain.objects.filter(
-			Q(name__icontains=query) |
-			Q(cname__icontains=query) |
-			Q(page_title__icontains=query) |
-			Q(http_url__icontains=query)
-		).distinct('name')
-		subdomain_data = SubdomainSerializer(subdomain, many=True).data
-		response['results']['subdomains'] = subdomain_data
-
-		endpoint = EndPoint.objects.filter(
-			Q(http_url__icontains=query) |
-			Q(page_title__icontains=query)
-		).distinct('http_url')
-		endpoint_data = EndpointSerializer(endpoint, many=True).data
-		response['results']['endpoints'] = endpoint_data
-
-		vulnerability = Vulnerability.objects.filter(
-			Q(http_url__icontains=query) |
-			Q(name__icontains=query) |
-			Q(description__icontains=query)
-		).distinct()
-		vulnerability_data = VulnerabilitySerializer(vulnerability, many=True).data
-		response['results']['vulnerabilities'] = vulnerability_data
-
-		response['results']['others'] = {}
-
-		if subdomain_data or endpoint_data or vulnerability_data:
-			response['status'] = True
-
-		return Response(response)
+		from limes import search
+		q = request.query_params
+		project = Project.objects.filter(slug=q.get('project') or '').first()
+		if not project:
+			return Response({'status': False, 'message': 'project not found'}, status=404)
+		query = (q.get('query') or '').strip()
+		if not 2 <= len(query) <= 200:
+			return Response({'status': False, 'message': 'query must be 2 to 200 characters'}, status=400)
+		return Response({'status': True, 'results': search.search(project, query)})
 
 
 class FetchMostCommonVulnerability(APIView):
@@ -584,6 +532,22 @@ class RescanAsset(APIView):
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
 		ok, message = start_asm_scan(asset, engine_id=request.data.get('engine_id'), initiated_by_id=request.user.id)
+		return Response({'status': ok, 'message': message})
+
+
+class FullScanAsset(APIView):
+	"""Run the full scanner run (port scan, crawl, vigil DAST, mantis) on one owned root: it actively tests the real
+	target, so it is refused for anything but an owned (or authorised co-brand) root, and while the project has a scan
+	running. An id from another project is a 404."""
+	permission_classes = [HasPermission]
+	permission_required = PERM_INITATE_SCANS_SUBSCANS
+
+	def post(self, request):
+		asset = _load_asset(request)
+		if not asset:
+			return Response({'status': False, 'message': 'asset not found'}, status=404)
+		ok, message = start_asm_scan(asset, engine_id=request.data.get('engine_id'),
+									 initiated_by_id=request.user.id, mode='full')
 		return Response({'status': ok, 'message': message})
 
 

@@ -31,6 +31,7 @@ urlpatterns = [
     path('action/asset/confirm/', ConfirmAsset.as_view(), name='confirm_asset'),
     path('action/asset/reject/', RejectAsset.as_view(), name='reject_asset'),
     path('action/asset/rescan/', RescanAsset.as_view(), name='rescan_asset'),
+    path('action/asset/fullscan/', FullScanAsset.as_view(), name='full_scan_asset'),
     path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
     path('action/asset/tags/', AssetTags.as_view(), name='asset_tags'),
     path('tags/', TagList.as_view(), name='tags'),
@@ -156,10 +157,6 @@ urlpatterns = [
         'search/',
         UniversalSearch.as_view(),
         name='search'),
-    path(
-        'search/history/',
-        SearchHistoryView.as_view(),
-        name='search_history'),
     # API for fetching currently ongoing scans and upcoming scans
     path(
         'scan_status/',
