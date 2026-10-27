@@ -25,6 +25,11 @@ function tag_can_write() {
 	return document.getElementById('asset_results').dataset.canWrite === '1';
 }
 
+// Checkboxes appear for anyone who can use a bulk action (tags or rescan).
+function asset_can_pick() {
+	return document.getElementById('asset_results').dataset.canPick === '1';
+}
+
 // The Tags cell: chips, and a pencil that opens the editor when the user may change tags.
 function tag_cell_html(row) {
 	var edit = tag_can_write() ? ' <button type="button" class="l-link-btn tag_edit" data-id="' + Number(row.id) + '" aria-label="Edit tags"><i class="fe-edit-2" aria-hidden="true"></i></button>' : '';

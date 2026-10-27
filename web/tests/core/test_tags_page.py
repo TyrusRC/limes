@@ -42,7 +42,7 @@ class TagsPageTest(TestCase):
         self.assertIn('id="f_tag"', html)  # reading and filtering stay open to everyone
 
     def test_issues_page_has_the_tag_filter(self):
-        self.assertIn('id="f_tag"', self.page(self.admin, '/scan/p1/issues'))
+        self.assertIn('id="tag_chips"', self.page(self.admin, '/scan/p1/issues'))  # the tag chips are filled from /api/tags/
 
 
 SINKS = re.compile(r'insertAdjacentHTML|document\.write|\beval\s*\(|new\s+Function|outerHTML|\.append\(\s*[\'"]<|\.prepend\(\s*[\'"]<')

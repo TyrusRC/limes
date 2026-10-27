@@ -496,6 +496,36 @@ class RescanAssetApiTest(TestCase):
     def test_missing_asset(self):
         self.assertFalse(self._post(self.admin, asset_id='abc').json()['status'])
 
+    def test_batch_rescan_reports_each_asset(self):
+        from targetApp.models import Domain
+        Domain.objects.create(project=self.p, name='nodom.com', insert_date=timezone.now())
+        r = self._post(self.admin, asset_ids=[self.root.id, self.nodom.id, self.host.id]).json()
+        self.assertTrue(r['status'])
+        self.assertEqual(r['message'], 'started 2 of 3')
+        self.assertEqual([(x['asset_id'], x['ok']) for x in r['results']],
+                         [(self.root.id, True), (self.nodom.id, True), (self.host.id, False)])
+        self.assertEqual(self.apply_async.call_count, 2)
+
+    def test_batch_is_capped_at_fifty(self):
+        r = self._post(self.admin, asset_ids=list(range(1, 52))).json()
+        self.assertFalse(r['status'])
+        self.assertIn('at most 50', r['message'])
+        self.apply_async.assert_not_called()
+        ids = [self.root.id] * 50  # fifty is allowed (duplicates count once)
+        self.assertTrue(self._post(self.admin, asset_ids=ids).json()['status'])
+
+    def test_batch_with_a_foreign_id_is_a_404_and_runs_nothing(self):
+        other = Project.objects.create(name='p2', slug='p2', insert_date=timezone.now())
+        foreign = Asset.objects.create(project=other, kind='root_domain', value='y.com', scope_tier='owned_root')
+        r = self._post(self.admin, asset_ids=[self.root.id, foreign.id])
+        self.assertEqual(r.status_code, 404)
+        self.apply_async.assert_not_called()
+
+    def test_batch_needs_a_list_of_ids(self):
+        for bad in ([], 'x', [None], ['abc'], [True]):
+            self.assertFalse(self._post(self.admin, asset_ids=bad).json()['status'], bad)
+        self.apply_async.assert_not_called()
+
     def test_without_permission_denied(self):
         self.assertEqual(self._post(self.auditor, asset_id=self.root.id).status_code, 403)
         self.apply_async.assert_not_called()
@@ -675,3 +705,70 @@ class RiskChecksRetrieveTest(AssetScoreApiTest):
         self.assertEqual(rows[0]['severity'], 3)
         self.assertTrue(rows[0]['title'] and rows[0]['fix'])
         self.assertEqual(rows[1]['evidence'], {'k': 'v'})
+
+
+class AssetActivityApiTest(TestCase):
+    """Active / Inactive tabs use the monitor's own rule: an open port, live HTTP or MX answer at the last check."""
+
+    def setUp(self):
+        user_logged_in.disconnect(on_user_logged_in)
+        self.addCleanup(user_logged_in.connect, on_user_logged_in)
+        self.c = APIClient()
+        self.c.force_login(User.objects.create_user('act', password='p'))
+        self.p = Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
+        self.q = Project.objects.create(name='p2', slug='p2', insert_date=timezone.now())
+        mk = lambda v, **kw: Asset.objects.create(project=self.p, kind='hostname', value=v, scope_tier='owned_host', **kw)
+        self.live = mk('live.x.com', enrichment={'monitor': {'active': True}})
+        self.quiet = mk('quiet.x.com', enrichment={'monitor': {'active': False}})
+        self.unchecked = mk('new.x.com')
+        self.retired = mk('gone.x.com', state='retired', enrichment={'monitor': {'active': True}})
+        Asset.objects.create(project=self.q, kind='hostname', value='other.y.com', scope_tier='owned_host',
+                             enrichment={'monitor': {'active': True}})
+
+    def vals(self, **q):
+        r = self.c.get('/api/listDatatableAsset/', {'project': 'p1', 'no_page': '1', **q})
+        return {a['value'] for a in r.json()}
+
+    def test_is_active_rule(self):
+        from limes import monitor
+        self.assertEqual([monitor.is_active(a) for a in (self.live, self.quiet, self.unchecked, self.retired)],
+                         [True, False, False, False])
+
+    def test_activity_filter_matches_the_rule(self):
+        from limes import monitor
+        every = Asset.objects.filter(project=self.p)
+        self.assertEqual(self.vals(activity='active'), {a.value for a in every if monitor.is_active(a)})
+        self.assertEqual(self.vals(activity='inactive'), {a.value for a in every if not monitor.is_active(a)})
+        self.assertEqual(self.vals(activity='active') | self.vals(activity='inactive'), self.vals())
+        self.assertEqual(self.vals(activity='bogus'), self.vals())  # an unknown value filters nothing
+
+    def test_rows_carry_active_flag(self):
+        rows = {a['value']: a['active'] for a in self.c.get('/api/listDatatableAsset/', {'project': 'p1', 'no_page': '1'}).json()}
+        self.assertEqual(rows['live.x.com'], True)
+        self.assertEqual(rows['gone.x.com'], False)
+
+    def test_retrieve_lists_open_issues_with_ids(self):
+        from startScan.models import TrackedIssue
+        open_ = TrackedIssue.objects.create(project=self.p, asset=self.live, key='web.hsts_missing', source='check', severity=2)
+        TrackedIssue.objects.create(project=self.p, asset=self.live, key='web.csp_missing', source='check', severity=1, status='fixed')
+        TrackedIssue.objects.create(project=self.p, asset=self.live, key='<b>cve</b>', source='finding', severity=4)
+        rows = self.c.get(f'/api/listDatatableAsset/{self.live.id}/', {'project': 'p1'}).json()['issues']
+        self.assertEqual([r['key'] for r in rows], ['<b>cve</b>', 'web.hsts_missing'])  # worst first, open only
+        self.assertEqual(rows[1]['id'], open_.id)
+        self.assertIn('Strict-Transport-Security', rows[1]['title'])
+        self.assertEqual(self.c.get(f'/api/listDatatableAsset/{self.live.id}/', {'project': 'p2'}).status_code, 404)
+
+    def test_retrieve_carries_certificates_and_dns_facts_for_the_modal_tabs(self):
+        from startScan.models import AssetFact, CertSighting
+        now = timezone.now()
+        CertSighting.objects.create(project=self.p, asset=self.live, tbs_sha256='a' * 64, names=['live.x.com', '*.x.com'],
+                                    issuer="O'Reilly <CA>", not_before=now - timedelta(days=30), not_after=now + timedelta(days=60),
+                                    source='crtsh', wildcard=True)
+        CertSighting.objects.create(project=self.p, asset=self.quiet, tbs_sha256='b' * 64, names=['q.x.com'], source='crtsh')
+        for kind, value in (('ns', 'ns1.x.com'), ('mx', 'mx.x.com'), ('cert', 'zzz')):
+            AssetFact.objects.create(asset=self.live, kind=kind, value=value, source='dns')
+        d = self.c.get(f'/api/listDatatableAsset/{self.live.id}/', {'project': 'p1'}).json()
+        self.assertEqual(len(d['certificates']), 1)  # only this asset's
+        self.assertEqual((d['certificates'][0]['issuer'], d['certificates'][0]['names'], d['certificates'][0]['wildcard']),
+                         ("O'Reilly <CA>", ['live.x.com', '*.x.com'], True))
+        self.assertEqual([(f['kind'], f['value']) for f in d['dns_facts']], [('mx', 'mx.x.com'), ('ns', 'ns1.x.com')])  # DNS kinds only

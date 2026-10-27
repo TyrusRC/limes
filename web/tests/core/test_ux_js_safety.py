@@ -4,7 +4,7 @@ import re
 from django.test import SimpleTestCase
 
 STATIC = os.path.join(os.path.dirname(__file__), '..', '..', 'static', 'limes')
-NEW_JS = ['ux.js', 'risk.js', 'issues.js']  # extend when a new UI script lands: these build DOM with textContent only
+NEW_JS = ['ux.js', 'risk.js', 'issues.js', 'assets_ux.js']  # extend when a new UI script lands: these build DOM with textContent only
 BAD = ('innerHTML', 'outerHTML', 'insertAdjacentHTML', '.html(', 'document.write', 'eval(', 'new Function', 'srcdoc')
 
 

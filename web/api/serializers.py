@@ -190,6 +190,11 @@ class AssetSerializer(serializers.ModelSerializer):
     vuln_count = serializers.IntegerField(read_only=True, default=0)
     monitor = serializers.SerializerMethodField()
     found_by = serializers.SerializerMethodField()
+    active = serializers.SerializerMethodField()
+
+    def get_active(self, obj):
+        from limes import monitor
+        return monitor.is_active(obj)
 
     def get_monitor(self, obj):
         from limes import monitor
@@ -206,4 +211,4 @@ class AssetSerializer(serializers.ModelSerializer):
                   'content_type', 'content_length', 'response_time', 'cname', 'is_cdn', 'cdn_name',
                   'screenshot_path', 'sources', 'decision_reason', 'technologies', 'ip_addresses',
                   'tags', 'vuln_count', 'enrichment', 'confidence', 'confidence_detail', 'cadence_tier',
-                  'last_resolved_at', 'monitor', 'found_by']
+                  'last_resolved_at', 'monitor', 'found_by', 'active']

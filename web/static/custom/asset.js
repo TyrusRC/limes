@@ -344,31 +344,103 @@ function asset_intel_html(e, breaches) {
 	return html;
 }
 
+// ---- asset modal tabs: Overview / Services / Certificates / DNS / Issues (all from the asset API's own payload) ----
+var ASSET_DNS_CHECKS = /^(dns|email)\./, ASSET_TLS_CHECKS = /^tls\./;
+
+function asset_checks_where(checks, test) {
+	return (checks || []).filter(function(c) { return test(String(c.check || '')); });
+}
+
+function asset_kv_rows(pairs) {
+	var rows = pairs.filter(function(p) { return p[1] !== null && p[1] !== undefined && p[1] !== ''; }).map(function(p) {
+		return '<tr><td>' + asset_esc(p[0]) + '</td><td>' + asset_esc(p[1]) + '</td></tr>';
+	}).join('');
+	return rows ? asset_table(['<span class="visually-hidden">Field</span>', 'Value'], rows) : '';
+}
+
+function asset_empty(text) {
+	return '<p class="l-hint mb-0">' + asset_esc(text) + '</p>';
+}
+
+function asset_services_html(a) {
+	var e = a.enrichment || {}, idb = e.internetdb || {};
+	var facts = asset_kv_rows([['HTTP status', a.http_status], ['Page title', a.page_title], ['Web server', a.webserver],
+		['CDN', a.is_cdn ? (a.cdn_name || 'yes') : ''], ['Technologies', (a.technologies || []).join(', ')],
+		['IP addresses', (a.ip_addresses || []).join(', ')], ['Open ports (InternetDB)', (idb.ports || []).join(', ')]]);
+	return asset_api_section(a) + (facts ? asset_section('Services', facts) : '') + asset_intel_html(a.enrichment, a.breaches) +
+		asset_unverified_cves_html(a.unverified_cves) + (facts || a.kind === 'api' ? '' : asset_empty('No services recorded yet. They appear after the next check or scan.'));
+}
+
+function asset_certs_html(a) {
+	var certs = (a.certificates || []).map(function(c) {
+		return '<tr><td>' + asset_esc((c.names || []).slice(0, 3).join(', ') + ((c.names || []).length > 3 ? ' +' + ((c.names || []).length - 3) : '')) + (c.wildcard ? ' <span class="badge l-badge-src">wildcard</span>' : '') +
+			'</td><td>' + asset_esc(c.issuer) + '</td><td class="text-nowrap">' + asset_esc(String(c.not_before || '').slice(0, 10)) + '</td><td class="text-nowrap">' + asset_esc(String(c.not_after || '').slice(0, 10)) + '</td></tr>';
+	}).join('');
+	var html = asset_checks_html(asset_checks_where(a.risk_checks, function(k) { return ASSET_TLS_CHECKS.test(k); }));
+	if (certs) html += asset_section('Certificates seen in transparency logs', asset_table(['Names', 'Issuer', 'Valid from', 'Valid to'], certs));
+	return html || asset_empty('No certificate data for this asset yet.');
+}
+
+function asset_dns_html(a) {
+	var facts = (a.dns_facts || []).map(function(f) { return '<tr><td>' + asset_esc(f.kind === 'ns' ? 'Name server' : 'Mail server') + '</td><td class="mono">' + asset_esc(f.value) + '</td></tr>'; }).join('');
+	var html = asset_kv_rows([['CNAME', a.cname], ['Resolves to', (a.ip_addresses || []).join(', ')]]);
+	if (html) html = asset_section('Records', html);
+	if (facts) html += asset_section('Delegation', asset_table(['Type', 'Value'], facts));
+	html += asset_checks_html(asset_checks_where(a.risk_checks, function(k) { return ASSET_DNS_CHECKS.test(k); }));
+	return html || asset_empty('No DNS data for this asset yet.');
+}
+
+function asset_issues_html(a) {
+	var slug = encodeURIComponent(asset_project());
+	var rows = (a.issues || []).map(function(i) {
+		return '<tr><td><a href="/scan/' + slug + '/issues/' + Number(i.id) + '/">' + asset_esc(i.title) + '</a></td><td>' + asset_sev_html(Number(i.severity)) +
+			'</td><td class="text-nowrap">' + asset_esc(String(i.first_seen || '').slice(0, 10)) + '</td></tr>';
+	}).join('');
+	var rest = asset_checks_where(a.risk_checks, function(k) { return !ASSET_TLS_CHECKS.test(k) && !ASSET_DNS_CHECKS.test(k); });
+	return asset_section('Open issues', rows ? asset_table(['Issue', 'Severity', 'First detected'], rows) : asset_empty('No open issues on this asset.')) +
+		asset_reputation_html(a.risk_checks) + asset_checks_html(rest);
+}
+
+function asset_overview_html(a, chain) {
+	var path = chain.slice().reverse().map(function(c) {
+		return '<span><span class="badge bg-soft-primary me-1">' + asset_esc(c.kind) + '</span>' + asset_esc(c.value) + '</span>';
+	}).join('<i class="fe-arrow-right l-muted" aria-hidden="true"></i>');
+	var sources = (a.sources || []).map(function(s) {
+		return '<tr><td>' + asset_esc(s.source) + '</td><td>' + asset_esc(s.evidence) + '</td><td>' +
+			asset_esc(s.confidence) + '</td><td>' + asset_esc(s.seen_at) + '</td></tr>';
+	}).join('') || '<tr><td colspan="4" class="l-muted">No recorded sources.</td></tr>';
+	return '<div class="l-meta-row mt-0"><span class="badge">' + asset_esc(a.kind) + '</span><span class="badge">' + asset_esc(a.scope_tier) +
+		'</span><span class="badge">' + asset_esc(a.state) + '</span><span class="badge ' + (a.active ? 'badge-soft-success' : '') + '">' + (a.active ? 'active' : 'inactive') +
+		'</span><span>' + asset_esc(a.vuln_count) + ' vulnerabilities</span></div>' +
+		(a.decision_reason ? '<p class="mb-0"><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
+		'<p class="mb-0"><b>Monitored</b> ' + (asset_monitor_html(a) || '<span class="l-muted">not monitored</span>').replace(/<br>/g, ' ') +
+		' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
+		' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
+		asset_cadence_html(a) +
+		'<p class="mb-0"><b>Tags</b> ' + (tag_chips_html(a.tags) || '<span class="l-muted">none</span>') +
+		(tag_can_write() ? ' <button type="button" class="btn btn-xs btn-soft-secondary" onclick="edit_asset_tags(' + Number(a.id) + ')">Edit tags</button>' : '') + '</p>' +
+		asset_risk_html(a.risk) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
+		asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources));
+}
+
+var ASSET_TABS = [['overview', 'Overview'], ['services', 'Services'], ['certificates', 'Certificates'], ['dns', 'DNS'], ['issues', 'Issues']];
+
 function get_asset_modal(id) {
 	asset_fetch(id).then(asset_parent_chain).then(function(chain) {
 		var a = chain[0];
-		var path = chain.slice().reverse().map(function(c) {
-			return '<span><span class="badge bg-soft-primary me-1">' + asset_esc(c.kind) + '</span>' + asset_esc(c.value) + '</span>';
-		}).join('<i class="fe-arrow-right l-muted" aria-hidden="true"></i>');
-		var sources = (a.sources || []).map(function(s) {
-			return '<tr><td>' + asset_esc(s.source) + '</td><td>' + asset_esc(s.evidence) + '</td><td>' +
-				asset_esc(s.confidence) + '</td><td>' + asset_esc(s.seen_at) + '</td></tr>';
-		}).join('') || '<tr><td colspan="4" class="l-muted">No recorded sources.</td></tr>';
+		var panels = {overview: asset_overview_html(a, chain), services: asset_services_html(a), certificates: asset_certs_html(a),
+			dns: asset_dns_html(a), issues: asset_issues_html(a)};
+		var tabs = ASSET_TABS.map(function(t, i) {
+			var count = t[0] === 'issues' ? ' <span class="lx-count">' + Number((a.issues || []).length) + '</span>' : '';
+			return '<button type="button" role="tab" class="lx-tab" id="am_t_' + t[0] + '" aria-controls="am_p_' + t[0] + '" aria-selected="' + (i === 0) +
+				'" tabindex="' + (i === 0 ? 0 : -1) + '">' + t[1] + count + '</button>';
+		}).join('');
+		var body = ASSET_TABS.map(function(t, i) {
+			return '<div role="tabpanel" class="lx-tabpanel l-asset-modal pt-3" id="am_p_' + t[0] + '" aria-labelledby="am_t_' + t[0] + '" tabindex="0"' + (i ? ' hidden' : '') + '>' + panels[t[0]] + '</div>';
+		}).join('');
 		$('#modal_title').text(a.value);
-		$('#modal-content').html('<div class="l-asset-modal">' +
-			'<div class="l-meta-row mt-0"><span class="badge">' + asset_esc(a.kind) + '</span><span class="badge">' + asset_esc(a.scope_tier) +
-			'</span><span class="badge">' + asset_esc(a.state) + '</span><span>' + asset_esc(a.vuln_count) + ' vulnerabilities</span></div>' +
-			(a.decision_reason ? '<p class="mb-0"><b>Decision reason</b> ' + asset_esc(a.decision_reason) + '</p>' : '') +
-			'<p class="mb-0"><b>Monitored</b> ' + (asset_monitor_html(a) || '<span class="l-muted">not monitored</span>').replace(/<br>/g, ' ') +
-			' &middot; <b>Last checked</b> ' + (asset_esc(asset_when(a.last_resolved_at)) || '<span class="l-muted">never</span>') +
-			' &middot; <b>Found by</b> ' + asset_esc((a.found_by || []).join(', ')) + '</p>' +
-			asset_cadence_html(a) + asset_api_section(a) +
-			'<p class="mb-0"><b>Tags</b> ' + (tag_chips_html(a.tags) || '<span class="l-muted">none</span>') +
-			(tag_can_write() ? ' <button type="button" class="btn btn-xs btn-soft-secondary" onclick="edit_asset_tags(' + Number(a.id) + ')">Edit tags</button>' : '') + '</p>' +
-			asset_risk_html(a.risk) + asset_reputation_html(a.risk_checks) + asset_checks_html(a.risk_checks) + asset_unverified_cves_html(a.unverified_cves) + asset_section('Why is this mine', '<div class="l-chain">' + path + '</div>') +
-			asset_confidence_html(a) + asset_section('Sources', asset_table(['Source', 'Evidence', 'Confidence', 'Seen'], sources)) +
-			asset_intel_html(a.enrichment, a.breaches) + '</div>'
-		);
+		$('#modal-content').html('<div class="lx-tabs" role="tablist" aria-label="Asset sections" id="am_tabs">' + tabs + '</div>' + body);
+		LimesUx.tabs(document.getElementById('am_tabs'));
 		$('#modal-footer').html(asset_actions(a));
 		asset_modal_wide(true);
 		$('#modal_dialog').modal('show');

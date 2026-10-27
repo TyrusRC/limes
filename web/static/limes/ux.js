@@ -2,7 +2,8 @@
    LimesUx.toast(text, isError)  one look for every action result, announced politely
    LimesUx.post(url, body)       JSON POST with the CSRF token; resolves to the parsed body, 403 becomes a message
    LimesUx.el(tag, cls, text)    element builder
-   LimesUx.tabs(root)            ARIA tablist: click, arrows, Home, End; dispatches 'lx-tab' on the root */
+   LimesUx.tabs(root)            ARIA tablist: click, arrows, Home, End; dispatches 'lx-tab' on the root.
+                                 data-shared-panel on the root: every tab controls one panel that stays visible. */
 (function () {
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -48,7 +49,7 @@
         t.setAttribute('aria-selected', on ? 'true' : 'false');
         t.tabIndex = on ? 0 : -1;
         var panel = document.getElementById(t.getAttribute('aria-controls'));
-        if (panel) panel.hidden = !on;
+        if (panel && !root.hasAttribute('data-shared-panel')) panel.hidden = !on;
       });
       if (focus) tab.focus();
       root.dispatchEvent(new CustomEvent('lx-tab', {detail: {id: tab.id, value: tab.dataset.value || tab.id}}));

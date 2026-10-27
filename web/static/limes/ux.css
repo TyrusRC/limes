@@ -121,3 +121,4 @@
   .lx-issues .lx-subrow { display: block; }
   .lx-issues .l-col-wider { min-width: 0; }
 }
+#asset_results .l-tag-chip { overflow-wrap: normal; white-space: nowrap; }

@@ -232,12 +232,37 @@ class RescanAsset(APIView):
 	permission_classes = [HasPermission]
 	permission_required = PERM_INITATE_SCANS_SUBSCANS
 
+	MAX_BATCH = 50
+
 	def post(self, request):
+		if isinstance(request.data, dict) and 'asset_ids' in request.data:
+			return self.batch(request)
 		asset = _load_asset(request)
 		if not asset:
 			return Response({'status': False, 'message': 'asset not found'})
 		ok, message = start_asm_scan(asset, engine_id=request.data.get('engine_id'), initiated_by_id=request.user.id)
 		return Response({'status': ok, 'message': message})
+
+	def batch(self, request):
+		"""Rescan up to MAX_BATCH assets of one project. A foreign id fails the whole call (404) before anything starts;
+		each asset then reports its own outcome, so one that cannot be rescanned does not stop the rest."""
+		raw, project = request.data.get('asset_ids'), request.data.get('project')
+		if not isinstance(raw, list) or not raw or not isinstance(project, str):
+			return Response({'status': False, 'message': 'asset_ids must be a non-empty list of ids'})
+		ids = list(dict.fromkeys(_parse_id(x) for x in raw))
+		if None in ids:
+			return Response({'status': False, 'message': 'asset_ids must be a non-empty list of ids'})
+		if len(ids) > self.MAX_BATCH:
+			return Response({'status': False, 'message': f'at most {self.MAX_BATCH} assets per rescan'})
+		found = {a.id: a for a in Asset.objects.filter(project__slug=project, id__in=ids)}
+		if len(found) != len(ids):
+			return Response({'status': False, 'message': 'asset not found'}, status=404)
+		results = []
+		for i in ids:
+			ok, message = start_asm_scan(found[i], initiated_by_id=request.user.id)
+			results.append({'asset_id': i, 'ok': ok, 'message': message})
+		started = sum(r['ok'] for r in results)
+		return Response({'status': True, 'message': f'started {started} of {len(ids)}', 'results': results})
 
 
 class FullScanAsset(APIView):
@@ -703,6 +728,10 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		if source:
 			from limes import monitor
 			qs = qs.filter(monitor.source_q(source))
+		activity = params.get('activity')
+		if activity in ('active', 'inactive'):  # the monitor's rule, see limes.monitor.is_active
+			from limes import monitor
+			qs = qs.filter(monitor.active_q() if activity == 'active' else monitor.inactive_q())
 		for field in ('kind', 'scope_tier', 'state'):
 			value = params.get(field)
 			if field == 'scope_tier' and value == 'owned':  # the rows the Overview counts: owned, not retired
@@ -753,6 +782,14 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 						   'last_checked': rc.last_checked})
 		checks.sort(key=lambda r: (r['status'] != 'fail', -r['severity'], r['check']))
 		data['risk_checks'] = checks
+		data['issues'] = [{'id': i.id, 'key': i.key, 'source': i.source, 'severity': i.severity, 'first_seen': i.reopened_at or i.first_seen,
+						   'title': CHECKS[i.key].title if i.source == 'check' and i.key in CHECKS else i.key}
+						  for i in asset.tracked_issues.filter(status='open').order_by('-severity', 'first_seen', 'id')[:100]]
+		from startScan.models import AssetFact, CertSighting
+		data['certificates'] = list(CertSighting.objects.filter(asset=asset).order_by('-first_seen_at', '-id')[:10]
+									.values('issuer', 'names', 'wildcard', 'not_before', 'not_after', 'source'))
+		data['dns_facts'] = list(AssetFact.objects.filter(asset=asset, kind__in=('ns', 'mx')).order_by('kind', 'value')
+								 .values('kind', 'value')[:100])
 		if asset.kind == 'ip':
 			from limes import exploit
 			data['unverified_cves'] = exploit.unverified(asset)

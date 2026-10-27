@@ -8,11 +8,18 @@ Assets
 {% block page_title %}Assets{% endblock page_title %}
 
 {% block main_content %}
-{% with can_write=user|can:'modify_targets' %}
+{% with can_write=user|can:'modify_targets' can_scan=user|can:'initiate_scans_subscans' %}
 <div class="l-page-bar">
   <p class="l-page-sub" id="asset_score" aria-live="polite"></p>
   <button type="button" class="btn btn-primary" onclick="show_add_asset_modal()"><i class="fe-plus" aria-hidden="true"></i>Add assets</button>
 </div>
+
+<div class="lx-tabs mb-3" role="tablist" aria-label="Asset activity" id="asset_tabs" data-shared-panel>
+  <button type="button" role="tab" class="lx-tab" id="tab_all" data-value="" aria-controls="asset_list" aria-selected="true" tabindex="0">All<span class="lx-count" id="cnt_all"></span></button>
+  <button type="button" role="tab" class="lx-tab" id="tab_active" data-value="active" aria-controls="asset_list" aria-selected="false" tabindex="-1">Active<span class="lx-count" id="cnt_active"></span></button>
+  <button type="button" role="tab" class="lx-tab" id="tab_inactive" data-value="inactive" aria-controls="asset_list" aria-selected="false" tabindex="-1">Inactive<span class="lx-count" id="cnt_inactive"></span></button>
+</div>
+<p class="l-hint" id="tab_hint">Active: an open port, a live web answer or a mail record at the last check. Inactive assets are checked monthly instead of daily.</p>
 
 <section class="card" id="asset_penalties" aria-labelledby="h_penalties" hidden>
   <div class="card-header"><h2 class="card-title mb-0" id="h_penalties">Top penalties</h2></div>
@@ -26,6 +33,7 @@ Assets
 
 <section class="card" aria-label="Filters">
   <div class="l-filter-bar">
+    <input type="hidden" id="f_activity" value="">
     <div class="l-field">
       <label for="f_kind">Kind</label>
       <select id="f_kind" class="form-select">
@@ -73,21 +81,21 @@ Assets
   </div>
 </section>
 
-{% if can_write %}
-<div class="l-banner" id="tag_bulk" role="status" aria-live="polite" hidden>
-  <div class="l-banner-text"><strong id="tag_bulk_count"></strong></div>
-  <div class="l-banner-actions">
-    <button type="button" class="btn btn-ghost" id="tag_bulk_add">Tag selected</button>
-    <button type="button" class="btn btn-ghost" id="tag_bulk_remove">Untag selected</button>
-  </div>
+{% if can_write or can_scan %}
+<div class="lx-bulkbar" id="tag_bulk" role="status" aria-live="polite" hidden>
+  <strong id="tag_bulk_count"></strong>
+  {% if can_write %}<button type="button" class="btn btn-light" id="tag_bulk_add"><i class="fe-tag" aria-hidden="true"></i>Tag selected</button>
+  <button type="button" class="btn btn-light" id="tag_bulk_remove">Untag selected</button>{% endif %}
+  {% if can_scan %}<button type="button" class="btn btn-light" id="rescan_bulk"><i class="fe-refresh-cw" aria-hidden="true"></i>Rescan selected</button>{% endif %}
+  <button type="button" class="btn btn-ghost" id="bulk_clear">Clear selection</button>
 </div>
 {% endif %}
 
-<section class="card l-table-card" aria-label="Asset list">
-  <table id="asset_results" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}">
+<section class="card l-table-card" aria-label="Asset list" id="asset_list" role="region">
+  <table id="asset_results" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}" data-can-pick="{% if can_write or can_scan %}1{% else %}0{% endif %}" data-can-scan="{% if can_scan %}1{% else %}0{% endif %}">
     <thead>
       <tr>
-        <th>{% if can_write %}<input type="checkbox" class="form-check-input me-1" id="asset_pick_all" aria-label="Select all assets on this page">{% endif %}Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
+        <th>{% if can_write or can_scan %}<input type="checkbox" class="form-check-input me-1" id="asset_pick_all" aria-label="Select all assets on this page">{% endif %}Value</th><th>Kind</th><th>Scope</th><th>State</th><th>HTTP</th>
         <th>Title</th><th>Technologies</th><th>IPs</th><th>Last seen</th><th>Tags</th><th>Confidence</th><th>Monitored</th><th>Last checked</th><th>Found by</th><th><span class="visually-hidden">Actions</span></th>
       </tr>
     </thead>
@@ -100,13 +108,14 @@ Assets
 {% block page_level_script %}
 <script src="{% static 'custom/asset.js' %}"></script>
 <script src="{% static 'custom/asset_tags.js' %}"></script>
+<script src="{% static 'limes/assets_ux.js' %}"></script>
 <script type="text/javascript">
 $(document).ready(function() {
   load_asset_score();
   // ?scope_tier=, ?source=, ?technology= ... (e.g. the dashboard's links) preselect a filter: a select takes the
   // URL value only when it is one of its options, a text input takes it as typed
   var query = new URLSearchParams(location.search);
-  var filterKeys = ['kind', 'scope_tier', 'state', 'source', 'tag', 'technology'];
+  var filterKeys = ['kind', 'scope_tier', 'state', 'source', 'tag', 'technology', 'activity'];
   filterKeys.forEach(function(k) {
     var el = document.getElementById('f_' + k), v = query.get(k);
     if (!v || !el) return;
@@ -136,7 +145,7 @@ $(document).ready(function() {
     columns: [
       {data: 'value', className: 'l-col-wide', render: function(d, t, row) {
         var mono = ['ip', 'cidr', 'asn'].indexOf(row.kind) !== -1 ? ' mono' : '';
-        var pick = tag_can_write() ? '<input type="checkbox" class="form-check-input asset_pick me-1" value="' + Number(row.id) + '" aria-label="Select this asset">' : '';
+        var pick = asset_can_pick() ? '<input type="checkbox" class="form-check-input asset_pick me-1" value="' + Number(row.id) + '" aria-label="Select this asset">' : '';
         return pick + '<button type="button" class="l-link-btn asset_open' + mono + '" data-id="' + Number(row.id) + '">' + esc(d) + '</button>';
       }},
       {data: 'kind', className: 'text-nowrap', render: esc}, {data: 'scope_tier', className: 'text-nowrap', render: esc}, {data: 'state', render: esc},
@@ -165,6 +174,7 @@ $(document).ready(function() {
   }
   $('#asset_results_filter input').attr('aria-label', 'Filter this list');
   tag_init();
+  assets_ux_init();
   $('#asset_results').on('click', '.asset_open', function() { get_asset_modal(Number(this.dataset.id)); });
   document.getElementById('f_show_low').addEventListener('change', function() { table.ajax.url(assetUrl()).load(); });
   filterKeys.forEach(function(k) {

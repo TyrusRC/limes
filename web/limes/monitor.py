@@ -52,6 +52,22 @@ OWNED = ('owned_root', 'owned_host')
 KINDS = ('hostname', 'ip', 'root_domain')
 
 
+def is_active(asset):
+    """UpGuard's activity rule as the last check stored it: an open port, a live HTTP answer or an MX record.
+    A retired asset is never active; one the monitor has not checked yet has no answer, so it is inactive."""
+    return asset.state != 'retired' and bool(((asset.enrichment or {}).get('monitor') or {}).get('active'))
+
+
+def active_q():
+    """The same rule as a queryset filter (Assets-page Active tab); the Inactive tab is its negation."""
+    return Q(enrichment__monitor__active=True) & ~Q(state='retired')
+
+
+def inactive_q():
+    """Everything active_q is not. Spelled out because a plain negation drops rows whose JSON key is absent (NULL)."""
+    return Q(state='retired') | Q(enrichment__monitor__active__isnull=True) | Q(enrichment__monitor__active=False)
+
+
 def effective_interval(asset):
     """How often this asset is checked: None when off; a retired asset monthly (a sighting revives it); an explicit
     cadence as set; otherwise daily while active (open port, live HTTP or MX), monthly while not."""
@@ -62,7 +78,7 @@ def effective_interval(asset):
         return INACTIVE_INTERVAL
     if enrichment.get('cadence_explicit'):
         return CADENCE_INTERVALS[asset.cadence_tier]
-    return ACTIVE_INTERVAL if (enrichment.get('monitor') or {}).get('active') else INACTIVE_INTERVAL
+    return ACTIVE_INTERVAL if is_active(asset) else INACTIVE_INTERVAL
 
 
 # Assets-page labels for the raw source names in Asset.sources.
