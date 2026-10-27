@@ -1,80 +1,82 @@
-"""The one choke point for project access.
+"""The first of two layers of project access (the second is memberships.drf, which re-decides from DRF's own parse).
 
 Every request is resolved to the project slugs it touches: the `slug` URL argument, the `project` / `project_slug`
-parameters of the REST API (query string, form body or JSON body) and the few views that name a project indirectly
-(memberships.policy.EXTRA_RESOLVERS). Each of them must exist and be visible to the user, otherwise the answer is a
-404 that is identical for "no such project" and "not yours". Then the user's role in each project must allow the
-method and the URL (memberships.policy). Views carry no checks of their own for this.
+parameters (query string and, for API writes, the body) and the few views that name a project indirectly. Each must
+exist and be visible to the user, otherwise the answer is a 404 identical for "no such project" and "not yours". Then
+the user's role must allow the method and the URL (memberships.policy), and a write that names no project is refused
+unless its route is on the allowlist.
+
+API write bodies are read here with the strictest reading: the media type and charset are normalised to lower case
+(and the request rewritten to match, so Django and DRF see the same thing), only JSON, urlencoded forms and multipart
+are accepted, the charset must be absent or utf-8, JSON must be strict utf-8 and an object. Anything else is refused
+before a view sees it.
 
 Runs after AuthenticationMiddleware and the login-required middleware."""
 import json
-from json import JSONDecodeError
 
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, SuspiciousOperation
 from django.http import Http404, JsonResponse
 
-from memberships import policy, rules
-from memberships.models import ADMIN, READ_ONLY, STANDARD
+from memberships import access
 
-PARAMS = ('project', 'project_slug')
-
-
-class Unreadable(Exception):
-    """A request whose project cannot be read: refused as not found rather than guessed at."""
+JSON = 'application/json'
+FORMS = ('application/x-www-form-urlencoded', 'multipart/form-data')
 
 
-def _values(source, out):
-    for key in PARAMS:
-        if hasattr(source, 'getlist'):
-            out.extend(source.getlist(key))
-        elif key in source:
-            out.append(source[key])
+class Unsupported(Exception):
+    pass
 
 
-def candidate_slugs(request, view_kwargs, view_name):
-    """The set of slugs the request names, or raises Unreadable."""
-    found = []
-    if 'slug' in view_kwargs:
-        found.append(view_kwargs['slug'])
-    _values(request.GET, found)
-    if request.path_info.startswith('/api/'):
-        ctype = (request.content_type or '').lower()
-        if request.method not in policy.SAFE_METHODS:
-            if ctype in ('application/x-www-form-urlencoded', 'multipart/form-data'):
-                _values(request.POST, found)
-            else:  # DRF parses anything that is not a form as JSON, so read the body the same way
-                try:
-                    body = request.body
-                except (RequestDataTooBig, SuspiciousOperation):
-                    raise Unreadable
-                if body:
-                    try:
-                        data = json.loads(body)
-                    except (JSONDecodeError, UnicodeDecodeError, RecursionError):
-                        data = None  # the view answers 400; it has no project to read from it either
-                    if isinstance(data, dict):
-                        _values(data, found)
-    extra = policy.EXTRA_RESOLVERS.get(view_name)
-    if extra:
-        got = extra(request, view_kwargs)
-        if got is None:
-            raise Unreadable
-        found.extend(got)
-    if not all(isinstance(s, str) for s in found):
-        raise Unreadable
-    return {s for s in found if s}
+class BadBody(Exception):
+    pass
 
 
-def needed_role(view_name, method):
-    if view_name in policy.ADMIN_ONLY:
-        return ADMIN
-    if view_name in policy.SELF_SERVICE:
-        return READ_ONLY
-    if view_name in policy.READ_ONLY_POST_OK:
-        return READ_ONLY
-    if method in policy.SAFE_METHODS and view_name not in policy.MUTATING_GET:
-        return READ_ONLY
-    return STANDARD
+def _bad_constant(name):
+    raise ValueError(name)  # DRF's JSON parser refuses NaN and Infinity; so does this
+
+
+def normalise_content_type(request):
+    """Lower-case the media type and the parameter names (and the charset value), keep other values (a multipart
+    boundary is case-sensitive), and make Django re-read it. Returns (media type, charset or '')."""
+    raw = request.META.get('CONTENT_TYPE', '') or ''
+    head, *params = [p.strip() for p in raw.split(';')]
+    media, charset, out = head.lower(), '', []
+    for p in params:
+        name, _, value = p.partition('=')
+        name = name.strip().lower()
+        value = value.strip()
+        if name == 'charset':
+            charset = value.strip('"').lower()
+            value = charset
+        out.append(f'{name}={value}')
+    request.META['CONTENT_TYPE'] = '; '.join([media] + out) if media else ''
+    request._set_content_type_params(request.META)
+    return media, charset
+
+
+def read_body(request):
+    """The parsed body of an API write: a dict / QueryDict, or None when there is no body. Raises Unsupported or
+    access.Unreadable."""
+    media, charset = normalise_content_type(request)
+    try:
+        body = request.body
+    except (RequestDataTooBig, SuspiciousOperation):
+        raise access.Unreadable
+    if not body:
+        return None
+    if charset not in ('', 'utf-8'):
+        raise Unsupported
+    if media == JSON:
+        try:
+            data = json.loads(body.decode('utf-8'), parse_constant=_bad_constant)
+        except (ValueError, RecursionError):  # includes UnicodeDecodeError and JSONDecodeError
+            raise BadBody
+        if not isinstance(data, dict):
+            raise BadBody
+        return data
+    if media in FORMS:
+        return request.POST
+    raise Unsupported
 
 
 class ProjectAccessMiddleware:
@@ -85,39 +87,38 @@ class ProjectAccessMiddleware:
         return self.get_response(request)
 
     @staticmethod
-    def _not_found(request):
-        if request.path_info.startswith('/api/'):
-            return JsonResponse({'status': False, 'message': 'project not found'}, status=404)
-        raise Http404('project not found')
-
-    @staticmethod
-    def _forbidden(request):
-        if request.path_info.startswith('/api/'):
+    def _deny(request, is_api, verdict, status=None):
+        request.limes_access = verdict
+        if verdict == access.NOT_FOUND:
+            if is_api:
+                return JsonResponse({'status': False, 'message': 'project not found'}, status=404)
+            raise Http404('project not found')
+        if is_api:
             return JsonResponse({'status': False, 'message': 'your role in this project does not allow this'}, status=403)
         raise PermissionDenied
 
     def process_view(self, request, view_func, view_args, view_kwargs):
         match = request.resolver_match
         name = match.view_name if match else ''
+        namespaces = match.namespaces if match else []
+        is_api = 'api' in namespaces
+        data = None
         try:
-            slugs = candidate_slugs(request, view_kwargs, name)
-        except Unreadable:
-            request.limes_access = 'not_found'
-            return self._not_found(request)
-        user = request.user
-        roles = {}
-        if slugs:
-            roles = rules.roles_by_slug(user, slugs)
-            if set(roles) != slugs:
-                request.limes_access = 'not_found'
-                return self._not_found(request)
-            need = needed_role(name, request.method)
-            if not all(rules.at_least(r, need) for r in roles.values()):
-                request.limes_access = 'forbidden'
-                return self._forbidden(request)
-        if name in policy.ANY_ADMIN and not rules.is_any_admin(user):
-            request.limes_access = 'forbidden'
-            return self._forbidden(request)
-        request.limes_roles = roles if slugs else {}  # the page chrome reads it: no second lookup
+            if is_api and request.method not in ('GET', 'HEAD', 'OPTIONS'):
+                data = read_body(request)
+            slugs = access.slugs_of(view_kwargs, request.GET, data, name, is_api)
+        except access.Unreadable:
+            return self._deny(request, is_api, access.NOT_FOUND)
+        except BadBody:
+            request.limes_access = 'bad_body'
+            return JsonResponse({'status': False, 'message': 'the request body is not a valid JSON object'}, status=400)
+        except Unsupported:
+            request.limes_access = 'unsupported'
+            return JsonResponse({'status': False, 'message': 'unsupported content type'}, status=415)
+        verdict, roles = access.decide(request.user, name, namespaces, request.method, slugs)
+        if verdict != access.OK:
+            return self._deny(request, is_api, verdict)
+        request.limes_roles = roles
+        request.limes_decided = (name, request.method, frozenset(slugs))  # the DRF layer reuses this for the same inputs
         request.limes_access = 'allowed' if slugs else 'unscoped'  # read by the tests: which layer answered
         return None

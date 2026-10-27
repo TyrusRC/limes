@@ -4,11 +4,13 @@ from tests.core.access_base import AccessBase
 from tests.core.test_access_matrix import all_routes, send
 
 ADMIN_ONLY = {'project_members', 'project_member_add', 'project_member_role', 'project_member_remove',
-              'project_members_api', 'project_member_api', 'notification_settings', 'proxy_settings', 'tool_settings',
-              'admin_interface', 'admin_interface_update', 'delete_project', 'api:getFileContents'}
+              'project_members_api', 'project_member_api', 'delete_project'}
+GLOBAL_ONLY = {'notification_settings', 'proxy_settings', 'tool_settings', 'admin_interface', 'admin_interface_update',
+               'api:getFileContents', 'api:create_project'}
 READS_VIA_POST = {'api:score_forecast'}
-OWN_THINGS = {'profile', 'api_tokens'}
-GET_THAT_WRITES = {'api:create_project'}
+OWN_THINGS = {'profile', 'api_tokens', 'api:notification-mark-read', 'api:notification-mark-all-read',
+              'api:notification-clear-all'}
+GET_THAT_WRITES = set()
 METHODS = ('GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE')
 READS = ('GET', 'HEAD', 'OPTIONS')
 
@@ -28,7 +30,7 @@ class RoleMatrixTest(AccessBase):
         for name, url, _ in scoped():
             for method in METHODS:
                 got, r = self.verdict(c, method, name, url)
-                if name in ADMIN_ONLY or name in GET_THAT_WRITES:
+                if name in ADMIN_ONLY or name in GLOBAL_ONLY or name in GET_THAT_WRITES:
                     want = 'forbidden'
                 elif method in READS or name in READS_VIA_POST or name in OWN_THINGS:
                     want = 'allowed'
@@ -43,15 +45,24 @@ class RoleMatrixTest(AccessBase):
         for name, url, _ in scoped():
             for method in METHODS:
                 got, r = self.verdict(c, method, name, url)
-                want = 'forbidden' if name in ADMIN_ONLY else 'allowed'
+                want = 'forbidden' if name in ADMIN_ONLY or name in GLOBAL_ONLY else 'allowed'
                 self.assertEqual(got, want, f'standard {method} {name} {url} -> {r.status_code}')
 
-    def test_admin(self):
+    def test_project_admin(self):
         c = self.client_for(self.user('ad', role='admin', global_role='penetration_tester'))
         for name, url, _ in scoped():
             for method in METHODS:
                 got, r = self.verdict(c, method, name, url)
-                self.assertEqual(got, 'allowed', f'admin {method} {name} {url} -> {r.status_code}')
+                want = 'forbidden' if name in GLOBAL_ONLY else 'allowed'  # instance-wide settings are not a project's
+                self.assertEqual(got, want, f'project admin {method} {name} {url} -> {r.status_code}')
+
+    def test_global_admin(self):
+        c = self.client_for(self.user('sa', global_role='sys_admin'))
+        c.raise_request_exception = False  # a few legacy views crash on odd verbs; only the access layer is judged here
+        for name, url, _ in scoped():
+            for method in METHODS:
+                got, r = self.verdict(c, method, name, url)
+                self.assertEqual(got, 'allowed', f'sys_admin {method} {name} {url} -> {r.status_code}')
 
     def test_read_only_cannot_write_through_an_action_endpoint_and_data_is_unchanged(self):
         from startScan.models import Asset

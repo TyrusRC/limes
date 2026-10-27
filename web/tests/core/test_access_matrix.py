@@ -17,8 +17,11 @@ UNSCOPED = {
     'serve_protected_media': 'login only: files are not project-addressed',
     'delete_project': 'resolved to its project by id (policy.EXTRA_RESOLVERS)',
     'api:stop_scan': 'resolved to its projects by scan id (policy.EXTRA_RESOLVERS)',
-    'api:getFileContents': 'global tool configs: admin of some project (policy.ANY_ADMIN)',
-    'api:create_project': 'creator becomes admin',
+    'api:getFileContents': 'global tool configs: global admin only (policy.GLOBAL_ONLY)',
+    'api:create_project': 'global admin only (policy.GLOBAL_ONLY); creator becomes admin',
+    'api:notification-mark-read': 'own read state', 'api:notification-mark-all-read': 'own read state',
+    'api:notification-clear-all': 'own read state', 'api:notification-unread-count': 'reads only what the user may see',
+    'api:notification-list': 'reads only what the user may see', 'api:notification-detail': 'reads only what the user may see',
 }
 INT_ARGS = {'id', 'run_id', 'schedule_id', 'pk', 'member_id'}
 SKIP = {'admin'}  # django admin: staff only, not project data
@@ -90,7 +93,7 @@ class RoutesTest(AccessBase):
 
     def test_policy_names_exist(self):
         names = {n for n, _, _ in all_routes()}
-        for group in (policy.ADMIN_ONLY, policy.READ_ONLY_POST_OK, policy.SELF_SERVICE, policy.MUTATING_GET, policy.ANY_ADMIN,
+        for group in (policy.ADMIN_ONLY, policy.READ_ONLY_POST_OK, policy.SELF_SERVICE, policy.MUTATING_GET, policy.GLOBAL_ONLY, policy.NO_PROJECT_WRITES,
                       set(policy.EXTRA_RESOLVERS)):
             for n in group:
                 self.assertIn(n, names, f'policy names {n}, which is not a route')
@@ -123,7 +126,7 @@ class RoutesTest(AccessBase):
             if 'slug' in kw or url.startswith('/api/'):
                 url = url.replace('/p2/', '/p1/')
                 r = send(c, 'GET', url, project='p1')
-                if name in policy.ADMIN_ONLY or name in policy.MUTATING_GET:
+                if name in policy.ADMIN_ONLY or name in policy.GLOBAL_ONLY:
                     continue
                 self.assertEqual(r.wsgi_request.limes_access, 'allowed', f'{name} {url} {r.status_code}')
 

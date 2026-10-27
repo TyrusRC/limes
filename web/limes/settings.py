@@ -105,6 +105,7 @@ OIDC_DEFAULT_PROJECTS = env.list('LIMES_OIDC_DEFAULT_PROJECTS', default=[])
 OIDC_LINK_BY_EMAIL = env.bool('LIMES_OIDC_LINK_BY_EMAIL', default=False)
 OIDC_REDIRECT_BASE = env('LIMES_OIDC_REDIRECT_BASE', default='').strip()
 LOCAL_LOGIN = env.bool('LIMES_LOCAL_LOGIN', default=True)
+SSO_RATE_PER_MIN = max(1, env.int('LIMES_SSO_RATE_PER_MIN', default=20))  # sign-in starts and callbacks per address
 
 # Sent only to abuse.ch hosts, never logged. Empty: Feodo is fetched without a key.
 ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
@@ -230,6 +231,7 @@ TEMPLATES = [
 }]
 ROOT_URLCONF = 'limes.urls'
 REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': ['memberships.drf.ProjectRolePermission'],
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',

@@ -335,7 +335,7 @@ class AddAssetsApiTest(TestCase):
         self.assertEqual((r.status_code, r.json()['status']), (200, True))
         c = APIClient(); c.force_login(self.admin)
         r = c.post('/api/add/assets/', [1], format='json')
-        self.assertEqual((r.status_code, r.json()['status']), (200, False))
+        self.assertEqual((r.status_code, r.json()['status']), (400, False))  # not a JSON object: refused before the view
 
     def test_entry_count_is_capped(self):
         r = self._post(self.admin, project='p1', text='\n'.join(f'h{i}.x.com' for i in range(5001)))
@@ -553,7 +553,7 @@ class FullScanAssetApiTest(RescanAssetApiTest):
         other = Project.objects.create(name='p2', slug='p2', insert_date=timezone.now())
         foreign = Asset.objects.create(project=other, kind='root_domain', value='y.com', scope_tier='owned_root')
         for project in ('p1', ''):
-            self.assertEqual(self._post(self.admin, asset_id=foreign.id, project=project).status_code, 404)
+            self.assertIn(self._post(self.admin, asset_id=foreign.id, project=project).status_code, (403, 404))  # no project named: refused
         self.apply_async.assert_not_called()
 
     def test_missing_asset_is_404(self):

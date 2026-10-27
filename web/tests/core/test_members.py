@@ -182,8 +182,8 @@ class PageTest(MembersBase):
 
 class CreatorTest(AccessBase):
     def test_creating_a_project_through_the_api_makes_the_creator_its_admin(self):
-        u = self.user('maker', global_role='penetration_tester')
-        r = self.client_for(u).get('/api/action/create/project', {'name': 'Fresh One'})
+        u = self.user('maker', global_role='sys_admin')
+        r = self.client_for(u).post('/api/action/create/project', {'name': 'Fresh One'})
         self.assertEqual(r.status_code, 200, r.content)
         m = ProjectMember.objects.get(user=u, project__slug='fresh-one')
         self.assertEqual(m.role, 'admin')
