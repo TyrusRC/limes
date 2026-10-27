@@ -61,7 +61,7 @@ class RuleApiTest(Base):
         self.assertEqual(self.create(kinds=['bogus']).status_code, 400)
         self.assertEqual(self.create().status_code, 201)
         self.assertEqual(self.create().status_code, 400)
-        self.assertEqual(self.c.post(RULES, [1], format='json').status_code, 404)
+        self.assertEqual(self.c.post(RULES, [1], format='json').status_code, 400)
 
     def test_cross_project_ids_are_404(self):
         rid = self.create().json()['id']
