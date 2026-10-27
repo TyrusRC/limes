@@ -139,6 +139,15 @@ class OverviewPageTest(Base):
         issue = TrackedIssue.objects.get(asset=a, key='web.hsts_missing')
         self.assertIn(f'href="/scan/p/issues/{issue.id}/"', section(self.page('p'), 'dash_top_risks'))
 
+    def test_trend_card_has_the_range_toggle_and_a_change_summary(self):
+        html = self.page('p')
+        card = html[html.index('id="h-trend"'):html.index('id="dash_what_changed"')]
+        for days in ('30', '90', '365'):
+            self.assertIn(f'data-days="{days}"', card)
+        self.assertIn('aria-pressed="true"', card)
+        for id_ in ('score_change', 'sc_new', 'sc_gone', 'sc_intro', 'sc_res', 'sc_range'):
+            self.assertIn(f'id="{id_}"', card)
+
     def test_risky_ports_link_to_network_issues(self):
         self.ip('203.0.113.9', [3389])
         html = section(self.page('p'), 'dash_exposure')

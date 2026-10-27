@@ -14,49 +14,45 @@
 })();
 
 /* Overview score trend: ApexCharts area from the ScoreSnapshot series (json_script), coloured from the theme tokens.
-   Only numbers and dates reach the DOM, and only through textContent. */
+   The 1M / 3M / 12M toggle loads /api/score_history/ and redraws the chart and the "What changed" summary under it.
+   Only numbers, dates and asset names reach the DOM, and only through textContent. */
 (function () {
   var dataEl = document.getElementById('score_trend_data');
   var el = document.getElementById('score_trend');
   if (!dataEl || !el) return;
   var trend = JSON.parse(dataEl.textContent).filter(function (p) { return p.score !== null; });
-  if (trend.length < 2 || !window.ApexCharts) {
-    document.getElementById('score_trend_empty').hidden = false;
-    return;
-  }
+  var chart = null, drop = null, model = null, lo = 0, hi = 0, pad = 10, shownDays = 30;
+  var RANGE_NAMES = {30: 'last 30 days', 90: 'last 90 days', 365: 'last 12 months'};
 
   function day(iso) {
-    return new Date(Date.parse(iso)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', timeZone: 'UTC'});
+    return new Date(Date.parse(iso)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: shownDays > 90 ? '2-digit' : undefined, timeZone: 'UTC'});
   }
   function signed(n) { return (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n); }
-
-  var first = trend[0], last = trend[trend.length - 1];
-  var delta = document.getElementById('score_delta');
-  delta.textContent = signed(last.score - first.score) + ' since ' + day(first.date);
-  delta.className = 'ov-delta ' + (last.score > first.score ? 'ov-delta-up' : last.score < first.score ? 'ov-delta-down' : '');
-  delta.hidden = false;
-
-  // the largest day-over-day fall, if any, is marked on the chart and named in the legend
-  var drop = null;
-  for (var i = 1; i < trend.length; i++) {
-    var d = trend[i].score - trend[i - 1].score;
-    if (d < 0 && (!drop || d < drop.d)) drop = {d: d, p: trend[i]};
-  }
-  var model = null;  // first scoring-model change in the window
-  for (var j = 1; j < trend.length && !model; j++) if (trend[j].version !== trend[j - 1].version) model = trend[j];
-
-  document.getElementById('score_legend').hidden = false;
-  if (drop) {
-    var dropEl = document.getElementById('score_drop');
-    dropEl.querySelector('span').textContent = day(drop.p.date) + ' · ' + signed(drop.d);
-    dropEl.hidden = false;
-  }
-
-  var scores = trend.map(function (p) { return p.score; });
-  var lo = Math.min.apply(null, scores), hi = Math.max.apply(null, scores);
-  var pad = Math.max(10, Math.ceil((hi - lo) * 0.15));
-
   function tok(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function analyse() {
+    var first = trend[0], last = trend[trend.length - 1];
+    var delta = document.getElementById('score_delta');
+    delta.textContent = signed(last.score - first.score) + ' since ' + day(first.date);
+    delta.className = 'ov-delta ' + (last.score > first.score ? 'ov-delta-up' : last.score < first.score ? 'ov-delta-down' : '');
+    delta.hidden = false;
+    // the largest day-over-day fall, if any, is marked on the chart and named in the legend
+    drop = null;
+    for (var i = 1; i < trend.length; i++) {
+      var d = trend[i].score - trend[i - 1].score;
+      if (d < 0 && (!drop || d < drop.d)) drop = {d: d, p: trend[i]};
+    }
+    model = null;  // first scoring-model change in the window
+    for (var j = 1; j < trend.length && !model; j++) if (trend[j].version !== trend[j - 1].version) model = trend[j];
+    document.getElementById('score_legend').hidden = false;
+    var dropEl = document.getElementById('score_drop');
+    if (drop) dropEl.querySelector('span').textContent = day(drop.p.date) + ' · ' + signed(drop.d);
+    dropEl.hidden = !drop;
+    var scores = trend.map(function (p) { return p.score; });
+    lo = Math.min.apply(null, scores); hi = Math.max.apply(null, scores);
+    pad = Math.max(10, Math.ceil((hi - lo) * 0.15));
+  }
+
   function options() {
     var brand = tok('--brand'), crit = tok('--sev-critical'), muted = tok('--ink-3'), border = tok('--border');
     var xs = [];
@@ -82,15 +78,76 @@
       annotations: {xaxis: xs,
                     points: drop ? [{x: Date.parse(drop.p.date), y: drop.p.score, marker: {size: 4, fillColor: crit, strokeColor: crit}}] : []},
       tooltip: {theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
-                x: {format: 'MMM d'}}
+                x: {format: shownDays > 90 ? 'MMM d, yyyy' : 'MMM d'}}
     };
   }
 
-  var chart = new ApexCharts(el, options());
-  chart.render();
-  // follow the theme toggle: re-read the tokens when data-theme changes
-  new MutationObserver(function () { chart.updateOptions(options(), false, false); })
-    .observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+  function draw() {
+    var empty = document.getElementById('score_trend_empty');
+    if (trend.length < 2 || !window.ApexCharts) {
+      empty.hidden = false;
+      el.hidden = true;
+      document.getElementById('score_delta').hidden = true;
+      document.getElementById('score_legend').hidden = true;
+      return;
+    }
+    empty.hidden = true;
+    el.hidden = false;
+    analyse();
+    if (chart) { chart.updateOptions(options(), false, false); return; }
+    chart = new ApexCharts(el, options());
+    chart.render();
+    // follow the theme toggle: re-read the tokens when data-theme changes
+    new MutationObserver(function () { chart.updateOptions(options(), false, false); })
+      .observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+  }
+  draw();
+
+  /* range toggle */
+  var group = document.getElementById('score_range');
+  if (!group) return;
+  function setText(id, v) { var n = document.getElementById(id); if (n) n.textContent = String(v); }
+  function sample(id, names) {
+    var box = document.getElementById(id);
+    if (!box) return;
+    box.replaceChildren.apply(box, (names || []).map(function (v) { var s = document.createElement('span'); s.textContent = v; return s; }));
+  }
+  function showChange(c) {
+    setText('sc_range', RANGE_NAMES[c.days] || ('last ' + c.days + ' days'));
+    var delta = document.getElementById('sc_delta');
+    if (c.score_delta === null || c.score_delta === undefined) {
+      delta.hidden = true;
+      setText('sc_score', c.score_to === null ? 'No score yet' : 'No trend yet: no score snapshot ' + c.days + ' days back');
+    } else {
+      delta.hidden = false;
+      delta.textContent = (c.score_delta > 0 ? '+' : '') + c.score_delta;
+      delta.className = 'ov-delta' + (c.score_delta > 0 ? ' ov-delta-up' : c.score_delta < 0 ? ' ov-delta-down' : '');
+      setText('sc_score', 'Score ' + c.score_from + ' → ' + c.score_to);
+    }
+    setText('sc_new', c.new_assets); sample('sc_new_s', c.new_sample);
+    setText('sc_gone', c.removed_assets); sample('sc_gone_s', c.removed_sample);
+    setText('sc_intro', c.introduced); setText('sc_res', c.resolved);
+  }
+  var seq = 0, project = document.body.dataset.currentProject;
+  Array.prototype.forEach.call(group.querySelectorAll('button'), function (btn) {
+    btn.addEventListener('click', function () {
+      var days = Number(btn.dataset.days), mine = ++seq;
+      Array.prototype.forEach.call(group.querySelectorAll('button'), function (b) { b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
+      group.setAttribute('aria-busy', 'true');
+      fetch('/api/score_history/?project=' + encodeURIComponent(project) + '&days=' + days, {credentials: 'same-origin'})
+        .then(function (r) { if (!r.ok) throw new Error('history'); return r.json(); })
+        .then(function (d) {
+          if (mine !== seq) return;
+          shownDays = days;
+          trend = d.series.filter(function (p) { return p.score !== null; });
+          draw();
+          showChange(d.change);
+        }).catch(function () {
+          if (mine !== seq) return;
+          if (window.LimesUx) LimesUx.toast('Could not load the score history.', true);
+        }).then(function () { if (mine === seq) group.setAttribute('aria-busy', 'false'); });
+    });
+  });
 })();
 
 /* Overview live updates: poll the project's live endpoint for new change events and the Real-time card.

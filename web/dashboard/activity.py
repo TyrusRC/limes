@@ -87,28 +87,34 @@ def _sample(qs):
     return list(qs.order_by('value').values_list('value', flat=True)[:SAMPLE_LIMIT])
 
 
-def what_changed(project, now, score):
+def window(project, now, score, n, owned=None, issues=None):
+    """What changed in the last n days: new and gone assets, issues introduced and resolved, the score against the
+    latest snapshot on or before the window's start. owned and issues may be passed in to share the base querysets."""
     from startScan.models import Asset, ScoreSnapshot, TrackedIssue
+    owned = Asset.objects.filter(project=project, scope_tier__in=OWNED) if owned is None else owned
+    issues = TrackedIssue.objects.filter(project=project).annotate(detected=_detected()) if issues is None else issues
+    since = now - timedelta(days=n)
+    new = owned.filter(first_seen__gte=since)
+    # NOTE: the model keeps no timestamp for going missing or retired; last_seen (the last sighting) is the closest honest field.
+    gone = owned.filter(state__in=GONE_STATES, last_seen__gte=since)
+    # NOTE: the score baseline is the latest snapshot on or before `since` with no lower bound, so after a gap in
+    # snapshots it can be much older than the window; score_from_date shows which day it is. Upgrade path: cap its age.
+    snap = (ScoreSnapshot.objects.filter(project=project, date__lte=timezone.localtime(since).date(), score__isnull=False)
+            .order_by('-date').values_list('score', 'date').first())
+    snap, snap_date = snap or (None, None)
+    return {'days': n, 'new_assets': new.count(), 'new_sample': _sample(new),
+            'removed_assets': gone.count(), 'removed_sample': _sample(gone),
+            'introduced': issues.filter(detected__gte=since).count(),
+            'resolved': issues.filter(status='fixed', fixed_at__gte=since).count(),
+            'score_from': snap, 'score_from_date': snap_date, 'score_to': score,
+            'score_delta': score - snap if snap is not None and score is not None else None}
+
+
+def what_changed(project, now, score):
+    from startScan.models import Asset, TrackedIssue
     owned = Asset.objects.filter(project=project, scope_tier__in=OWNED)
     issues = TrackedIssue.objects.filter(project=project).annotate(detected=_detected())
-    out = []
-    for n in WINDOWS:
-        since = now - timedelta(days=n)
-        new = owned.filter(first_seen__gte=since)
-        # NOTE: the model keeps no timestamp for going missing or retired; last_seen (the last sighting) is the closest honest field.
-        gone = owned.filter(state__in=GONE_STATES, last_seen__gte=since)
-        # NOTE: the score baseline is the latest snapshot on or before `since` with no lower bound, so after a gap in
-        # snapshots it can be much older than the window; score_from_date shows which day it is. Upgrade path: cap its age.
-        snap = (ScoreSnapshot.objects.filter(project=project, date__lte=timezone.localtime(since).date(), score__isnull=False)
-                .order_by('-date').values_list('score', 'date').first())
-        snap, snap_date = snap or (None, None)
-        out.append({'days': n, 'new_assets': new.count(), 'new_sample': _sample(new),
-                    'removed_assets': gone.count(), 'removed_sample': _sample(gone),
-                    'introduced': issues.filter(detected__gte=since).count(),
-                    'resolved': issues.filter(status='fixed', fixed_at__gte=since).count(),
-                    'score_from': snap, 'score_from_date': snap_date, 'score_to': score,
-                    'score_delta': score - snap if snap is not None and score is not None else None})
-    return out
+    return [window(project, now, score, n, owned, issues) for n in WINDOWS]
 
 
 def discovery(project):

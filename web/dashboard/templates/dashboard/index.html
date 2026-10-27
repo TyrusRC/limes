@@ -66,16 +66,36 @@ Overview
 
   <section class="card ov-trend" aria-labelledby="h-trend">
     <div class="ov-card-head">
-      <div class="ov-trend-head"><h2 id="h-trend">Score trend</h2><span class="ov-meta">Last 30 days</span></div>
+      <div class="ov-trend-head"><h2 id="h-trend">Score trend</h2>
+        <div class="ov-toggle" role="group" aria-label="Score history range" id="score_range">
+          <button type="button" data-days="30" aria-pressed="true" aria-label="Last month">1M</button>
+          <button type="button" data-days="90" aria-pressed="false" aria-label="Last 3 months">3M</button>
+          <button type="button" data-days="365" aria-pressed="false" aria-label="Last 12 months">12M</button>
+        </div></div>
       <span class="ov-delta" id="score_delta" hidden></span>
     </div>
     <div class="ov-card-body">
-      <div id="score_trend" data-max="{{ risk.max_score }}" role="img" aria-label="Headline score over the last 30 days"></div>
+      <div id="score_trend" data-max="{{ risk.max_score }}" role="img" aria-label="Headline score over the selected range" aria-describedby="score_change_title"></div>
       <p class="ov-note ov-empty-note" id="score_trend_empty" hidden>Not enough score history yet. A point is added each day.</p>
       <div class="ov-legend" id="score_legend" hidden>
         <span><i class="ov-swatch"></i>Headline score</span>
         <span id="score_drop" hidden><i class="ov-swatch-event"></i><span></span></span>
       </div>
+      {% with w=what_changed.0 %}
+      <div class="ov-wc ov-range-change" id="score_change" aria-live="polite">
+        <h3 class="ov-subhead" id="score_change_title">What changed: <span id="sc_range">last 30 days</span></h3>
+        <div class="ov-wc-score">
+          <span class="ov-delta{% if w.score_delta > 0 %} ov-delta-up{% elif w.score_delta < 0 %} ov-delta-down{% endif %}" id="sc_delta"{% if w.score_delta is None %} hidden{% endif %}>{% if w.score_delta > 0 %}+{% endif %}{{ w.score_delta }}</span>
+          <span id="sc_score">{% if w.score_delta is not None %}Score {{ w.score_from }} → {{ w.score_to }}{% elif w.score_to is None %}No score yet{% else %}No trend yet: no score snapshot 30 days back{% endif %}</span>
+        </div>
+        <dl class="ov-wc-list">
+          <div><dt>New assets</dt><dd id="sc_new">{{ w.new_assets|intcomma }}</dd><dd class="ov-sample" id="sc_new_s">{% for v in w.new_sample %}<span>{{ v }}</span>{% endfor %}</dd></div>
+          <div><dt>Missing or stale</dt><dd id="sc_gone">{{ w.removed_assets|intcomma }}</dd><dd class="ov-sample" id="sc_gone_s">{% for v in w.removed_sample %}<span>{{ v }}</span>{% endfor %}</dd></div>
+          <div><dt>Issues introduced</dt><dd id="sc_intro">{{ w.introduced|intcomma }}</dd></div>
+          <div><dt>Issues resolved</dt><dd id="sc_res">{{ w.resolved|intcomma }}</dd></div>
+        </dl>
+      </div>
+      {% endwith %}
     </div>
   </section>
 
