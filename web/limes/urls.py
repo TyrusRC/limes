@@ -16,9 +16,6 @@ urlpatterns = [
         '',
         include('dashboard.urls')),
     path(
-        'target/',
-        include('targetApp.urls')),
-    path(
         'scanEngine/',
         include('scanEngine.urls')),
     path(

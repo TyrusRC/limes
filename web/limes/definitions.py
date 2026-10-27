@@ -256,7 +256,6 @@ PERM_MODIFY_SYSTEM_CONFIGURATIONS = 'modify_system_configurations'
 PERM_MODIFY_SCAN_CONFIGURATIONS = 'modify_scan_configurations'
 PERM_MODIFY_TARGETS = 'modify_targets' # projects and targets
 PERM_MODIFY_SCAN_RESULTS = 'modify_scan_results'
-PERM_MODIFY_INTERESTING_LOOKUP = 'modify_interesting_lookup'
 PERM_INITATE_SCANS_SUBSCANS = 'initiate_scans_subscans'
 
 # 404 page url

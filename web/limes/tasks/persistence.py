@@ -342,7 +342,6 @@ def save_vulnerability(**vuln_data):
 	cve_ids = vuln_data.pop('cve_ids', [])
 	cwe_ids = vuln_data.pop('cwe_ids', [])
 	tags = vuln_data.pop('tags', [])
-	subscan = vuln_data.pop('subscan', None)
 
 	# remove nulls
 	vuln_data = replace_nulls(vuln_data)
@@ -385,11 +384,6 @@ def save_vulnerability(**vuln_data):
 			vuln.references.add(ref)
 			vuln.save()
 
-	# Save subscan id in vuln object
-	if subscan:
-		vuln.vuln_subscan_ids.add(subscan)
-		vuln.save()
-
 	return vuln, created
 
 
@@ -411,7 +405,6 @@ def save_endpoint(
 		results_dir (str, optional): Results directory.
 		crawl (bool, optional): Run httpx on endpoint if True. Default: False.
 		force (bool, optional): Force crawl even if ENABLE_HTTP_CRAWL mode is on.
-		subscan (startScan.models.SubScan, optional): SubScan object.
 
 	Returns:
 		tuple: (startScan.models.EndPoint, created) where `created` is a boolean
@@ -474,10 +467,6 @@ def save_endpoint(
 		endpoint.is_default = is_default
 		endpoint.discovered_date = timezone.now()
 		endpoint.save()
-		subscan_id = ctx.get('subscan_id')
-		if subscan_id:
-			endpoint.endpoint_subscan_ids.add(subscan_id)
-			endpoint.save()
 
 	return endpoint, created
 
@@ -494,7 +483,6 @@ def save_subdomain(subdomain_name, ctx={}):
 			boolean indicating if the object has been created in DB.
 	"""
 	scan_id = ctx.get('scan_history_id')
-	subscan_id = ctx.get('subscan_id')
 	out_of_scope_subdomains = ctx.get('out_of_scope_subdomains', [])
 	subdomain_checker = SubdomainScopeChecker(out_of_scope_subdomains)
 	valid_domain = (
@@ -525,8 +513,6 @@ def save_subdomain(subdomain_name, ctx={}):
 	if created:
 		# logger.warning(f'Found new subdomain {subdomain_name}')
 		subdomain.discovered_date = timezone.now()
-		if subscan_id:
-			subdomain.subdomain_subscan_ids.add(subscan_id)
 		subdomain.save()
 	project = getattr(domain, 'project', None)
 	if project and subdomain.name:
@@ -537,7 +523,7 @@ def save_subdomain(subdomain_name, ctx={}):
 	return subdomain, created
 
 
-def save_ip_address(ip_address, subdomain=None, subscan=None, **kwargs):
+def save_ip_address(ip_address, subdomain=None, **kwargs):
 	if not (validators.ipv4(ip_address) or validators.ipv6(ip_address)):
 		logger.info(f'IP {ip_address} is not a valid IP. Skipping.')
 		return None, False
@@ -569,14 +555,7 @@ def save_ip_address(ip_address, subdomain=None, subscan=None, **kwargs):
 			if host and ip_asset:
 				host.ip_addresses.add(ip)
 
-	# Add subscan to IP
-	if subscan:
-		ip.ip_subscan_ids.add(subscan)
 
-	# Geo-localize IP asynchronously
-	if created:
-		from limes.tasks.enrichment import geo_localize
-		geo_localize.delay(ip_address, ip.id)
 
 	return ip, created
 

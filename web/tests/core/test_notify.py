@@ -20,7 +20,7 @@ class NotifyGateTest(TestCase):
             port_scan.task_name = 'port_scan'
             port_scan.status = 1
             port_scan.result = port_scan.traceback = port_scan.output_path = None
-            port_scan.scan_id = port_scan.engine_id = port_scan.subscan_id = None
+            port_scan.scan_id = port_scan.engine_id = None
             port_scan.notify(fields={'x': 'y'})
         delay.assert_not_called()
 
@@ -32,6 +32,17 @@ class InAppDescriptionTest(TestCase):
         from limes.tasks import notifications
         scan = NS(id=7, domain=NS(name='x.test', project=NS(slug='acme')))
         with mock.patch.object(notifications, 'create_inappnotification') as create:
-            notifications.generate_inapp_notification(scan, None, 'SUCCESS', NS(engine_name='full'), {'Duration': '5s'})
+            notifications.generate_inapp_notification(scan, 'SUCCESS', NS(engine_name='full'), {'Duration': '5s'})
         self.assertEqual(create.call_args.kwargs['description'],
                          'Scan was successful for x.test\nEngine: full\nCompleted in 5s')
+
+
+class ScanLinkTest(TestCase):
+    def test_scan_url_is_a_page_that_exists(self):
+        from types import SimpleNamespace as NS
+        from django.urls import resolve
+        from limes.common_func import get_scan_url
+        url = get_scan_url(NS(id=7, domain=NS(project=NS(slug='acme'))))
+        path = url.split('/', 3)[3]
+        self.assertEqual(resolve('/' + path).url_name, 'scan_history')
+        self.assertIsNone(get_scan_url(None))

@@ -47,63 +47,6 @@ class UpdateEngineForm(forms.ModelForm):
         showinvisibles=True,
         attrs={"id": "editor"}))
 
-class InterestingLookupForm(forms.ModelForm):
-    class Meta:
-        model = InterestingLookupModel
-        fields = '__all__'
-    keywords = forms.CharField(
-        required=False,
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control form-control-lg",
-                "id": "keywords",
-                "placeholder": "Interesting Keywords",
-            }))
-
-    custom_type = forms.BooleanField(
-        required=False,
-        widget=forms.HiddenInput(
-            attrs={
-                "value": 'true'
-                }))
-
-    title_lookup = forms.BooleanField(
-        required=False,
-        widget=forms.CheckboxInput(
-            attrs={
-                "class": "form-check-input",
-                "id": "title_lookup"
-            }))
-
-    url_lookup = forms.BooleanField(
-        required=False,
-        widget=forms.CheckboxInput(
-            attrs={
-                "class": "form-check-input",
-                "id": "url_lookup"
-            }))
-
-    condition_200_http_lookup = forms.BooleanField(
-        required=False,
-        widget=forms.CheckboxInput(
-            attrs={
-                "class": "form-check-input",
-                "id": "condition_200_http_lookup"
-            }))
-
-    def set_value(self, key):
-        print(key.url_lookup)
-        self.initial['keywords'] = key.keywords
-        self.initial['title_lookup'] = key.title_lookup
-        self.initial['url_lookup'] = key.url_lookup
-        self.initial['condition_200_http_lookup'] = key.condition_200_http_lookup
-
-    def initial_checkbox(self):
-        self.initial['title_lookup'] = True
-        self.initial['url_lookup'] = True
-        self.initial['condition_200_http_lookup'] = False
-
-
 class NotificationForm(forms.ModelForm):
     class Meta:
         model = Notification
@@ -204,14 +147,6 @@ class NotificationForm(forms.ModelForm):
                 "id": "send_scan_status_notif",
             }))
 
-    send_interesting_notif = forms.BooleanField(
-        required=False,
-        widget=forms.CheckboxInput(
-            attrs={
-                "class": "form-check-input",
-                "id": "send_interesting_notif",
-            }))
-
 
     send_vuln_notif = forms.BooleanField(
         required=False,
@@ -261,7 +196,6 @@ class NotificationForm(forms.ModelForm):
         self.initial['telegram_bot_chat_id'] = key.telegram_bot_chat_id
 
         self.initial['send_scan_status_notif'] = key.send_scan_status_notif
-        self.initial['send_interesting_notif'] = key.send_interesting_notif
         self.initial['send_vuln_notif'] = key.send_vuln_notif
         self.initial['send_subdomain_changes_notif'] = key.send_subdomain_changes_notif
 
@@ -292,7 +226,6 @@ class NotificationForm(forms.ModelForm):
         self.fields['telegram_bot_chat_id'].widget.attrs['readonly'] = True
 
         self.initial['send_scan_status_notif'] = True
-        self.initial['send_interesting_notif'] = True
         self.initial['send_vuln_notif'] = True
         self.initial['send_subdomain_changes_notif'] = True
 

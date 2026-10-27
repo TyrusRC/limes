@@ -14,13 +14,10 @@ from dashboard.views import on_user_logged_in
 
 SLUG = 'p1'
 
-# Every link the old top_nav.html carried, with the permission that gated it (None = everyone).
+# Every sidebar link, with the permission that gates it (None = everyone).
 NAV = {
-    'dashboardIndex': None, 'list_target': None, 'scan_history': None, 'subscan_history': None,
-    'scheduled_scan_view': None, 'assets': None, 'issues': None, 'all_subdomains': None,
-    'all_endpoints': None, 'all_vulns': None, 'list_organization': None,
+    'dashboardIndex': None, 'scan_history': None, 'assets': None, 'issues': None, 'lookalikes': None,
     'scan_engine_index': 'modify_scan_configurations',
-    'interesting_lookup': 'modify_interesting_lookup',
     'proxy_settings': 'modify_scan_configurations',
     'tool_settings': 'modify_scan_configurations',
     'limes_settings': 'modify_system_configurations',
@@ -73,36 +70,24 @@ class NavigationTest(TestCase):
         for name, perm in NAV.items():
             self.assertEqual(self.href(name) in side, perm is None, name)
         self.assertNotIn('Configure', side)
-        self.assertNotIn('aria-label="Quick add"', top)
+        self.assertNotIn(self.href('add_engine'), top)
 
     def test_each_configure_gate_checked_on_its_own(self):
         # sys_admin minus one permission: the Configure section still renders, so each inner
         # gate (not just the section gate) has to hide its link
         user = User.objects.create_user('partial', password='p')
         assign_role(user, 'sys_admin')
-        for perm in ('modify_interesting_lookup',):
-            revoke_permission(user, perm)
-        side, _ = self.shell(user)
+        revoke_permission(user, 'modify_scan_configurations')
+        side, top = self.shell(user)
         for name, perm in NAV.items():
             self.assertEqual(self.href(name) in side, perm is None or has_permission(user, perm), name)
-        self.assertNotIn(self.href('interesting_lookup'), side)
-        self.assertIn(self.href('scan_engine_index'), side)
+        self.assertNotIn(self.href('scan_engine_index'), side)
+        self.assertIn(self.href('limes_settings'), side)
+        self.assertNotIn(self.href('add_engine'), top)
 
-    def test_quick_add_items_gated_one_by_one(self):
-        # a user holding exactly one of the Quick add permissions sees the menu with only that item
-        items = {'modify_targets': 'show_quick_add_target_modal()', 'modify_scan_configurations': self.href('add_engine')}
-        for keep in items:
-            user = User.objects.create_user('qa-' + keep, password='p')
-            assign_role(user, 'sys_admin')
-            for perm in items:
-                if perm != keep:
-                    revoke_permission(user, perm)
-            _, top = self.shell(user)
-            menu = re.search(r'aria-label="Quick add".*?</div>', top, re.S)
-            self.assertIsNotNone(menu, keep)
-            for perm, marker in items.items():
-                self.assertEqual(marker in menu.group(0), perm == keep, (keep, perm))
-            self.assertEqual(self.href('add_organization') in menu.group(0), keep == 'modify_targets', keep)
+    def test_add_engine_shortcut_follows_permission(self):
+        _, top = self.shell(self.admin)
+        self.assertIn(self.href('add_engine'), top)
 
     def test_not_found_pages_render_without_a_project(self):
         # no slug in these URLs, so no current project: the page must not need one (it used to raise NoReverseMatch -> 500)

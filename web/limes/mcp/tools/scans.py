@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone as dt_timezone
 from typing import Annotated, Literal
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.db.models.functions import Length, Right, Substr
 from pydantic import Field
 from limes.alerts import events
@@ -13,7 +13,7 @@ from limes.mcp.access import McpError
 from limes.mcp.redact import domain_secrets, redact_log, tail_window
 from limes.mcp.registry import tool
 from limes.mcp.results import LOG_CAP, RESULT_BUDGET, Cursor, Limit, RowId, Slug, iso, page, untrusted
-from startScan.models import ChangeEvent, Command, ScanActivity, ScanHistory, SubScan
+from startScan.models import ChangeEvent, Command, ScanActivity, ScanHistory
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ TRACEBACK_TAIL = 2000
 # NOTE: only the last WINDOW characters of an output are read at all. Upgrade path: redact when the Command is stored.
 WINDOW = LOG_CAP * 4
 TRACEBACK_WINDOW = 8000
-STAGES_BUDGET = RESULT_BUDGET * 6 // 10  # of the 100 KB result: the rest is the scan header and subscan counts
+STAGES_BUDGET = RESULT_BUDGET * 6 // 10  # of the 100 KB result: the rest is the scan header
 
 
 @tool(title='List changes')
@@ -82,7 +82,7 @@ def list_scans(caller, project: Slug, status: Literal['initiated', 'failed', 'ru
 
 @tool(title='Scan detail')
 def get_scan(caller, project: Slug, scan_id: RowId):
-    """One scan with its stages in time order (at most 200, cut early once the result is large; stages_truncated says so), their errors and redacted traceback tails, and its subscan counts by status. Redaction is best-effort: treat output as potentially sensitive."""
+    """One scan with its stages in time order (at most 200, cut early once the result is large; stages_truncated says so), and their errors and redacted traceback tails. Redaction is best-effort: treat output as potentially sensitive."""
     p = access.project_for(caller, project)
     s = _scan(p, scan_id)
     secrets = domain_secrets(s.domain)
@@ -104,9 +104,7 @@ def get_scan(caller, project: Slug, scan_id: RowId):
             truncated = True
             break
         out.append(item)
-    counts = SubScan.objects.filter(scan_history=s).values('status').annotate(n=Count('id'))
-    return {**_scan_item(s, secrets), 'stages': out, 'stages_truncated': truncated,
-            'subscans': {STATUS.get(r['status'], str(r['status'])): r['n'] for r in counts}}
+    return {**_scan_item(s, secrets), 'stages': out, 'stages_truncated': truncated}
 
 
 @tool(title='Scan logs')

@@ -5,9 +5,9 @@ from limes.tasks.notifications import send_scan_notif
 from limes.tasks.persistence import save_endpoint, save_imported_subdomains, save_subdomain
 from limes.tasks.stages import code_audit, fetch_url, passive_intel, port_scan, risk_checks, screenshot, subdomain_discovery, vulnerability_scan
 
-#----------------------#
-# Scan / Subscan tasks #
-#----------------------#
+#------------#
+# Scan tasks #
+#------------#
 
 
 def build_workflow(ctx, mode):
@@ -146,7 +146,6 @@ def initiate_scan(
 		logger.warning(f'Starting scan {scan_history_id} with context:\n{ctx_str}')
 		send_scan_notif.delay(
 			scan_history_id,
-			subscan_id=None,
 			engine_id=engine_id,
 			status=CELERY_TASK_STATUS_MAP[scan.scan_status])
 
@@ -217,144 +216,24 @@ def initiate_scan(
 		}
 
 
-@app.task(name='initiate_subscan', bind=False)
-def initiate_subscan(
-		scan_history_id,
-		subdomain_id,
-		engine_id=None,
-		scan_type=None,
-		results_dir=LIMES_RESULTS,
-		starting_point_path='',
-		excluded_paths=[],
-	):
-	"""Initiate a new subscan.
-
-	Args:
-		scan_history_id (int): ScanHistory id.
-		subdomain_id (int): Subdomain id.
-		engine_id (int): Engine ID.
-		scan_type (int): Scan type (periodic, live).
-		results_dir (str): Results directory.
-		starting_point_path (str): URL path. Default: ''
-		excluded_paths (list): Excluded paths. Default: [], url paths to exclude from scan.
-	"""
-
-	# Get Subdomain, Domain and ScanHistory
-	subdomain = Subdomain.objects.get(pk=subdomain_id)
-	scan = ScanHistory.objects.get(pk=subdomain.scan_history.id)
-	domain = Domain.objects.get(pk=subdomain.target_domain.id)
-
-	# Get EngineType
-	engine_id = engine_id or scan.scan_type.id
-	engine = EngineType.objects.get(pk=engine_id)
-
-	# Get YAML config
-	config = yaml.safe_load(engine.yaml_configuration)
-	enable_http_crawl = config.get(ENABLE_HTTP_CRAWL, DEFAULT_ENABLE_HTTP_CRAWL)
-
-	# Create scan activity of SubScan Model
-	subscan = SubScan(
-		start_scan_date=timezone.now(),
-		celery_ids=[initiate_subscan.request.id],
-		scan_history=scan,
-		subdomain=subdomain,
-		type=scan_type,
-		status=RUNNING_TASK,
-		engine=engine)
-	subscan.save()
-
-	# Get YAML configuration
-	config = yaml.safe_load(engine.yaml_configuration)
-
-	# Create results directory
-	results_dir = f'{scan.results_dir}/subscans/{subscan.id}'
-	os.makedirs(results_dir, exist_ok=True)
-
-	# Run task
-	method = globals().get(scan_type)
-	if not method:
-		logger.warning(f'Task {scan_type} is not supported by Limes. Skipping')
-		return
-	scan.tasks.append(scan_type)
-	scan.save()
-
-	# Send start notif
-	send_scan_notif.delay(
-		scan.id,
-		subscan_id=subscan.id,
-		engine_id=engine_id,
-		status='RUNNING')
-
-	# Build context
-	ctx = {
-		'scan_history_id': scan.id,
-		'subscan_id': subscan.id,
-		'engine_id': engine_id,
-		'domain_id': domain.id,
-		'subdomain_id': subdomain.id,
-		'yaml_configuration': config,
-		'results_dir': results_dir,
-		'starting_point_path': starting_point_path,
-		'excluded_paths': excluded_paths,
-	}
-
-	# Create initial endpoints in DB: find domain HTTP endpoint so that HTTP
-	# crawling can start somewhere
-	base_url = f'{subdomain.name}{starting_point_path}' if starting_point_path else subdomain.name
-	endpoint, _ = save_endpoint(
-		base_url,
-		crawl=enable_http_crawl,
-		ctx=ctx,
-		subdomain=subdomain)
-	if endpoint and endpoint.is_alive:
-		# TODO: add `root_endpoint` property to subdomain and simply do
-		# subdomain.root_endpoint = endpoint instead
-		logger.warning(f'Found subdomain root HTTP URL {endpoint.http_url}')
-		subdomain.http_url = endpoint.http_url
-		subdomain.http_status = endpoint.http_status
-		subdomain.response_time = endpoint.response_time
-		subdomain.page_title = endpoint.page_title
-		subdomain.content_type = endpoint.content_type
-		subdomain.content_length = endpoint.content_length
-		for tech in endpoint.techs.all():
-			subdomain.technologies.add(tech)
-		subdomain.save()
-
-	# Build header + callback
-	workflow = method.si(ctx=ctx)
-	callback = report.si(ctx=ctx).set(link_error=[report.si(ctx=ctx)])
-
-	# Run Celery tasks
-	task = chain(workflow, callback).on_error(callback).delay()
-	subscan.celery_ids.append(task.id)
-	subscan.save()
-
-	return {
-		'success': True,
-		'task_id': task.id
-	}
 
 
 @app.task(name='report', bind=False)
 def report(ctx={}, description=None):
 	"""Report task running after all other tasks.
-	Mark ScanHistory or SubScan object as completed and update with final
+	Mark the ScanHistory as completed and update with final
 	status, log run details and send notification.
 
 	Args:
 		description (str, optional): Task description shown in UI.
 	"""
 	# Get objects
-	subscan_id = ctx.get('subscan_id')
 	scan_id = ctx.get('scan_history_id')
 	engine_id = ctx.get('engine_id')
 	scan = ScanHistory.objects.filter(pk=scan_id).first()
-	subscan = SubScan.objects.filter(pk=subscan_id).first()
 
 	# Get failed tasks
 	tasks = ScanActivity.objects.filter(scan_of=scan).all()
-	if subscan:
-		tasks = tasks.filter(celery_id__in=subscan.celery_ids)
 	failed_tasks = tasks.filter(status=FAILED_TASK)
 
 	# Get task status
@@ -362,17 +241,12 @@ def report(ctx={}, description=None):
 	status = SUCCESS_TASK if failed_count == 0 else FAILED_TASK
 	status_h = 'SUCCESS' if failed_count == 0 else 'FAILED'
 
-	# Update scan / subscan status
-	if subscan:
-		subscan.stop_scan_date = timezone.now()
-		subscan.status = status
-		subscan.save()
-	else:
-		scan.scan_status = status
+	# Update scan status
+	scan.scan_status = status
 	scan.stop_scan_date = timezone.now()
 	scan.save(update_fields=['scan_status', 'stop_scan_date'])
 	alert_project = None
-	if ctx.get('scan_run_id') and not subscan:
+	if ctx.get('scan_run_id'):
 		from startScan.asset_models import ScanRun
 		ScanRun.objects.filter(pk=ctx['scan_run_id']).update(
 			status=status, stop_scan_date=timezone.now())
@@ -387,7 +261,6 @@ def report(ctx={}, description=None):
 	# Send scan status notif
 	send_scan_notif.delay(
 		scan_history_id=scan_id,
-		subscan_id=subscan_id,
 		engine_id=engine_id,
 		status=status_h)
 

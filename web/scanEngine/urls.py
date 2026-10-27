@@ -21,10 +21,6 @@ urlpatterns = [
         views.update_engine,
         name='update_engine'),
     path(
-        '<slug:slug>/interesting/lookup/',
-        views.interesting_lookup,
-        name='interesting_lookup'),
-    path(
         '<slug:slug>/tool_settings',
         views.tool_specific_settings,
         name='tool_settings'),

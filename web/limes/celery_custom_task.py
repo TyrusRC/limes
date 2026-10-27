@@ -11,7 +11,7 @@ from limes.common_func import (fmt_traceback, get_output_file_name,
 from limes.definitions import *
 from limes.settings import *
 from scanEngine.models import EngineType
-from startScan.models import ScanActivity, ScanHistory, SubScan
+from startScan.models import ScanActivity, ScanHistory
 
 logger = get_task_logger(__name__)
 
@@ -69,7 +69,6 @@ class LimesTask(Task):
 		ctx = kwargs.get('ctx', {})
 		self.track = ctx.pop('track', True)
 		self.scan_id = ctx.get('scan_history_id')
-		self.subscan_id = ctx.get('subscan_id')
 		self.engine_id = ctx.get('engine_id')
 		self.filename = ctx.get('filename')
 		self.starting_point_path = ctx.get('starting_point_path', '')
@@ -79,19 +78,15 @@ class LimesTask(Task):
 		self.out_of_scope_subdomains = ctx.get('out_of_scope_subdomains', [])
 		self.history_file = f'{self.results_dir}/commands.txt'
 		self.scan = ScanHistory.objects.filter(pk=self.scan_id).first()
-		self.subscan = SubScan.objects.filter(pk=self.subscan_id).first()
 		self.engine = EngineType.objects.filter(pk=self.engine_id).first()
 		self.domain = self.scan.domain if self.scan else None
 		self.domain_id = self.domain.id if self.domain else None
-		self.subdomain = self.subscan.subdomain if self.subscan else None
-		self.subdomain_id = self.subdomain.id if self.subdomain else None
 		self.activity_id = None
 
 		# Set file self.task_name if not already set
 		if not self.filename:
 			self.filename = get_output_file_name(
 				self.scan_id,
-				self.subscan_id,
 				f'{self.task_name}.txt')
 			if self.task_name == 'screenshot':
 				self.filename = 'Requests.csv'
@@ -146,8 +141,7 @@ class LimesTask(Task):
 			self.output_path = get_traceback_path(
 				self.task_name,
 				self.results_dir,
-				self.scan_id,
-				self.subscan_id)
+				self.scan_id)
 			os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
 
 			if LIMES_RAISE_ON_ERROR:
@@ -227,8 +221,6 @@ class LimesTask(Task):
 		self.activity_id = self.activity.id
 		if self.scan:
 			append_celery_id(ScanHistory, self.scan.pk, celery_id)
-		if self.subscan:
-			append_celery_id(SubScan, self.subscan.pk, celery_id)
 
 		# Send notification
 		self.notify()
@@ -262,7 +254,6 @@ class LimesTask(Task):
 			output_path=self.output_path,
 			scan_history_id=self.scan_id,
 			engine_id=self.engine_id,
-			subscan_id=self.subscan_id,
 			severity=severity,
 			add_meta_info=add_meta_info,
 			update_fields=fields)

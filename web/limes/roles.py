@@ -6,7 +6,6 @@ class SysAdmin(AbstractUserRole):
         PERM_MODIFY_SYSTEM_CONFIGURATIONS: True,
         PERM_MODIFY_SCAN_CONFIGURATIONS: True,
         PERM_MODIFY_SCAN_RESULTS: True,
-        PERM_MODIFY_INTERESTING_LOOKUP: True,
         PERM_INITATE_SCANS_SUBSCANS: True,
         PERM_MODIFY_TARGETS: True,
     }
@@ -17,7 +16,6 @@ class PenetrationTester(AbstractUserRole):
         PERM_MODIFY_SYSTEM_CONFIGURATIONS: False,
         PERM_MODIFY_SCAN_CONFIGURATIONS: True,
         PERM_MODIFY_SCAN_RESULTS: True,
-        PERM_MODIFY_INTERESTING_LOOKUP: True,
         PERM_INITATE_SCANS_SUBSCANS: True,
         PERM_MODIFY_TARGETS: True,
     }
@@ -28,7 +26,6 @@ class Auditor(AbstractUserRole):
         PERM_MODIFY_SYSTEM_CONFIGURATIONS: False,
         PERM_MODIFY_SCAN_CONFIGURATIONS: False,
         PERM_MODIFY_SCAN_RESULTS: True,
-        PERM_MODIFY_INTERESTING_LOOKUP: True,
         PERM_INITATE_SCANS_SUBSCANS: False,
         PERM_MODIFY_TARGETS: False,
     }

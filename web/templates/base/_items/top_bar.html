@@ -31,33 +31,9 @@
   </form>
 
   <div class="l-topbar-actions">
-    {% if user|can:'modify_targets' or user|can:'modify_scan_configurations' %}
-    <div class="dropdown">
-      <button type="button" class="btn btn-ghost btn-icon" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Quick add" title="Quick add">
-        <i class="fe-plus" aria-hidden="true"></i>
-      </button>
-      <div class="dropdown-menu dropdown-menu-end">
-        <h6 class="dropdown-header">Quick add</h6>
-        {% if user|can:'modify_targets' %}
-        <button type="button" onclick="show_quick_add_target_modal()" class="dropdown-item"><i class="fe-crosshair me-2" aria-hidden="true"></i>Target</button>
-        <a href="{% url 'add_organization' current_project.slug %}" class="dropdown-item"><i class="fe-briefcase me-2" aria-hidden="true"></i>Organization</a>
-        {% endif %}
-        {% if user|can:'modify_scan_configurations' %}
-        <a href="{% url 'add_engine' current_project.slug %}" class="dropdown-item"><i class="fe-cpu me-2" aria-hidden="true"></i>Scan Engine</a>
-        {% endif %}
-      </div>
-    </div>
+    {% if user|can:'modify_scan_configurations' %}
+    <a href="{% url 'add_engine' current_project.slug %}" class="btn btn-ghost btn-icon" aria-label="Add scan engine" title="Add scan engine"><i class="fe-plus" aria-hidden="true"></i></a>
     {% endif %}
-
-    <div class="dropdown">
-      <button type="button" class="btn btn-ghost btn-icon" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Toolbox" title="Toolbox">
-        <i class="fe-grid" aria-hidden="true"></i>
-      </button>
-      <div class="dropdown-menu dropdown-menu-end">
-        <h6 class="dropdown-header">Toolbox</h6>
-        <button type="button" onclick="toolbox_cve_detail()" class="dropdown-item"><i class="fe-shield me-2" aria-hidden="true"></i>CVE lookup</button>
-      </div>
-    </div>
 
     <button type="button" class="btn btn-ghost btn-icon" id="theme-toggle" aria-label="Dark theme" aria-pressed="false" title="Toggle dark theme">
       <i class="fe-moon l-theme-moon" aria-hidden="true"></i>

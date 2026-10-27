@@ -19,7 +19,7 @@ from django.utils import timezone
 from limes.celery import app
 from limes.checks.catalogue import CHECKS, PROVISIONAL
 from limes.definitions import NOTHING_ASSESSED, SUCCESS_TASK
-from startScan.models import (Asset, IssueWaiver, RiskCheck, ScanActivity, ScanHistory, ScoreSnapshot, SubScan,
+from startScan.models import (Asset, IssueWaiver, RiskCheck, ScanActivity, ScanHistory, ScoreSnapshot,
                               TrackedIssue, Vulnerability)
 from targetApp.models import Domain
 
@@ -86,25 +86,15 @@ def _assessed(activities):
             .exclude(error_message__startswith=NOTHING_ASSESSED))
 
 
-def _scan_stage_assessed(scan):
-    """The scan's own vulnerability stage scanned something. A subscan's activity attaches to the parent
-    scan but covers one host, so it never counts."""
-    subscan_ids = {c for ids in SubScan.objects.filter(scan_history=scan).values_list('celery_ids', flat=True)
-                   for c in ids or []}
-    return any(c not in subscan_ids
-               for c in _assessed(ScanActivity.objects.filter(scan_of=scan)).values_list('celery_id', flat=True))
-
-
 def baselines(project):
     """{root value: ScanHistory} - each owned root's latest scan whose own vulnerability stage assessed
     something. NOTE: a few queries per owned root; fine for tens of roots. Upgrade: one annotated query."""
     vuln_ok = _assessed(ScanActivity.objects.filter(scan_of=OuterRef('pk')))
     out = {}
     for d in _owned_domains(project):
-        for scan in ScanHistory.objects.filter(domain=d).filter(Exists(vuln_ok)).order_by('-start_scan_date', '-id'):
-            if _scan_stage_assessed(scan):
-                out[d.name] = scan
-                break
+        scan = ScanHistory.objects.filter(domain=d).filter(Exists(vuln_ok)).order_by('-start_scan_date', '-id').first()
+        if scan:
+            out[d.name] = scan
     return out
 
 

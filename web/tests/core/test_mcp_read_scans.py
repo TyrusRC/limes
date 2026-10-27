@@ -13,7 +13,7 @@ from limes.mcp.redact import redact_log
 from limes.mcp.results import FIELD_CAP, LOG_CAP
 from scanEngine.models import EngineType
 from startScan.models import (Asset, ChangeEvent, Command, CveId, CweId, IssueNote, IssueWaiver, ScanActivity, ScanHistory,
-                              SubScan, Technology, TrackedIssue, Vulnerability, VulnerabilityReference,
+                              Technology, TrackedIssue, Vulnerability, VulnerabilityReference,
                               VulnerabilityTags)
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
@@ -93,7 +93,6 @@ class ChangesAndScansTests(ScansBase):
         self.assertEqual([x['title']['untrusted_text'] for x in g['stages']], ['First', 'Second'])
         self.assertNotIn('hunter2', json.dumps(g))
         self.assertIn('***', g['stages'][1]['traceback_tail']['untrusted_text'])
-        self.assertEqual(g['subscans'], {})
         self.assertEqual(self.err(self.call('get_scan', project='p1', scan_id=other.id)), 'not_found')
         for _ in range(3):
             self.scan(d, status=0)
@@ -248,8 +247,7 @@ class VulnTests(ScansBase):
 
 
 class SearchTests(ScansBase):
-    def test_search_scoped_bounded_and_unrecorded(self):
-        from dashboard.models import SearchHistory
+    def test_search_scoped_and_bounded(self):
         a = Asset.objects.create(project=self.p1, kind='hostname', value='login.x.com', scope_tier='owned_host')
         Asset.objects.create(project=self.p1, kind='hostname', value='b.x.com', scope_tier='owned_host', page_title='Login page')
         Asset.objects.create(project=self.p2, kind='hostname', value='login.y.com', scope_tier='owned_host')
@@ -269,7 +267,6 @@ class SearchTests(ScansBase):
         self.assertEqual(self.err(self.call('search', project='p1', query='a')), 'invalid')
         self.assertEqual(self.err(self.call('search', project='p1', query='a' * 201)), 'invalid')
         self.assertEqual(self.err(self.call('search', project='nope', query='login')), 'not_found')
-        self.assertEqual(SearchHistory.objects.count(), 0)
 
 
 class HostileTextTests(ScansBase):

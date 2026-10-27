@@ -18,26 +18,16 @@
       <li><a class="l-nav-link" href="{% url 'issues' slug %}"{% if cur == 'issues' %} aria-current="page"{% endif %}><i class="fe-alert-octagon" aria-hidden="true"></i>Issues</a></li>
       <li><a class="l-nav-link" href="{% url 'assets' slug %}"{% if cur == 'assets' %} aria-current="page"{% endif %}><i class="fe-box" aria-hidden="true"></i>Assets</a></li>
       <li><a class="l-nav-link" href="{% url 'lookalikes' slug %}"{% if cur == 'lookalikes' %} aria-current="page"{% endif %}><i class="fe-copy" aria-hidden="true"></i>Lookalikes</a></li>
-      <li><a class="l-nav-link" href="{% url 'all_subdomains' slug %}"{% if cur == 'all_subdomains' %} aria-current="page"{% endif %}><i class="fe-globe" aria-hidden="true"></i>Subdomains</a></li>
-      <li><a class="l-nav-link" href="{% url 'all_endpoints' slug %}"{% if cur == 'all_endpoints' %} aria-current="page"{% endif %}><i class="fe-link" aria-hidden="true"></i>Endpoints</a></li>
-      <li><a class="l-nav-link" href="{% url 'all_vulns' slug %}"{% if cur == 'all_vulns' %} aria-current="page"{% endif %}><i class="fe-alert-triangle" aria-hidden="true"></i>Vulnerabilities</a></li>
     </ul>
     <div class="l-nav-section" id="nav-operate">Operate</div>
     <ul class="l-nav-list" aria-labelledby="nav-operate">
-      <li><a class="l-nav-link" href="{% url 'list_target' slug %}"{% if cur == 'list_target' or cur == 'add_target' or cur == 'update_target' or cur == 'target_summary' %} aria-current="page"{% endif %}><i class="fe-crosshair" aria-hidden="true"></i>Targets</a></li>
-      <li><a class="l-nav-link" href="{% url 'list_organization' slug %}"{% if cur == 'list_organization' or cur == 'add_organization' or cur == 'update_organization' %} aria-current="page"{% endif %}><i class="fe-briefcase" aria-hidden="true"></i>Organizations</a></li>
-      <li><a class="l-nav-link" href="{% url 'scan_history' slug %}"{% if cur == 'scan_history' or cur == 'detail_scan' or cur == 'detail_vuln_scan' %} aria-current="page"{% endif %}><i class="fe-activity" aria-hidden="true"></i>Scan History</a></li>
-      <li><a class="l-nav-link" href="{% url 'subscan_history' slug %}"{% if cur == 'subscan_history' %} aria-current="page"{% endif %}><i class="fe-layers" aria-hidden="true"></i>Subscans</a></li>
-      <li><a class="l-nav-link" href="{% url 'scheduled_scan_view' slug %}"{% if cur == 'scheduled_scan_view' %} aria-current="page"{% endif %}><i class="fe-clock" aria-hidden="true"></i>Scheduled Scans</a></li>
+      <li><a class="l-nav-link" href="{% url 'scan_history' slug %}"{% if cur == 'scan_history' %} aria-current="page"{% endif %}><i class="fe-activity" aria-hidden="true"></i>Scan History</a></li>
     </ul>
-    {% if user|can:'modify_scan_configurations' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' %}
+    {% if user|can:'modify_scan_configurations' or user|can:'modify_system_configurations' %}
     <div class="l-nav-section" id="nav-configure">Configure</div>
     <ul class="l-nav-list" aria-labelledby="nav-configure">
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'scan_engine_index' slug %}"{% if cur == 'scan_engine_index' or cur == 'add_engine' or cur == 'update_engine' %} aria-current="page"{% endif %}><i class="fe-cpu" aria-hidden="true"></i>Scan Engines</a></li>
-      {% endif %}
-      {% if user|can:'modify_interesting_lookup' %}
-      <li><a class="l-nav-link" href="{% url 'interesting_lookup' slug %}"{% if cur == 'interesting_lookup' %} aria-current="page"{% endif %}><i class="fe-search" aria-hidden="true"></i>Interesting Lookup</a></li>
       {% endif %}
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'proxy_settings' slug %}"{% if cur == 'proxy_settings' %} aria-current="page"{% endif %}><i class="fe-shuffle" aria-hidden="true"></i>Proxies</a></li>

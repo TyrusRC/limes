@@ -88,37 +88,6 @@ def update_engine(request, slug, id):
     return render(request, 'scanEngine/update_engine.html', context)
 
 
-@has_permission_decorator(PERM_MODIFY_INTERESTING_LOOKUP, redirect_url=FOUR_OH_FOUR_URL)
-def interesting_lookup(request, slug):
-    lookup_keywords = None
-    context = {}
-    context['scan_engine_nav_active'] = 'active'
-    context['interesting_lookup_li'] = 'active'
-    context['engine_ul_show'] = 'show'
-    form = InterestingLookupForm()
-    if InterestingLookupModel.objects.filter(custom_type=True).exists():
-        lookup_keywords = InterestingLookupModel.objects.filter(custom_type=True).order_by('-id')[0]
-    else:
-        form.initial_checkbox()
-    if request.method == "POST":
-        if lookup_keywords:
-            form = InterestingLookupForm(request.POST, instance=lookup_keywords)
-        else:
-            form = InterestingLookupForm(request.POST or None)
-        if form.is_valid():
-            form.save()
-            messages.add_message(
-                request,
-                messages.INFO,
-                'Lookup Keywords updated successfully')
-            return http.HttpResponseRedirect(reverse('interesting_lookup', kwargs={'slug': slug}))
-
-    if lookup_keywords:
-        form.set_value(lookup_keywords)
-        context['interesting_lookup_found'] = True
-    context['form'] = form
-    context['default_lookup'] = InterestingLookupModel.objects.filter(id=1)
-    return render(request, 'scanEngine/lookup.html', context)
 
 
 @has_permission_decorator(PERM_MODIFY_SCAN_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)

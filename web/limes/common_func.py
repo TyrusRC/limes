@@ -4,7 +4,6 @@ import json
 import os
 import random
 import traceback
-import ipaddress
 import humanize
 import redis
 import requests
@@ -15,7 +14,6 @@ from time import sleep
 from urllib.parse import urlparse
 from celery.utils.log import get_task_logger
 from discord_webhook import DiscordEmbed, DiscordWebhook
-from django.db.models import Q
 
 from limes.definitions import *
 from limes.settings import *
@@ -29,33 +27,6 @@ from limes.utilities import is_valid_url
 logger = get_task_logger(__name__)
 DISCORD_WEBHOOKS_CACHE = redis.Redis.from_url(CELERY_BROKER_URL)
 CHAT_TIMEOUT = 10  # seconds; a hung chat host must not hold a worker forever
-
-#--------------------------------#
-# InterestingLookupModel queries #
-#--------------------------------#
-def get_lookup_keywords():
-	"""Get lookup keywords from InterestingLookupModel.
-
-	Returns:
-		list: Lookup keywords.
-	"""
-	lookup_model = InterestingLookupModel.objects.first()
-	lookup_obj = InterestingLookupModel.objects.filter(custom_type=True).order_by('-id').first()
-	custom_lookup_keywords = []
-	default_lookup_keywords = []
-	if lookup_model:
-		default_lookup_keywords = [
-			key.strip()
-			for key in lookup_model.keywords.split(',')]
-	if lookup_obj:
-		custom_lookup_keywords = [
-			key.strip()
-			for key in lookup_obj.keywords.split(',')
-		]
-	lookup_keywords = default_lookup_keywords + custom_lookup_keywords
-	lookup_keywords = list(filter(None, lookup_keywords)) # remove empty strings from list
-	return lookup_keywords
-
 
 #-------------------#
 # SubDomain queries #
@@ -74,7 +45,6 @@ def get_subdomains(write_filepath=None, exclude_subdomains=False, ctx={}):
 	"""
 	domain_id = ctx.get('domain_id')
 	scan_id = ctx.get('scan_history_id')
-	subdomain_id = ctx.get('subdomain_id')
 	exclude_subdomains = ctx.get('exclude_subdomains', False)
 	url_filter = ctx.get('url_filter', '')
 	domain = Domain.objects.filter(pk=domain_id).first()
@@ -85,9 +55,7 @@ def get_subdomains(write_filepath=None, exclude_subdomains=False, ctx={}):
 		query = query.filter(target_domain=domain)
 	if scan:
 		query = query.filter(scan_history=scan)
-	if subdomain_id:
-		query = query.filter(pk=subdomain_id)
-	elif domain and exclude_subdomains:
+	if domain and exclude_subdomains:
 		query = query.filter(name=domain.name)
 	subdomain_query = query.distinct('name').order_by('name')
 	subdomains = [
@@ -181,54 +149,6 @@ def get_removed_subdomain(scan_id, domain_id):
 	)
 
 
-def get_interesting_subdomains(scan_history=None, domain_id=None):
-	"""Get Subdomain objects matching InterestingLookupModel conditions.
-
-	Args:
-		scan_history (startScan.models.ScanHistory, optional): Scan history.
-		domain_id (int, optional): Domain id.
-
-	Returns:
-		django.db.Q: QuerySet object.
-	"""
-	lookup_keywords = get_lookup_keywords()
-	lookup_obj = (
-		InterestingLookupModel.objects
-		.filter(custom_type=True)
-		.order_by('-id').first())
-	if not lookup_obj:
-		return Subdomain.objects.none()
-
-	url_lookup = lookup_obj.url_lookup
-	title_lookup = lookup_obj.title_lookup
-	condition_200_http_lookup = lookup_obj.condition_200_http_lookup
-
-	# Filter on domain_id, scan_history_id
-	query = Subdomain.objects
-	if domain_id:
-		query = query.filter(target_domain__id=domain_id)
-	elif scan_history:
-		query = query.filter(scan_history__id=scan_history)
-
-	# Filter on HTTP status code 200
-	if condition_200_http_lookup:
-		query = query.filter(http_status__exact=200)
-
-	# Build subdomain lookup / page title lookup queries
-	url_lookup_query = Q()
-	title_lookup_query = Q()
-	for key in lookup_keywords:
-		if url_lookup:
-			url_lookup_query |= Q(name__icontains=key)
-		if title_lookup:
-			title_lookup_query |= Q(page_title__iregex=f"\\y{key}\\y")
-
-	# Filter on url / title queries
-	url_lookup_query = query.filter(url_lookup_query)
-	title_lookup_query = query.filter(title_lookup_query)
-
-	# Return OR query
-	return url_lookup_query | title_lookup_query
 
 
 #------------------#
@@ -258,7 +178,6 @@ def get_http_urls(
 	"""
 	domain_id = ctx.get('domain_id')
 	scan_id = ctx.get('scan_history_id')
-	subdomain_id = ctx.get('subdomain_id')
 	url_filter = ctx.get('url_filter', '')
 	domain = Domain.objects.filter(pk=domain_id).first()
 	scan = ScanHistory.objects.filter(pk=scan_id).first()
@@ -268,9 +187,7 @@ def get_http_urls(
 		query = query.filter(target_domain=domain)
 	if scan:
 		query = query.filter(scan_history=scan)
-	if subdomain_id:
-		query = query.filter(subdomain__id=subdomain_id)
-	elif exclude_subdomains and domain:
+	if exclude_subdomains and domain:
 		query = query.filter(http_url=domain.http_url)
 	if get_only_default_urls:
 		query = query.filter(is_default=True)
@@ -312,51 +229,6 @@ def get_http_urls(
 
 	return endpoints
 
-def get_interesting_endpoints(scan_history=None, target=None):
-	"""Get EndPoint objects matching InterestingLookupModel conditions.
-
-	Args:
-		scan_history (startScan.models.ScanHistory): Scan history.
-		target (str): Domain id.
-
-	Returns:
-		django.db.Q: QuerySet object.
-	"""
-
-	lookup_keywords = get_lookup_keywords()
-	lookup_obj = InterestingLookupModel.objects.filter(custom_type=True).order_by('-id').first()
-	if not lookup_obj:
-		return EndPoint.objects.none()
-	url_lookup = lookup_obj.url_lookup
-	title_lookup = lookup_obj.title_lookup
-	condition_200_http_lookup = lookup_obj.condition_200_http_lookup
-
-	# Filter on domain_id, scan_history_id
-	query = EndPoint.objects
-	if target:
-		query = query.filter(target_domain__id=target)
-	elif scan_history:
-		query = query.filter(scan_history__id=scan_history)
-
-	# Filter on HTTP status code 200
-	if condition_200_http_lookup:
-		query = query.filter(http_status__exact=200)
-
-	# Build subdomain lookup / page title lookup queries
-	url_lookup_query = Q()
-	title_lookup_query = Q()
-	for key in lookup_keywords:
-		if url_lookup:
-			url_lookup_query |= Q(http_url__icontains=key)
-		if title_lookup:
-			title_lookup_query |= Q(page_title__iregex=f"\\y{key}\\y")
-
-	# Filter on url / title queries
-	url_lookup_query = query.filter(url_lookup_query)
-	title_lookup_query = query.filter(title_lookup_query)
-
-	# Return OR query
-	return url_lookup_query | title_lookup_query
 
 
 #-----------#
@@ -704,83 +576,65 @@ def send_discord_message(
 			f'\n\tDetails: {response.content}')
 
 
-def enrich_notification(message, scan_history_id, subscan_id):
-	"""Add scan id / subscan id to notification message.
+def enrich_notification(message, scan_history_id):
+	"""Add the scan id to a notification message.
 
 	Args:
 		message (str): Original notification message.
 		scan_history_id (int): Scan history id.
-		subscan_id (int): Subscan id.
 
 	Returns:
 		str: Message.
 	"""
 	if scan_history_id is not None:
-		if subscan_id:
-			message = f'`#{scan_history_id}_{subscan_id}`: {message}'
-		else:
-			message = f'`#{scan_history_id}`: {message}'
+		message = f'`#{scan_history_id}`: {message}'
 	return message
 
 
-def get_scan_title(scan_id, subscan_id=None, task_name=None):
-	return f'Subscan #{subscan_id} summary' if subscan_id else f'Scan #{scan_id} summary'
+def get_scan_title(scan_id):
+	return f'Scan #{scan_id} summary'
 
 
-def get_scan_url(scan_id=None, subscan_id=None):
-	if scan_id:
-		return f'https://{DOMAIN_NAME}/scan/detail/{scan_id}'
+def get_scan_url(scan=None):
+	"""The project's Scan History page (the per-scan page is gone); None without a scan."""
+	if scan:
+		return f'https://{DOMAIN_NAME}/scan/{scan.domain.project.slug}/history/scan'
 	return None
 
 
-def get_scan_fields(engine, scan, subscan=None, status='RUNNING', tasks=[]):
-	scan_obj = subscan if subscan else scan
-	if subscan:
-		tasks_h = f'`{subscan.type}`'
-		host = subscan.subdomain.name
-		scan_obj = subscan
-	else:
-		tasks_h = '• ' + '\n• '.join(f'`{task.name}`' for task in tasks) if tasks else ''
-		host = scan.domain.name
-		scan_obj = scan
+def get_scan_fields(engine, scan, status='RUNNING', tasks=[]):
+	tasks_h = '• ' + '\n• '.join(f'`{task.name}`' for task in tasks) if tasks else ''
 
 	# Find scan elapsed time
 	duration = None
-	if scan_obj and status in ['ABORTED', 'FAILED', 'SUCCESS']:
-		td = scan_obj.stop_scan_date - scan_obj.start_scan_date
+	if scan and status in ['ABORTED', 'FAILED', 'SUCCESS']:
+		td = scan.stop_scan_date - scan.start_scan_date
 		duration = humanize.naturaldelta(td)
-	elif scan_obj:
-		td = timezone.now() - scan_obj.start_scan_date
+	elif scan:
+		td = timezone.now() - scan.start_scan_date
 		duration = humanize.naturaldelta(td)
 
 	# Build fields
-	url = get_scan_url(scan.id)
+	url = get_scan_url(scan)
 	fields = {
 		'Status': f'**{status}**',
 		'Engine': engine.engine_name,
 		'Scan ID': f'[#{scan.id}]({url})'
 	}
 
-	if subscan:
-		url = get_scan_url(scan.id, subscan.id)
-		fields['Subscan ID'] = f'[#{subscan.id}]({url})'
-
 	if duration:
 		fields['Duration'] = duration
 
-	fields['Host'] = host
+	fields['Host'] = scan.domain.name
 	if tasks:
 		fields['Tasks'] = tasks_h
 
 	return fields
 
 
-def get_task_title(task_name, scan_id=None, subscan_id=None):
+def get_task_title(task_name, scan_id=None):
 	if scan_id:
-		prefix = f'#{scan_id}'
-		if subscan_id:
-			prefix += f'-#{subscan_id}'
-		return f'`{prefix}` - `{task_name}`'
+		return f'`#{scan_id}` - `{task_name}`'
 	return f'`{task_name}` [unbound]'
 
 
@@ -790,20 +644,14 @@ def get_task_cache_key(func_name, *args, **kwargs):
 	return f'{func_name}__{args_str}__{kwargs_str}'
 
 
-def get_output_file_name(scan_history_id, subscan_id, filename):
-	title = f'#{scan_history_id}'
-	if subscan_id:
-		title += f'-{subscan_id}'
-	title += f'_{filename}'
-	return title
+def get_output_file_name(scan_history_id, filename):
+	return f'#{scan_history_id}_{filename}'
 
 
-def get_traceback_path(task_name, results_dir, scan_history_id=None, subscan_id=None):
+def get_traceback_path(task_name, results_dir, scan_history_id=None):
 	path = results_dir
 	if scan_history_id:
 		path += f'/#{scan_history_id}'
-		if subscan_id:
-			path += f'-#{subscan_id}'
 	path += f'-{task_name}.txt'
 	return path
 
@@ -1082,23 +930,7 @@ def create_inappnotification(
 	notification.save()
 	return notification
 
-def get_ip_info(ip_address):
-	is_ipv4 = bool(validators.ipv4(ip_address))
-	is_ipv6 = bool(validators.ipv6(ip_address))
-	ip_data = None
-	if is_ipv4:
-		ip_data = ipaddress.IPv4Address(ip_address)
-	elif is_ipv6:
-		ip_data = ipaddress.IPv6Address(ip_address)
-	else:
-		return None
-	return ip_data
 
-def get_ips_from_cidr_range(target):
-	try:
-		return [str(ip) for ip in ipaddress.IPv4Network(target, False)]
-	except Exception as e:
-		logger.error(f'{target} is not a valid CIDR range. Skipping.')
 
 
 def is_valid_nmap_command(cmd):

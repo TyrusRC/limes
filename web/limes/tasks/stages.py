@@ -52,7 +52,7 @@ def subdomain_discovery(
 		subdomains (list): List of subdomain names.
 	"""
 	if not host:
-		host = self.subdomain.name if self.subdomain else self.domain.name
+		host = self.domain.name
 
 	# Resolve before anything else (even the early return below): the contact guard refuses unresolved hosts.
 	resolution.resolve_domain(self.domain, self.results_dir)
@@ -69,12 +69,11 @@ def subdomain_discovery(
 	tools = config.get(USES_TOOLS, SUBDOMAIN_SCAN_DEFAULT_TOOLS)
 	# amass's tool name is amass, but the engine may ask for amass-active/passive
 	supported_tools = ('subfinder', 'amass', 'amass-passive', 'amass-active')
-	send_subdomain_changes, send_interesting = False, False
+	send_subdomain_changes = False
 	notif = Notification.objects.first()
 	subdomain_scope_checker = SubdomainScopeChecker(self.out_of_scope_subdomains)
 	if notif:
 		send_subdomain_changes = notif.send_subdomain_changes_notif
-		send_interesting = notif.send_interesting_notif
 
 	# Gather tools to run for subdomain scan
 	if ALL in tools:
@@ -211,12 +210,6 @@ def subdomain_discovery(
 		if removed:
 			subdomains_str = '\n'.join([f'• `{subdomain}`' for subdomain in removed])
 			self.notify(fields={'Removed subdomains': subdomains_str})
-
-	if send_interesting and self.scan_id and self.domain_id:
-		interesting_subdomains = get_interesting_subdomains(self.scan_id, self.domain_id)
-		if interesting_subdomains:
-			subdomains_str = '\n'.join([f'• `{subdomain}`' for subdomain in interesting_subdomains])
-			self.notify(fields={'Interesting subdomains': subdomains_str})
 
 	return SubdomainSerializer(subdomains, many=True).data
 
@@ -392,7 +385,6 @@ def screenshot(self, ctx={}, description=None):
 		for path in screenshot_paths:
 			title = get_output_file_name(
 				self.scan_id,
-				self.subscan_id,
 				self.filename)
 			send_file_to_discord.delay(path, title)
 
@@ -490,10 +482,7 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 		).first()
 
 		# Add IP DB
-		ip, _ = save_ip_address(ip_address, subdomain, subscan=self.subscan)
-		if self.subscan:
-			ip.ip_subscan_ids.add(self.subscan)
-			ip.save()
+		ip, _ = save_ip_address(ip_address, subdomain)
 
 		# Add endpoint to DB
 		# port 80 and 443 not needed as http crawl already does that.
@@ -557,7 +546,7 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 		logger.warning('Starting nmap scans ...')
 		for host, port_list in ports_data.items():
 			ctx_nmap = ctx.copy()
-			ctx_nmap['description'] = get_task_title(f'nmap_{host}', self.scan_id, self.subscan_id)
+			ctx_nmap['description'] = get_task_title(f'nmap_{host}', self.scan_id)
 			ctx_nmap['track'] = False
 			nmap(
 				cmd=nmap_cmd,
@@ -647,9 +636,7 @@ def nmap(
 			vuln_data['http_url'] = endpoint.http_url
 		vuln, created = save_vulnerability(
 			target_domain=self.domain,
-			subdomain=self.subdomain,
 			scan_history=self.scan,
-			subscan=self.subscan,
 			endpoint=endpoint,
 			**vuln_data)
 		vulns_str += f'• {str(vuln)}\n'
@@ -1112,7 +1099,6 @@ def http_crawl(
 			ip, created = save_ip_address(
 				ip_address,
 				subdomain,
-				subscan=self.subscan,
 				cdn=cdn)
 		ips_str = '• ' + '\n• '.join([f'`{ip}`' for ip in a_records])
 		self.notify(
@@ -1124,7 +1110,6 @@ def http_crawl(
 			ip, created = save_ip_address(
 				host,
 				subdomain,
-				subscan=self.subscan,
 				cdn=cdn)
 			if ip:
 				self.notify(
@@ -1156,7 +1141,6 @@ def http_crawl(
 		remove_duplicate_endpoints(
 			self.scan_id,
 			self.domain_id,
-			self.subdomain_id,
 			filter_ids=endpoint_ids
 		)
 

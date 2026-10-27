@@ -58,7 +58,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.3.8/purify.min.js"></script>
     <script src="{% static 'assets/js/app.min.js' %}"></script>
     <script src="{% static 'custom/custom.js' %}"></script>
-    <script src="{% static 'custom/toolbox.js' %}"></script>
     <script src="{% static 'custom/right_sidebar.js' %}"></script>
     <script src="{% static 'custom/notification.js' %}"></script>
     <script src="{% static 'plugins/snackbar/snackbar.min.js' %}"></script>
@@ -78,9 +77,9 @@
         });
         $(window).on('hashchange', handleHashInUrl);
 
-        getScanStatusSidebar(project='{{current_project.slug}}', reload=false);
+        getScanStatusSidebar('{{current_project.slug}}');
         $('.right-bar-toggle').on('click', function () {
-          getScanStatusSidebar(project='{{current_project.slug}}', reload=false);
+          getScanStatusSidebar('{{current_project.slug}}');
         });
 
         // tippy for notification or scan acitivity
