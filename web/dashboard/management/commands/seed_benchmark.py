@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from dashboard.models import Project
 from scanEngine.models import EngineType
-from startScan.models import EndPoint, ScanHistory, Subdomain, Vulnerability
+from startScan.models import Asset, ScanHistory, Vulnerability
 from targetApp.models import Domain
 
 BATCH = 5000
@@ -18,7 +18,6 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--domains', type=int, default=50)
         parser.add_argument('--subs', type=int, default=4000)
-        parser.add_argument('--endpoints', type=int, default=20000)
         parser.add_argument('--vulns', type=int, default=1000)
 
     def handle(self, *args, **opts):
@@ -31,21 +30,16 @@ class Command(BaseCommand):
                 name=f'seed{d}.bench.test', defaults={'project': project, 'insert_date': now})
             scan = ScanHistory.objects.create(
                 domain=domain, scan_type=engine, start_scan_date=now, scan_status=2)
-            subs = [Subdomain(name=f's{i}.{domain.name}', scan_history=scan, target_domain=domain,
-                              http_status=rnd.choice([0, 200, 301, 403, 404]),
-                              discovered_date=now - timedelta(days=rnd.randint(0, 13)))
-                    for i in range(opts['subs'])]
-            Subdomain.objects.bulk_create(subs, batch_size=BATCH)
-            sub_ids = list(Subdomain.objects.filter(scan_history=scan).values_list('id', flat=True))
-            eps = [EndPoint(http_url=f'https://s{i % opts["subs"]}.{domain.name}/p{i}', scan_history=scan,
-                            target_domain=domain, subdomain_id=sub_ids[i % len(sub_ids)],
-                            http_status=rnd.choice([200, 302, 404, 500]),
-                            discovered_date=now - timedelta(days=rnd.randint(0, 13)))
-                   for i in range(opts['endpoints'])]
-            EndPoint.objects.bulk_create(eps, batch_size=BATCH)
+            root, _ = Asset.objects.get_or_create(
+                project=project, kind='root_domain', value=domain.name, defaults={'scope_tier': 'owned_root'})
+            Asset.objects.bulk_create([
+                Asset(project=project, kind='hostname', value=f's{i}.{domain.name}', parent=root,
+                      scope_tier='owned_host', http_status=rnd.choice([0, 200, 301, 403, 404]),
+                      first_seen=now - timedelta(days=rnd.randint(0, 13)))
+                for i in range(opts['subs'])], batch_size=BATCH, ignore_conflicts=True)
+            host_ids = list(Asset.objects.filter(parent=root).values_list('id', flat=True))
             vulns = [Vulnerability(name=f'bench-vuln-{i % 40}', severity=rnd.choice([-1, 0, 1, 2, 3, 4]),
-                                   scan_history=scan, target_domain=domain,
-                                   subdomain_id=sub_ids[i % len(sub_ids)],
+                                   scan_history=scan, asset_id=host_ids[i % len(host_ids)],
                                    discovered_date=now - timedelta(days=rnd.randint(0, 13)))
                      for i in range(opts['vulns'])]
             Vulnerability.objects.bulk_create(vulns, batch_size=BATCH)

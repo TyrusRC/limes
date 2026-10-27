@@ -12,7 +12,6 @@ import concurrent.futures
 
 from datetime import datetime
 from urllib.parse import urlparse
-from api.serializers import SubdomainSerializer
 from celery import chain, group
 from celery.utils.log import get_task_logger
 from django.db.models import Count
@@ -33,7 +32,7 @@ from limes.utilities import *
 from limes.urlfiles import merge_url_files
 from scanEngine.models import (EngineType, Notification, Proxy)
 from startScan.models import *
-from startScan.models import EndPoint, Subdomain, Vulnerability
+from startScan.models import Vulnerability
 from targetApp.models import Domain
 
 """

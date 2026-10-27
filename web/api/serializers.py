@@ -60,8 +60,6 @@ class MinimalUserSerializer(serializers.ModelSerializer):
 
 class ScanHistorySerializer(serializers.ModelSerializer):
 
-	subdomain_count = serializers.SerializerMethodField('get_subdomain_count')
-	endpoint_count = serializers.SerializerMethodField('get_endpoint_count')
 	vulnerability_count = serializers.SerializerMethodField('get_vulnerability_count')
 	current_progress = serializers.SerializerMethodField('get_progress')
 	completed_time = serializers.SerializerMethodField('get_total_scan_time_in_sec')
@@ -73,8 +71,6 @@ class ScanHistorySerializer(serializers.ModelSerializer):
 		model = ScanHistory
 		fields = [
 			'id',
-			'subdomain_count',
-			'endpoint_count',
 			'vulnerability_count',
 			'current_progress',
 			'completed_time',
@@ -93,14 +89,6 @@ class ScanHistorySerializer(serializers.ModelSerializer):
 		]
 		depth = 1
 
-	def get_subdomain_count(self, scan_history):
-		if scan_history.get_subdomain_count:
-			return scan_history.get_subdomain_count()
-
-	def get_endpoint_count(self, scan_history):
-		if scan_history.get_endpoint_count:
-			return scan_history.get_endpoint_count()
-
 	def get_vulnerability_count(self, scan_history):
 		if scan_history.get_vulnerability_count:
 			return scan_history.get_vulnerability_count()
@@ -116,70 +104,6 @@ class ScanHistorySerializer(serializers.ModelSerializer):
 
 	def get_completed_ago(self, scan_history):
 		return scan_history.get_completed_ago()
-
-
-class TechnologySerializer(serializers.ModelSerializer):
-	class Meta:
-		model = Technology
-		fields = '__all__'
-
-
-class PortSerializer(serializers.ModelSerializer):
-	class Meta:
-		model = Port
-		fields = '__all__'
-
-
-class IpSerializer(serializers.ModelSerializer):
-
-	ports = PortSerializer(many=True)
-
-	class Meta:
-		model = IpAddress
-		fields = '__all__'
-
-
-class SubdomainSerializer(serializers.ModelSerializer):
-
-	vuln_count = serializers.SerializerMethodField('get_vuln_count')
-
-	endpoint_count = serializers.SerializerMethodField('get_endpoint_count')
-	info_count = serializers.SerializerMethodField('get_info_count')
-	low_count = serializers.SerializerMethodField('get_low_count')
-	medium_count = serializers.SerializerMethodField('get_medium_count')
-	high_count = serializers.SerializerMethodField('get_high_count')
-	critical_count = serializers.SerializerMethodField('get_critical_count')
-	ip_addresses = IpSerializer(many=True)
-	technologies = TechnologySerializer(many=True)
-
-
-	class Meta:
-		model = Subdomain
-		fields = '__all__'
-
-	def get_endpoint_count(self, subdomain):
-		return subdomain.get_endpoint_count
-
-	def get_info_count(self, subdomain):
-		return subdomain.get_info_count
-
-	def get_low_count(self, subdomain):
-		return subdomain.get_low_count
-
-	def get_medium_count(self, subdomain):
-		return subdomain.get_medium_count
-
-	def get_high_count(self, subdomain):
-		return subdomain.get_high_count
-
-	def get_critical_count(self, subdomain):
-		return subdomain.get_critical_count
-
-	def get_vuln_count(self, obj):
-		try:
-			return obj.vuln_count
-		except:
-			return None
 
 
 class AssetSerializer(serializers.ModelSerializer):

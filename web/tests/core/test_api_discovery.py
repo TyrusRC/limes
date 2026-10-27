@@ -277,9 +277,12 @@ class ApiNeverATargetTest(DiscoveryBase):
         self.assertEqual(monitor.monitor_state(api)['interval'], None)
         self.assertIn(api.id, scoring.issue_assets(self.p).values_list('id', flat=True))  # tracked for api.* checks only
         self.assertNotIn(api.id, scoring.scored_assets(self.p).values_list('id', flat=True))
-        # port scan and nuclei take their targets from the scan, never from the inventory
+        # port scan takes the hostnames this scan saved, nuclei the URLs of the run's file, never an api asset
+        from limes.tasks import inventory
+        Asset.objects.filter(pk=api.pk).update(sources=[{'source': 'discovery', 'evidence': 'scan:99'}])
+        self.assertNotIn(api.value, inventory.run_hostnames(self.p, 99))
         src = (WEB / 'limes/tasks/stages.py').read_text()
-        for fn in ('port_scan', 'nmap', 'vulnerability_scan'):
+        for fn in ('nmap', 'vulnerability_scan'):
             body = src[src.index(f"def {fn}("):]
             body = body[:body.index('\n@app.task')] if '\n@app.task' in body else body
             self.assertNotIn('Asset', body, fn)

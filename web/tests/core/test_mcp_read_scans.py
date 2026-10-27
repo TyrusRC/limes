@@ -12,9 +12,8 @@ from limes.mcp import registry
 from limes.mcp.redact import redact_log
 from limes.mcp.results import FIELD_CAP, LOG_CAP
 from scanEngine.models import EngineType
-from startScan.models import (Asset, ChangeEvent, Command, CveId, CweId, IssueNote, IssueWaiver, ScanActivity, ScanHistory,
-                              Technology, TrackedIssue, Vulnerability, VulnerabilityReference,
-                              VulnerabilityTags)
+from startScan.models import (Asset, ChangeEvent, Command, CveId, IssueNote, IssueWaiver, ScanActivity, ScanHistory,
+                              Technology, TrackedIssue, Vulnerability)
 from targetApp.models import Domain
 from tests.core.mcp_base import McpBase
 
@@ -230,8 +229,8 @@ class VulnTests(ScansBase):
         s = self.scan()
         v = self.vuln(s, 'n', description='d', request='GET / HTTP/1.1\nAuthorization: Bearer tok999\n',
                       response='Set-Cookie: sid=cookie999', curl_command="curl -H 'X-Api-Key: key999' http://x",
-                      extracted_results=[f'r{i}' for i in range(30)], cvss_metrics='CVSS:3.1')
-        v.tags.add(VulnerabilityTags.objects.create(name='xss'))
+                      extracted_results=[f'r{i}' for i in range(30)], cvss_metrics='CVSS:3.1',
+                      tag_names=['xss'], cwe_names=['CWE-79'], reference_urls=['https://ref.example/1'])
         v.cve_ids.add(CveId.objects.create(name='CVE-1'))
         env = self.call('get_vulnerability', project='p1', vulnerability_id=v.id)
         d = self.data(env)
@@ -241,7 +240,8 @@ class VulnTests(ScansBase):
         self.assertEqual(len(d['extracted_results']), 20)
         self.assertEqual(d['tags'], [{'untrusted_text': 'xss'}])
         self.assertEqual(d['cve_ids'], [{'untrusted_text': 'CVE-1'}])
-        self.assertEqual(d['cwe_ids'], [])
+        self.assertEqual(d['cwe_ids'], [{'untrusted_text': 'CWE-79'}])
+        self.assertEqual(d['references'], [{'untrusted_text': 'https://ref.example/1'}])
         self.assertEqual(d['description'], {'untrusted_text': 'd'})
         self.assertEqual(self.err(self.call('get_vulnerability', project='p1', vulnerability_id=True)), 'invalid')
 
@@ -294,11 +294,9 @@ class HostileTextTests(ScansBase):
         v = Vulnerability.objects.create(
             scan_history=scan, asset=owned, name=H + 'A' * 2300, severity=3, description=H, impact=H, remediation=H,
             response=H, request=H, curl_command=H, matcher_name=H, template_id=H, source=H, http_url=H,
-            cvss_metrics=H, extracted_results=[H, H], discovered_date=timezone.now())
-        v.tags.add(VulnerabilityTags.objects.create(name=H))
+            cvss_metrics=H, extracted_results=[H, H], discovered_date=timezone.now(),
+            tag_names=[H], cwe_names=[H], reference_urls=[H])
         v.cve_ids.add(CveId.objects.create(name=H))
-        v.cwe_ids.add(CweId.objects.create(name=H))
-        v.references.add(VulnerabilityReference.objects.create(url=H))
         return {'asset_id': owned.id, 'issue_id': issue.id, 'scan_id': scan.id, 'activity_id': act.id,
                 'vulnerability_id': v.id}
 

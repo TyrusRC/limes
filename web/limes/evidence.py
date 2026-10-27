@@ -15,7 +15,7 @@ def issue_evidence(issue):
     if issue.source != 'finding':
         return []
     rows = (Vulnerability.objects.filter(asset_id=issue.asset_id, open_status=True)
-            .prefetch_related('cve_ids', 'references').order_by('-discovered_date', '-id'))
+            .prefetch_related('cve_ids').order_by('-discovered_date', '-id'))
     out = []
     for v in rows.iterator():
         if scoring.issue_key(v.template_id or v.name) != issue.key:
@@ -26,7 +26,7 @@ def issue_evidence(issue):
             'description': _cap(v.description), 'impact': _cap(v.impact), 'remediation': _cap(v.remediation),
             'curl_command': _cap(v.curl_command, 2000), 'request': _cap(v.request), 'response': _cap(v.response),
             'extracted_results': [_cap(r, 2000) for r in (v.extracted_results or [])[:20]],
-            'cves': sorted(c.name for c in v.cve_ids.all()), 'references': sorted(r.url for r in v.references.all())[:20],
+            'cves': sorted(c.name for c in v.cve_ids.all()), 'references': sorted(v.reference_urls or [])[:20],
         })
         if len(out) >= MAX_ROWS:
             break

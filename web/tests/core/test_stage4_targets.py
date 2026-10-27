@@ -222,6 +222,17 @@ def _golden(name):
         return json.load(f)[name]
 
 
+def _ordered(summary):
+    """Target lists are sets: the legacy queries sorted in the database's collation, the files in Python's."""
+    out = json.loads(json.dumps(summary))
+    for key in ('port_scan', 'screenshot', 'fetch_url', 'vigil'):
+        if out[key]:
+            out[key] = {k: sorted(v) for k, v in out[key].items()}
+    for key in ('port_scan_file', 'vigil_file'):
+        out[key] = out[key] and sorted(out[key])
+    return out
+
+
 class TargetListsTest(Stage4TargetsBase):
     maxDiff = None
 
@@ -231,7 +242,7 @@ class TargetListsTest(Stage4TargetsBase):
             data = json.load(open(path)) if os.path.exists(path) else {}
             data[name] = summary
             json.dump(data, open(path, 'w'), indent=1, sort_keys=True)
-        self.assertEqual(json.loads(json.dumps(summary)), _golden(name))
+        self.assertEqual(_ordered(summary), _ordered(_golden(name)))
 
     def test_crawl_enabled(self):
         self.check('crawl_enabled', Scenario(self, crawl=True).run())

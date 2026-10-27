@@ -304,6 +304,13 @@ class IssueEvidenceApiTest(IssueApiTest):
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]['request'], len(rows[0]['description'])), ('GET /', 20000))
 
+    def test_returns_cves_and_references(self):
+        from startScan.models import CveId
+        v = self.vuln(self.a, '<script>x', reference_urls=['https://r/2', 'https://r/1'])
+        v.cve_ids.add(CveId.objects.create(name='CVE-2024-2'), CveId.objects.create(name='CVE-2024-1'))
+        row = self.get(self.i2.id).json()[0]
+        self.assertEqual((row['cves'], row['references']), (['CVE-2024-1', 'CVE-2024-2'], ['https://r/1', 'https://r/2']))
+
     def test_check_issue_has_no_evidence(self):
         self.assertEqual(self.get(self.i1.id).json(), [])
 

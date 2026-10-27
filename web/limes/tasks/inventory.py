@@ -123,22 +123,33 @@ def update_host_state(asset, **fields):
         asset.save(update_fields=changed)
 
 
-def mirror_subdomain_state(subdomain, project):
-    """Mirror a Subdomain's current probe/screenshot state + technologies onto its hostname Asset."""
+def record_host_state(project, name, technologies=(), **fields):
+    """Write one probe's result (status, title, screenshot...) and the technologies it saw on the hostname Asset."""
     if not project:
         return None
-    asset = upsert_hostname_asset(project, subdomain.name, source='probe',
-                                  evidence='httpx')
+    asset = upsert_hostname_asset(project, name, source='probe', evidence='httpx')
     if not asset:
         return None
-    update_host_state(asset, http_status=subdomain.http_status, page_title=subdomain.page_title,
-                      webserver=subdomain.webserver, content_type=subdomain.content_type,
-                      content_length=subdomain.content_length, response_time=subdomain.response_time,
-                      cname=subdomain.cname, is_cdn=subdomain.is_cdn, cdn_name=subdomain.cdn_name,
-                      screenshot_path=subdomain.screenshot_path)
-    for tech in subdomain.technologies.all():
+    update_host_state(asset, **fields)
+    for tech in technologies:
         asset.technologies.add(tech)
     return asset
+
+
+def run_hostnames(project, scan_id):
+    """Sorted hostnames this scan discovered, imported or probed (every one is stamped `scan:<id>` when saved)."""
+    return sorted(Asset.objects.filter(project=project, kind='hostname',
+                                       sources__contains=[{'evidence': f'scan:{scan_id}'}])
+                  .values_list('value', flat=True))
+
+
+def run_host(project, scan_id, name):
+    """The hostname Asset called name if this scan saved it, else None."""
+    value = normalize_host(name)
+    if not (project and value):
+        return None
+    return Asset.objects.filter(project=project, kind='hostname', value=value,
+                                sources__contains=[{'evidence': f'scan:{scan_id}'}]).first()
 
 
 def finalize_lifecycle(run):

@@ -1,4 +1,5 @@
 from limes.tasks.base import *
+from limes.run_urls import RunUrls
 
 #-------------#
 # Utils tasks #
@@ -316,15 +317,15 @@ def create_scan_activity(scan_history_id, message, status):
 #--------------------#
 
 
-def resolve_vuln_asset(scan_history, subdomain=None, http_url=None):
+def resolve_vuln_asset(scan_history, http_url=None):
 	"""The scan's project Asset (hostname or root domain) a finding is on, else None.
 	Never crosses projects: the asset must belong to the scan's own project."""
 	from urllib.parse import urlsplit
 	from startScan.models import Asset
 	if not scan_history:
 		return None
-	host = getattr(subdomain, 'name', None)
-	if not host and http_url:
+	host = None
+	if http_url:
 		try:
 			host = urlsplit(http_url if '://' in http_url else '//' + http_url).hostname
 		except ValueError:
@@ -337,17 +338,21 @@ def resolve_vuln_asset(scan_history, subdomain=None, http_url=None):
 			.first())
 
 
+def _uniq(values):
+	"""Non-empty strings, first occurrence wins, order kept."""
+	return list(dict.fromkeys(v for v in values or [] if v))
+
+
 def save_vulnerability(**vuln_data):
-	references = vuln_data.pop('references', [])
+	references = _uniq(vuln_data.pop('references', []))
 	cve_ids = vuln_data.pop('cve_ids', [])
-	cwe_ids = vuln_data.pop('cwe_ids', [])
-	tags = vuln_data.pop('tags', [])
+	cwe_names = _uniq(vuln_data.pop('cwe_ids', []))
+	tag_names = _uniq(vuln_data.pop('tags', []))
 
 	# remove nulls
 	vuln_data = replace_nulls(vuln_data)
 	if not vuln_data.get('asset'):
-		vuln_data['asset'] = resolve_vuln_asset(
-			vuln_data.get('scan_history'), vuln_data.get('subdomain'), vuln_data.get('http_url'))
+		vuln_data['asset'] = resolve_vuln_asset(vuln_data.get('scan_history'), vuln_data.get('http_url'))
 
 	# Create vulnerability
 	vuln, created = Vulnerability.objects.get_or_create(**vuln_data)
@@ -356,221 +361,123 @@ def save_vulnerability(**vuln_data):
 		vuln.open_status = True
 		vuln.save()
 
-	# Save vuln tags
-	for tag_name in tags or []:
-		tag, created = VulnerabilityTags.objects.get_or_create(name=tag_name)
-		if tag:
-			vuln.tags.add(tag)
-			vuln.save()
+	# Tags, CWEs and references are plain lists on the row; CVEs stay rows (the exploit-intel join needs them)
+	merged = {}
+	for field, new in (('tag_names', tag_names), ('cwe_names', cwe_names), ('reference_urls', references)):
+		have = getattr(vuln, field) or []
+		if any(n not in have for n in new):
+			merged[field] = have + [n for n in new if n not in have]
+			setattr(vuln, field, merged[field])
+	if merged:
+		vuln.save(update_fields=list(merged))
 
 	# Save CVEs
 	for cve_id in cve_ids or []:
-		cve, created = CveId.objects.get_or_create(name=cve_id)
-		if cve:
-			vuln.cve_ids.add(cve)
-			vuln.save()
-
-	# Save CWEs
-	for cve_id in cwe_ids or []:
-		cwe, created = CweId.objects.get_or_create(name=cve_id)
-		if cwe:
-			vuln.cwe_ids.add(cwe)
-			vuln.save()
-
-	# Save vuln reference
-	for url in references or []:
-		ref, created = VulnerabilityReference.objects.get_or_create(url=url)
-		if created:
-			vuln.references.add(ref)
-			vuln.save()
+		cve, _ = CveId.objects.get_or_create(name=cve_id)
+		vuln.cve_ids.add(cve)
 
 	return vuln, created
 
 
-def save_endpoint(
-		http_url,
-		ctx={},
-		crawl=False,
-		is_default=False,
-		**endpoint_data):
-	"""Get or create EndPoint object. If crawl is True, also crawl the endpoint
-	HTTP URL with httpx.
-
-	Args:
-		http_url (str): Input HTTP URL.
-		is_default (bool): If the url is a default url for SubDomains.
-		scan_history (startScan.models.ScanHistory): ScanHistory object.
-		domain (startScan.models.Domain): Domain object.
-		subdomain (starScan.models.Subdomain): Subdomain object.
-		results_dir (str, optional): Results directory.
-		crawl (bool, optional): Run httpx on endpoint if True. Default: False.
-		force (bool, optional): Force crawl even if ENABLE_HTTP_CRAWL mode is on.
+def record_url(store, http_url, domain, is_default=False, **fields):
+	"""Record http_url in the run's URL store when it is a valid URL of the scan's domain.
 
 	Returns:
-		tuple: (startScan.models.EndPoint, created) where `created` is a boolean
-			indicating if the object is new or already existed.
+		tuple: (stored url, created); (None, False) when the URL is refused.
 	"""
-	# remove nulls
-	endpoint_data = replace_nulls(endpoint_data)
+	if domain and domain.name not in http_url:
+		logger.error(f"{http_url} is not a URL of domain {domain.name}. Skipping.")
+		return None, False
+	if not urlparse(http_url).scheme or not validators.url(http_url):
+		return None, False
+	url = sanitize_url(http_url)
+	return url, store.record(url, is_default=is_default, **fields)
 
-	scheme = urlparse(http_url).scheme
-	endpoint = None
-	created = False
-	if ctx.get('domain_id'):
-		domain = Domain.objects.get(id=ctx.get('domain_id'))
-		if domain.name not in http_url:
+
+def probe_url(http_url, ctx, crawl=False, is_default=False):
+	"""Put http_url in the run's URL file; with crawl, probe it with httpx first and record what answers.
+
+	Returns:
+		tuple: (url, created). url is None when the URL is refused or did not answer.
+	"""
+	domain = Domain.objects.filter(pk=ctx.get('domain_id')).first()
+	if crawl:
+		if domain and domain.name not in http_url:
 			logger.error(f"{http_url} is not a URL of domain {domain.name}. Skipping.")
 			return None, False
-	if crawl:
 		ctx['track'] = False
 		from limes.tasks.stages import http_crawl
-		results = http_crawl(
-			urls=[http_url],
-			method='HEAD',
-			ctx=ctx)
-		if results:
-			endpoint_data = results[0]
-			endpoint_id = endpoint_data['endpoint_id']
-			created = endpoint_data['endpoint_created']
-			endpoint = EndPoint.objects.get(pk=endpoint_id)
-	elif not scheme:
-		return None, False
-	else: # add dumb endpoint without probing it
-		scan = ScanHistory.objects.filter(pk=ctx.get('scan_history_id')).first()
-		domain = Domain.objects.filter(pk=ctx.get('domain_id')).first()
-		if not validators.url(http_url):
+		results = http_crawl(urls=[http_url], method='HEAD', ctx=ctx)
+		if not results:
 			return None, False
-		http_url = sanitize_url(http_url)
-
-		# Try to get the first matching record (prevent duplicate error)
-		endpoints = EndPoint.objects.filter(
-			scan_history=scan,
-			target_domain=domain,
-			http_url=http_url,
-			**endpoint_data
-		)
-
-		if endpoints.exists():
-			endpoint = endpoints.first()
-			created = False
-		else:
-			# No existing record, create a new one
-			endpoint = EndPoint.objects.create(
-				scan_history=scan,
-				target_domain=domain,
-				http_url=http_url,
-				**endpoint_data
-			)
-			created = True
-
-	if created:
-		endpoint.is_default = is_default
-		endpoint.discovered_date = timezone.now()
-		endpoint.save()
-
-	return endpoint, created
+		url, created = results[0]['endpoint_url'], results[0]['endpoint_created']
+		if created and is_default:
+			RunUrls(ctx['results_dir']).mark_default(url)
+		return url, created
+	# a URL that was never probed has status 0: it is not alive, but a default one is still screenshotted
+	return record_url(RunUrls(ctx['results_dir']), http_url, domain, is_default=is_default, http_status=0)
 
 
-def save_subdomain(subdomain_name, ctx={}):
-	"""Get or create Subdomain object.
-
-	Args:
-		subdomain_name (str): Subdomain name.
-		scan_history (startScan.models.ScanHistory): ScanHistory object.
-
-	Returns:
-		tuple: (startScan.models.Subdomain, created) where `created` is a
-			boolean indicating if the object has been created in DB.
-	"""
+def save_host(name, ctx={}):
+	"""Validate name against the scan (valid host, in scope, under the scan's domain) and upsert its hostname Asset,
+	stamped with this scan so the stages can list the hosts of the run. Returns the Asset, or None."""
 	scan_id = ctx.get('scan_history_id')
-	out_of_scope_subdomains = ctx.get('out_of_scope_subdomains', [])
-	subdomain_checker = SubdomainScopeChecker(out_of_scope_subdomains)
+	subdomain_checker = SubdomainScopeChecker(ctx.get('out_of_scope_subdomains', []))
 	valid_domain = (
-		validators.domain(subdomain_name) or
-		validators.ipv4(subdomain_name) or
-		validators.ipv6(subdomain_name)
+		validators.domain(name) or
+		validators.ipv4(name) or
+		validators.ipv6(name)
 	)
 	if not valid_domain:
-		logger.error(f'{subdomain_name} is not an invalid domain. Skipping.')
-		return None, False
+		logger.error(f'{name} is not an invalid domain. Skipping.')
+		return None
 
-	if subdomain_checker.is_out_of_scope(subdomain_name):
-		logger.error(f'{subdomain_name} is out-of-scope. Skipping.')
-		return None, False
+	if subdomain_checker.is_out_of_scope(name):
+		logger.error(f'{name} is out-of-scope. Skipping.')
+		return None
 
 	if ctx.get('domain_id'):
 		domain = Domain.objects.get(id=ctx.get('domain_id'))
-		if domain.name not in subdomain_name:
-			logger.error(f"{subdomain_name} is not a subdomain of domain {domain.name}. Skipping.")
-			return None, False
+		if domain.name not in name:
+			logger.error(f"{name} is not a subdomain of domain {domain.name}. Skipping.")
+			return None
 
 	scan = ScanHistory.objects.filter(pk=scan_id).first()
 	domain = scan.domain if scan else None
-	subdomain, created = Subdomain.objects.get_or_create(
-		scan_history=scan,
-		target_domain=domain,
-		name=subdomain_name)
-	if created:
-		# logger.warning(f'Found new subdomain {subdomain_name}')
-		subdomain.discovered_date = timezone.now()
-		subdomain.save()
 	project = getattr(domain, 'project', None)
-	if project and subdomain.name:
-		from limes.tasks import inventory as inv  # lazy: persistence <-> inventory
-		root = inv.upsert_root_asset(project, domain.name, getattr(domain, 'request_headers', None))
-		inv.upsert_hostname_asset(project, subdomain.name, parent=root,
-								  source='discovery', evidence=f'scan:{scan.id}')
-	return subdomain, created
+	if not project:
+		return None
+	from limes.tasks import inventory as inv  # lazy: persistence <-> inventory
+	root = inv.upsert_root_asset(project, domain.name, getattr(domain, 'request_headers', None))
+	return inv.upsert_hostname_asset(project, name, parent=root, source='discovery', evidence=f'scan:{scan.id}')
 
 
-def save_ip_address(ip_address, subdomain=None, **kwargs):
+def save_ip_address(ip_address, host=None, **kwargs):
+	"""Get or create the IP; with a hostname Asset, also record the ip Asset and link the IP to the host."""
 	if not (validators.ipv4(ip_address) or validators.ipv6(ip_address)):
 		logger.info(f'IP {ip_address} is not a valid IP. Skipping.')
 		return None, False
 	if 'cdn' in kwargs:  # callers pass cdn=; the model field is is_cdn
 		kwargs['is_cdn'] = kwargs.pop('cdn')
 	ip, created = IpAddress.objects.get_or_create(address=ip_address)
-	# if created:
-	# 	logger.warning(f'Found new IP {ip_address}')
 
 	# Set extra attributes
 	for key, value in kwargs.items():
 		setattr(ip, key, value)
 	ip.save()
 
-	# Add IP to subdomain
-	if subdomain:
-		subdomain.ip_addresses.add(ip)
-		subdomain.save()
-
-		# Dual-write the canonical ip Asset and link it to the host Asset
-		project = getattr(getattr(subdomain, 'target_domain', None), 'project', None)
-		if project:
-			from limes.tasks import inventory as inv
-			from startScan.models import Asset
-			ip_asset = inv.upsert_ip_asset(project, ip_address, evidence=f'host:{subdomain.name}')
-			host = Asset.objects.filter(
-				project=project, kind='hostname',
-				value=inv.normalize_host(subdomain.name)).first()
-			if host and ip_asset:
-				host.ip_addresses.add(ip)
-
-
+	if host:
+		from limes.tasks import inventory as inv
+		if inv.upsert_ip_asset(host.project, ip_address, evidence=f'host:{host.value}'):
+			host.ip_addresses.add(ip)
 
 	return ip, created
 
 
-def save_imported_subdomains(subdomains, ctx={}):
-	"""Take a list of subdomains imported and write them to from_imported.txt.
-
-	Args:
-		subdomains (list): List of subdomain names.
-		scan_history (startScan.models.ScanHistory): ScanHistory instance.
-		domain (startScan.models.Domain): Domain instance.
-		results_dir (str): Results directory.
-	"""
-	domain_id = ctx['domain_id']
-	domain = Domain.objects.get(pk=domain_id)
+def save_imported_hosts(subdomains, ctx={}):
+	"""Take a list of imported subdomain names, save the valid ones under the scan's domain and write them to
+	from_imported.txt in the results dir."""
+	domain = Domain.objects.get(pk=ctx['domain_id'])
 	results_dir = ctx.get('results_dir', LIMES_RESULTS)
 
 	# Validate each subdomain and de-duplicate entries
@@ -584,8 +491,5 @@ def save_imported_subdomains(subdomains, ctx={}):
 	logger.warning(f'Found {len(subdomains)} imported subdomains.')
 	with open(f'{results_dir}/from_imported.txt', 'w+') as output_file:
 		for name in subdomains:
-			subdomain_name = name.strip()
-			subdomain, _ = save_subdomain(subdomain_name, ctx=ctx)
-			subdomain.is_imported_subdomain = True
-			subdomain.save()
-			output_file.write(f'{subdomain}\n')
+			host = save_host(name.strip(), ctx=ctx)
+			output_file.write(f'{host.value if host else name.strip()}\n')

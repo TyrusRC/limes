@@ -3,7 +3,7 @@ from django.utils import timezone
 from dashboard.models import Project
 from startScan.models import Asset
 from limes.tasks import inventory as inv
-from limes.tasks.persistence import save_subdomain, save_ip_address
+from limes.tasks.persistence import save_host, save_ip_address
 from scanEngine.models import EngineType
 from startScan.models import ScanHistory, IpAddress
 from targetApp.models import Domain
@@ -68,7 +68,7 @@ class InventoryHelpersTest(TestCase):
         self.assertEqual(a.state, 'missing'); self.assertEqual(a.missed_count, 3)
 
 
-class SaveSubdomainDualWriteTest(TestCase):
+class SaveHostTest(TestCase):
     def setUp(self):
         self.p = Project.objects.create(name='p2', slug='p2', insert_date=timezone.now())
         self.domain = Domain.objects.create(name='x.com', project=self.p, insert_date=timezone.now())
@@ -76,56 +76,82 @@ class SaveSubdomainDualWriteTest(TestCase):
         self.scan = ScanHistory.objects.create(domain=self.domain, scan_type=engine, start_scan_date=timezone.now())
         self.ctx = {'scan_history_id': self.scan.id, 'domain_id': self.domain.id}
 
-    def test_hostname_asset_written_and_deduped(self):
-        sub, created = save_subdomain('a.x.com', ctx=self.ctx)
-        self.assertTrue(created)
-        save_subdomain('a.x.com', ctx=self.ctx)
+    def test_hostname_asset_written_deduped_and_stamped_with_the_scan(self):
+        first = save_host('a.x.com', ctx=self.ctx)
+        self.assertEqual(save_host('a.x.com', ctx=self.ctx), first)
         qs = Asset.objects.filter(project=self.p, kind='hostname', value='a.x.com')
         self.assertEqual(qs.count(), 1)
         a = qs.get()
         self.assertEqual(a.scope_tier, 'owned_host')
         self.assertEqual(a.parent.value, 'x.com')
         self.assertEqual(a.parent.kind, 'root_domain')
+        self.assertEqual(inv.run_hostnames(self.p, self.scan.id), ['a.x.com'])
+        self.assertEqual(inv.run_hostnames(self.p, self.scan.id + 1), [])
 
     def test_co_brand_not_promoted(self):
         Asset.objects.create(project=self.p, kind='hostname', value='cb.x.com', scope_tier='co_brand')
-        save_subdomain('cb.x.com', ctx=self.ctx)
+        save_host('cb.x.com', ctx=self.ctx)
         self.assertEqual(Asset.objects.get(project=self.p, value='cb.x.com').scope_tier, 'co_brand')
 
+    def test_names_the_scan_must_not_take_are_refused(self):
+        ctx = dict(self.ctx, out_of_scope_subdomains=['skip.x.com'])
+        for name in ('not a host!', 'skip.x.com', 'a.other.org'):
+            self.assertIsNone(save_host(name, ctx=ctx), name)
+        self.assertFalse(Asset.objects.filter(kind='hostname').exists())
 
-class SaveIpAddressDualWriteTest(SaveSubdomainDualWriteTest):
+    def test_a_domain_without_a_project_saves_nothing(self):
+        orphan = Domain.objects.create(name='y.com', project=None, insert_date=timezone.now())
+        self.scan.domain = orphan
+        self.scan.save()
+        self.assertIsNone(save_host('a.y.com', ctx=dict(self.ctx, domain_id=orphan.id)))
+
+    def test_run_host_only_finds_hosts_this_scan_saved(self):
+        save_host('a.x.com', ctx=self.ctx)
+        inv.upsert_hostname_asset(self.p, 'old.x.com', source='discovery', evidence=f'scan:{self.scan.id + 1}')
+        self.assertEqual(inv.run_host(self.p, self.scan.id, 'A.x.com.').value, 'a.x.com')
+        self.assertIsNone(inv.run_host(self.p, self.scan.id, 'old.x.com'))
+        self.assertIsNone(inv.run_host(None, self.scan.id, 'a.x.com'))
+
+
+class SaveIpAddressTest(SaveHostTest):
     def test_cdn_persisted_and_ip_asset_linked(self):
-        sub, _ = save_subdomain('h.x.com', ctx=self.ctx)
-        host = Asset.objects.get(project=self.p, kind='hostname', value='h.x.com')
-        ip, created = save_ip_address('1.2.3.4', subdomain=sub, cdn=True)
+        host = save_host('h.x.com', ctx=self.ctx)
+        ip, created = save_ip_address('1.2.3.4', host, cdn=True)
         self.assertTrue(created)
         self.assertTrue(IpAddress.objects.get(address='1.2.3.4').is_cdn)
-        ipa = Asset.objects.get(project=self.p, kind='ip', value='1.2.3.4')
+        self.assertTrue(Asset.objects.filter(project=self.p, kind='ip', value='1.2.3.4').exists())
         self.assertIn(ip, host.ip_addresses.all())
-        self.assertTrue(ipa)
 
-    def test_no_subdomain_ok(self):
+    def test_no_host_ok(self):
         ip, _ = save_ip_address('5.6.7.8')
         self.assertIsNotNone(ip)
+        self.assertFalse(Asset.objects.filter(kind='ip').exists())
+
+    def test_invalid_ip_is_refused(self):
+        self.assertEqual(save_ip_address('not-an-ip'), (None, False))
 
 
-class MirrorSubdomainStateTest(SaveSubdomainDualWriteTest):
-    def test_state_and_technologies_mirrored(self):
+class RecordHostStateTest(SaveHostTest):
+    def test_state_and_technologies_land_on_the_hostname_asset(self):
         from startScan.models import Technology
-        sub, _ = save_subdomain('m.x.com', ctx=self.ctx)
-        sub.http_status = 200; sub.page_title = 'T'; sub.webserver = 'nginx'
-        sub.content_type = 'text/html'; sub.content_length = 42; sub.response_time = 0.5
-        sub.cname = 'c.cdn.net'; sub.is_cdn = True; sub.cdn_name = 'cf'
-        sub.screenshot_path = 'a/b.png'; sub.save()
+        host = save_host('m.x.com', ctx=self.ctx)
         tech = Technology.objects.create(name='nginx')
-        sub.technologies.add(tech)
-        asset = inv.mirror_subdomain_state(sub, self.p)
+        state = dict(http_status=200, page_title='T', webserver='nginx', content_type='text/html', content_length=42,
+                     response_time=0.5, cname='c.cdn.net', is_cdn=True, cdn_name='cf', screenshot_path='a/b.png')
+        asset = inv.record_host_state(self.p, 'M.x.com', technologies=[tech], **state)
+        self.assertEqual(asset.id, host.id)
         asset.refresh_from_db()
-        self.assertEqual(asset.value, 'm.x.com')
-        for f in inv.STATE_FIELDS:
-            self.assertEqual(getattr(asset, f), getattr(sub, f), f)
+        for f, v in state.items():
+            self.assertEqual(getattr(asset, f), v, f)
         self.assertEqual(list(asset.technologies.all()), [tech])
+        self.assertIn({'source': 'probe', 'evidence': 'httpx'}, [{k: s[k] for k in ('source', 'evidence')} for s in asset.sources])
+
+    def test_a_later_partial_write_keeps_the_earlier_fields(self):
+        save_host('m.x.com', ctx=self.ctx)
+        inv.record_host_state(self.p, 'm.x.com', http_status=200, page_title='T')
+        inv.record_host_state(self.p, 'm.x.com', screenshot_path='s.png')
+        a = Asset.objects.get(value='m.x.com', kind='hostname')
+        self.assertEqual((a.http_status, a.page_title, a.screenshot_path), (200, 'T', 's.png'))
 
     def test_no_project_returns_none(self):
-        sub, _ = save_subdomain('n.x.com', ctx=self.ctx)
-        self.assertIsNone(inv.mirror_subdomain_state(sub, None))
+        self.assertIsNone(inv.record_host_state(None, 'n.x.com', http_status=200))

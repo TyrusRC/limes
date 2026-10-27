@@ -10,25 +10,6 @@ from scanEngine.models import EngineType
 from targetApp.models import Domain
 
 
-class hybrid_property:
-	def __init__(self, func):
-		self.func = func
-		self.name = func.__name__
-		self.exp = None
-
-	def __get__(self, instance, owner):
-		if instance is None:
-			return self
-		return self.func(instance)
-
-	def __set__(self, instance, value):
-		pass
-
-	def expression(self, exp):
-		self.exp = exp
-		return self
-
-
 class ScanHistory(models.Model):
 	id = models.AutoField(primary_key=True)
 	start_scan_date = models.DateTimeField()
@@ -73,39 +54,6 @@ class ScanHistory(models.Model):
 
 	def __str__(self):
 		return self.domain.name
-
-	def get_subdomain_count(self):
-		return Subdomain.objects.filter(scan_history__id=self.id).count()
-
-	def get_subdomain_change_count(self):
-		last_scan = (
-			ScanHistory.objects
-			.filter(id=self.id)
-			.filter(tasks__overlap=['subdomain_discovery'])
-			.order_by('-start_scan_date')
-		)
-		scanned_host_q1 = (
-			Subdomain.objects
-			.filter(target_domain__id=self.domain.id)
-			.exclude(scan_history__id=last_scan[0].id)
-			.values('name')
-		)
-		scanned_host_q2 = (
-			Subdomain.objects
-			.filter(scan_history__id=last_scan[0].id)
-			.values('name')
-		)
-		new_subdomains = scanned_host_q2.difference(scanned_host_q1).count()
-		removed_subdomains = scanned_host_q1.difference(scanned_host_q2).count()
-		return [new_subdomains, removed_subdomains]
-
-
-	def get_endpoint_count(self):
-		return (
-			EndPoint.objects
-			.filter(scan_history__id=self.id)
-			.count()
-		)
 
 	def get_vulnerability_count(self):
 		return (
@@ -198,169 +146,7 @@ class ScanHistory(models.Model):
 		return f'{hours} hours {minutes} minutes'
 
 
-class Subdomain(models.Model):
-	# TODO: Add endpoint property instead of replicating endpoint fields here
-	id = models.AutoField(primary_key=True)
-	scan_history = models.ForeignKey(ScanHistory, on_delete=models.CASCADE, null=True, blank=True)
-	target_domain = models.ForeignKey(Domain, on_delete=models.CASCADE, null=True, blank=True)
-	name = models.CharField(max_length=1000)
-	is_imported_subdomain = models.BooleanField(default=False)
-	is_important = models.BooleanField(default=False, null=True, blank=True)
-	http_url = models.CharField(max_length=10000, null=True, blank=True)
-	screenshot_path = models.CharField(max_length=1000, null=True, blank=True)
-	http_header_path = models.CharField(max_length=1000, null=True, blank=True)
-	discovered_date = models.DateTimeField(blank=True, null=True)
-	cname = models.CharField(max_length=5000, blank=True, null=True)
-	is_cdn = models.BooleanField(default=False, blank=True, null=True)
-	cdn_name = models.CharField(max_length=200, blank=True, null=True)
-	http_status = models.IntegerField(default=0)
-	content_type = models.CharField(max_length=100, null=True, blank=True)
-	response_time = models.FloatField(null=True, blank=True)
-	webserver = models.CharField(max_length=1000, blank=True, null=True)
-	content_length = models.IntegerField(default=0, blank=True, null=True)
-	page_title = models.CharField(max_length=1000, blank=True, null=True)
-	technologies = models.ManyToManyField('Technology', related_name='technologies', blank=True)
-	ip_addresses = models.ManyToManyField('IPAddress', related_name='ip_addresses', blank=True)
-	attack_surface = models.TextField(null=True, blank=True)
-
-
-	class Meta:
-		indexes = [
-			models.Index(fields=['scan_history', 'discovered_date'], name='sub_scan_disc_idx'),
-			models.Index(fields=['scan_history', 'http_status'], name='sub_scan_status_idx'),
-		]
-
-	def __str__(self):
-		return str(self.name)
-
-	@property
-	def get_endpoint_count(self):
-		endpoints = EndPoint.objects.filter(subdomain__name=self.name)
-		if self.scan_history:
-			endpoints = endpoints.filter(scan_history=self.scan_history)
-		return endpoints.count()
-
-	@property
-	def get_info_count(self):
-		return (
-			self.get_vulnerabilities
-			.filter(severity=0)
-			.count()
-		)
-
-	@property
-	def get_low_count(self):
-		return (
-			self.get_vulnerabilities
-			.filter(severity=1)
-			.count()
-		)
-
-	@property
-	def get_medium_count(self):
-		return (
-			self.get_vulnerabilities
-			.filter(severity=2)
-			.count()
-		)
-
-	@property
-	def get_high_count(self):
-		return (
-			self.get_vulnerabilities
-			.filter(severity=3)
-			.count()
-		)
-
-	@property
-	def get_critical_count(self):
-		return (
-			self.get_vulnerabilities
-			.filter(severity=4)
-			.count()
-		)
-
-	@property
-	def get_total_vulnerability_count(self):
-		return self.get_vulnerabilities.count()
-
-	@property
-	def get_vulnerabilities(self):
-		vulns = Vulnerability.objects.filter(subdomain__name=self.name)
-		if self.scan_history:
-			vulns = vulns.filter(scan_history=self.scan_history)
-		return vulns
-
-	@property
-	def get_vulnerabilities_without_info(self):
-		vulns = Vulnerability.objects.filter(subdomain__name=self.name).exclude(severity=0)
-		if self.scan_history:
-			vulns = vulns.filter(scan_history=self.scan_history)
-		return vulns
-
-
-class EndPoint(models.Model):
-	id = models.AutoField(primary_key=True)
-	scan_history = models.ForeignKey(ScanHistory, on_delete=models.CASCADE, null=True, blank=True)
-	target_domain = models.ForeignKey(
-		Domain, on_delete=models.CASCADE, null=True, blank=True)
-	subdomain = models.ForeignKey(
-		Subdomain,
-		on_delete=models.CASCADE,
-		null=True,
-		blank=True)
-	source = models.CharField(max_length=200, null=True, blank=True)
-	http_url = models.CharField(max_length=30000)
-	content_length = models.IntegerField(default=0, null=True, blank=True)
-	page_title = models.CharField(max_length=30000, null=True, blank=True)
-	http_status = models.IntegerField(default=0, null=True, blank=True)
-	content_type = models.CharField(max_length=100, null=True, blank=True)
-	discovered_date = models.DateTimeField(blank=True, null=True)
-	response_time = models.FloatField(null=True, blank=True)
-	webserver = models.CharField(max_length=1000, blank=True, null=True)
-	is_default = models.BooleanField(null=True, blank=True, default=False)
-	matched_gf_patterns = models.CharField(max_length=10000, null=True, blank=True)
-	techs = models.ManyToManyField('Technology', related_name='techs', null=True, blank=True)
-
-	class Meta:
-		indexes = [
-			models.Index(fields=['scan_history', 'discovered_date'], name='ep_scan_disc_idx'),
-			models.Index(fields=['scan_history', 'http_status'], name='ep_scan_status_idx'),
-		]
-
-	def __str__(self):
-		return self.http_url
-
-	@hybrid_property
-	def is_alive(self):
-		return self.http_status and (0 < self.http_status < 500) and self.http_status != 404
-
-
-class VulnerabilityTags(models.Model):
-	id = models.AutoField(primary_key=True)
-	name = models.CharField(max_length=100)
-
-	def __str__(self):
-		return self.name
-
-
-class VulnerabilityReference(models.Model):
-	id = models.AutoField(primary_key=True)
-	url = models.CharField(max_length=5000)
-
-	def __str__(self):
-		return self.url
-
-
 class CveId(models.Model):
-	id = models.AutoField(primary_key=True)
-	name = models.CharField(max_length=100)
-
-	def __str__(self):
-		return self.name
-
-
-class CweId(models.Model):
 	id = models.AutoField(primary_key=True)
 	name = models.CharField(max_length=100)
 
@@ -373,18 +159,6 @@ class Vulnerability(models.Model):
 	scan_history = models.ForeignKey(ScanHistory, on_delete=models.CASCADE, null=True, blank=True)
 	source = models.CharField(max_length=200, null=True, blank=True)
 	asset = models.ForeignKey('Asset', on_delete=models.SET_NULL, null=True, blank=True, related_name='vulnerabilities')
-	subdomain = models.ForeignKey(
-		Subdomain,
-		on_delete=models.CASCADE,
-		null=True,
-		blank=True)
-	endpoint = models.ForeignKey(
-		EndPoint,
-		on_delete=models.CASCADE,
-		blank=True,
-		null=True)
-	target_domain = models.ForeignKey(
-		Domain, on_delete=models.CASCADE, null=True, blank=True)
 	template = models.CharField(max_length=100, null=True, blank=True)
 	template_url = models.CharField(max_length=2500, null=True, blank=True)
 	template_id = models.CharField(max_length=200, null=True, blank=True)
@@ -399,10 +173,11 @@ class Vulnerability(models.Model):
 		models.CharField(max_length=5000), blank=True, null=True
 	)
 
-	tags = models.ManyToManyField('VulnerabilityTags', related_name='vuln_tags', blank=True)
-	references = models.ManyToManyField('VulnerabilityReference', related_name='vuln_reference', blank=True)
+	# CVEs stay rows: the exploit-intel join (KEV/EPSS) goes through them. The rest are plain lists.
 	cve_ids = models.ManyToManyField('CveId', related_name='cve_ids', blank=True)
-	cwe_ids = models.ManyToManyField('CweId', related_name='cwe_ids', blank=True)
+	tag_names = ArrayField(models.CharField(max_length=100), blank=True, default=list)
+	cwe_names = ArrayField(models.CharField(max_length=100), blank=True, default=list)
+	reference_urls = ArrayField(models.CharField(max_length=5000), blank=True, default=list)
 
 	cvss_metrics = models.CharField(max_length=500, null=True, blank=True)
 	cvss_score = models.FloatField(null=True, blank=True, default=None)
@@ -432,13 +207,13 @@ class Vulnerability(models.Model):
 		return ', '.join(f'`{cve.name}`' for cve in self.cve_ids.all())
 
 	def get_cwe_str(self):
-		return ', '.join(f'`{cwe.name}`' for cwe in self.cwe_ids.all())
+		return ', '.join(f'`{cwe}`' for cwe in self.cwe_names)
 
 	def get_tags_str(self):
-		return ', '.join(f'`{tag.name}`' for tag in self.tags.all())
+		return ', '.join(f'`{tag}`' for tag in self.tag_names)
 
 	def get_refs_str(self):
-		return '•' + '\n• '.join(f'`{ref.url}`' for ref in self.references.all())
+		return '•' + '\n• '.join(f'`{ref}`' for ref in self.reference_urls)
 
 	def get_path(self):
 		return urlparse(self.http_url).path

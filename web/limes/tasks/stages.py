@@ -1,13 +1,14 @@
 from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks.base import *
-from limes.tasks.enrichment import remove_duplicate_endpoints
 from limes import scope
+from limes.run_urls import RunUrls, is_alive
 from limes.definitions import NOTHING_ASSESSED
 from limes import api_discovery, cloud_storage, code_search, dangling
 from limes.checks import leak, run as checks_run
 from limes.tasks import attribution, intel, resolution
 from limes.tasks.notifications import send_file_to_discord
-from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, save_endpoint, save_ip_address, save_subdomain, save_vulnerability
+from limes.tasks import inventory
+from limes.tasks.persistence import extract_httpx_url, parse_nmap_results, probe_url, record_url, save_host, save_ip_address, save_vulnerability
 from limes.tasks.runner import run_command, stream_command
 
 def _in_scope(task, targets, level, allow_co_brand=True):
@@ -69,11 +70,7 @@ def subdomain_discovery(
 	tools = config.get(USES_TOOLS, SUBDOMAIN_SCAN_DEFAULT_TOOLS)
 	# amass's tool name is amass, but the engine may ask for amass-active/passive
 	supported_tools = ('subfinder', 'amass', 'amass-passive', 'amass-active')
-	send_subdomain_changes = False
-	notif = Notification.objects.first()
 	subdomain_scope_checker = SubdomainScopeChecker(self.out_of_scope_subdomains)
-	if notif:
-		send_subdomain_changes = notif.send_subdomain_changes_notif
 
 	# Gather tools to run for subdomain scan
 	if ALL in tools:
@@ -149,11 +146,8 @@ def subdomain_discovery(
 	with open(self.output_path) as f:
 		lines = f.readlines()
 
-	# Parse the output_file file and store Subdomain and EndPoint objects found
-	# in db.
-	subdomain_count = 0
+	# Parse the output_file file and save the hostnames found as Assets.
 	subdomains = []
-	urls = []
 	for line in lines:
 		subdomain_name = line.strip()
 		valid_url = bool(validators.url(subdomain_name))
@@ -175,11 +169,8 @@ def subdomain_discovery(
 			continue
 
 		# Add subdomain
-		subdomain, _ = save_subdomain(subdomain_name, ctx=ctx)
-		if subdomain:
-			subdomain_count += 1
-			subdomains.append(subdomain)
-			urls.append(subdomain.name)
+		if save_host(subdomain_name, ctx=ctx):
+			subdomains.append(subdomain_name)
 
 	# Resolve again: this run's newly discovered hosts have no answer yet (the call above only covers known ones).
 	resolution.resolve_domain(self.domain, self.results_dir)
@@ -187,31 +178,16 @@ def subdomain_discovery(
 	# Bulk crawl subdomains
 	if enable_http_crawl:
 		ctx['track'] = True
-		http_crawl(urls, ctx=ctx, is_ran_from_subdomain_scan=True)
+		http_crawl(subdomains, ctx=ctx, is_ran_from_subdomain_scan=True)
 
-	# Find root subdomain endpoints
-	for subdomain in subdomains:
-		pass
-
-	# Send notifications
-	subdomains_str = '\n'.join([f'• `{subdomain.name}`' for subdomain in subdomains])
+	# Send notifications (new and missing hosts are change events on the inventory)
+	subdomains_str = '\n'.join([f'• `{subdomain}`' for subdomain in subdomains])
 	self.notify(fields={
 		'Subdomain count': len(subdomains),
 		'Subdomains': subdomains_str,
 	})
-	if send_subdomain_changes and self.scan_id and self.domain_id:
-		added = get_new_added_subdomain(self.scan_id, self.domain_id)
-		removed = get_removed_subdomain(self.scan_id, self.domain_id)
 
-		if added:
-			subdomains_str = '\n'.join([f'• `{subdomain}`' for subdomain in added])
-			self.notify(fields={'Added subdomains': subdomains_str})
-
-		if removed:
-			subdomains_str = '\n'.join([f'• `{subdomain}`' for subdomain in removed])
-			self.notify(fields={'Removed subdomains': subdomains_str})
-
-	return SubdomainSerializer(subdomains, many=True).data
+	return subdomains
 
 
 @app.task(name='passive_intel', base=LimesTask, bind=True)
@@ -313,21 +289,11 @@ def screenshot(self, ctx={}, description=None):
 	alive_endpoints_file = f'{self.results_dir}/endpoints_alive.txt'
 	config = self.yaml_configuration.get(SCREENSHOT) or {}
 	enable_http_crawl = config.get(ENABLE_HTTP_CRAWL, DEFAULT_ENABLE_HTTP_CRAWL)
-	intensity = config.get(INTENSITY) or self.yaml_configuration.get(INTENSITY, DEFAULT_SCAN_INTENSITY)
 	timeout = config.get(TIMEOUT) or self.yaml_configuration.get(TIMEOUT, DEFAULT_HTTP_TIMEOUT + 5)
 	threads = config.get(THREADS) or self.yaml_configuration.get(THREADS, DEFAULT_THREADS)
 
-	# If intensity is normal, grab only the root endpoints of each subdomain
-	strict = True if intensity == 'normal' else False
-
-	# Get URLs to take screenshot of
-	urls = get_http_urls(
-		is_alive=enable_http_crawl,
-		strict=strict,
-		write_filepath=alive_endpoints_file,
-		get_only_default_urls=True,
-		ctx=ctx
-	) or []
+	# Get URLs to take screenshot of: the root URL of each host, from the run's URL file
+	urls = RunUrls(self.results_dir).urls(alive=enable_http_crawl, default_only=True)
 	urls = _in_scope(self, urls, 'contact')
 	if not urls:
 		logger.warning('Screenshot: no in-scope URLs, skipping')
@@ -365,18 +331,13 @@ def screenshot(self, ctx={}, description=None):
 		if not screenshot_path or not os.path.isfile(screenshot_path):
 			continue
 		subdomain_name = get_subdomain_from_url(row.get('url', ''))
-		subdomain_query = Subdomain.objects.filter(name=subdomain_name)
-		if self.scan:
-			subdomain_query = subdomain_query.filter(scan_history=self.scan)
-		subdomain = subdomain_query.first()
-		if not subdomain:
+		project = getattr(self.domain, 'project', None)
+		if not inventory.run_host(project, self.scan_id, subdomain_name):
 			continue
 		screenshot_paths.append(screenshot_path)
-		subdomain.screenshot_path = screenshot_path.replace('/usr/src/scan_results/', '')
-		subdomain.save()
-		from limes.tasks import inventory
-		inventory.mirror_subdomain_state(subdomain, getattr(self.domain, 'project', None))
-		logger.warning(f'Added screenshot for {subdomain.name} to DB')
+		inventory.record_host_state(project, subdomain_name,
+									screenshot_path=screenshot_path.replace('/usr/src/scan_results/', ''))
+		logger.warning(f'Added screenshot for {subdomain_name} to DB')
 
 	# Send finish notifs
 	screenshots_str = '• ' + '\n• '.join([f'`{path}`' for path in screenshot_paths])
@@ -408,7 +369,6 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 	enable_http_crawl = config.get(ENABLE_HTTP_CRAWL, DEFAULT_ENABLE_HTTP_CRAWL)
 	timeout = config.get(TIMEOUT) or self.yaml_configuration.get(TIMEOUT, DEFAULT_HTTP_TIMEOUT)
 	exclude_ports = config.get(NAABU_EXCLUDE_PORTS, [])
-	exclude_subdomains = config.get(NAABU_EXCLUDE_SUBDOMAINS, False)
 	ports = config.get(PORTS, NAABU_DEFAULT_PORTS)
 	ports = [str(port) for port in ports]
 	rate_limit = config.get(NAABU_RATE) or self.yaml_configuration.get(RATE_LIMIT, DEFAULT_RATE_LIMIT)
@@ -423,8 +383,11 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 	nmap_script = ','.join(return_iterable(nmap_script))
 	nmap_script_args = config.get(NMAP_SCRIPT_ARGS)
 
+	project = self.domain.project if self.domain else None
 	if not hosts:
-		hosts = get_subdomains(exclude_subdomains=exclude_subdomains, ctx=ctx)
+		hosts = inventory.run_hostnames(project, self.scan_id) if project else []
+		if not hosts:
+			logger.error('No subdomains were found in query !')
 	hosts = _in_scope(self, hosts, 'attack', allow_co_brand=False)
 	if not hosts:
 		logger.warning('Port scan: no in-scope hosts, skipping')
@@ -456,7 +419,6 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 
 	# Execute cmd and gather results
 	results = []
-	urls = []
 	ports_data = {}
 	for line in stream_command(
 			cmd,
@@ -474,28 +436,16 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 		if port_number == 0:
 			continue
 
-		# Grab subdomain
-		subdomain = Subdomain.objects.filter(
-			name=host,
-			target_domain=self.domain,
-			scan_history=self.scan
-		).first()
+		# Grab the host's Asset
+		host_asset = inventory.run_host(project, self.scan_id, host)
 
 		# Add IP DB
-		ip, _ = save_ip_address(ip_address, subdomain)
+		ip, _ = save_ip_address(ip_address, host_asset)
 
-		# Add endpoint to DB
+		# Add the URL to the run's URL file
 		# port 80 and 443 not needed as http crawl already does that.
 		if port_number not in [80, 443]:
-			http_url = f'{host}:{port_number}'
-			endpoint, _ = save_endpoint(
-				http_url,
-				crawl=enable_http_crawl,
-				ctx=ctx,
-				subdomain=subdomain)
-			if endpoint:
-				http_url = endpoint.http_url
-			urls.append(http_url)
+			probe_url(f'{host}:{port_number}', ctx, crawl=enable_http_crawl)
 
 		# Add Port in DB
 		res = get_port_service_description(port_number)
@@ -626,19 +576,15 @@ def nmap(
 
 	# Save vulnerabilities found by nmap
 	vulns_str = ''
+	run_urls = RunUrls(self.results_dir)
 	for vuln_data in vulns:
 		# URL is not necessarily an HTTP URL when running nmap (can be any
-		# other vulnerable protocols). Look for existing endpoint and use its
-		# URL as vulnerability.http_url if it exists.
-		url = vuln_data['http_url']
-		endpoint = EndPoint.objects.filter(http_url__contains=url).first()
-		if endpoint:
-			vuln_data['http_url'] = endpoint.http_url
-		vuln, created = save_vulnerability(
-			target_domain=self.domain,
-			scan_history=self.scan,
-			endpoint=endpoint,
-			**vuln_data)
+		# other vulnerable protocols). Look for a URL of this run that contains
+		# it and use that URL as vulnerability.http_url if there is one.
+		matched = run_urls.first_containing(vuln_data['http_url'])
+		if matched:
+			vuln_data['http_url'] = matched
+		vuln, created = save_vulnerability(scan_history=self.scan, **vuln_data)
 		vulns_str += f'• {str(vuln)}\n'
 		if created:
 			logger.warning(str(vuln))
@@ -664,7 +610,6 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 	# Config
 	config = self.yaml_configuration.get(FETCH_URL) or {}
 	should_remove_duplicate_endpoints = config.get(REMOVE_DUPLICATE_ENDPOINTS, True)
-	duplicate_removal_fields = config.get(DUPLICATE_REMOVAL_FIELDS, ENDPOINT_SCAN_DEFAULT_DUPLICATE_FIELDS)
 	enable_http_crawl = config.get(ENABLE_HTTP_CRAWL, DEFAULT_ENABLE_HTTP_CRAWL)
 	ignore_file_extension = config.get(IGNORE_FILE_EXTENSION, DEFAULT_IGNORE_FILE_EXTENSIONS)
 	threads = config.get(THREADS) or self.yaml_configuration.get(THREADS, DEFAULT_THREADS)
@@ -675,13 +620,10 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 		with open(input_path, 'w') as f:
 			f.write('\n'.join(urls))
 	else:
-		urls = get_http_urls(
-			is_alive=enable_http_crawl,
-			write_filepath=input_path,
-			exclude_subdomains=exclude_subdomains,
-			get_only_default_urls=True,
-			ctx=ctx
-		)
+		urls = RunUrls(self.results_dir).urls(
+			alive=enable_http_crawl,
+			default_only=True,
+			root_host=self.domain.name if exclude_subdomains and self.domain else None)
 
 	urls = _in_scope(self, urls or [], 'attack')
 	if not urls:
@@ -790,8 +732,7 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 		http_crawl(
 			all_urls,
 			ctx=ctx,
-			should_remove_duplicate_endpoints=should_remove_duplicate_endpoints,
-			duplicate_removal_fields=duplicate_removal_fields
+			should_remove_duplicate_endpoints=should_remove_duplicate_endpoints
 		)
 
 
@@ -814,7 +755,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 			if self.engine and getattr(self.engine, 'profile', None) else profiles.resolve_profile('normal'))
 
 	# Gather crawled, alive HTTP URLs discovered for this scan
-	target_urls = _in_scope(self, get_http_urls(is_alive=True, ctx=ctx) or [], 'attack')
+	target_urls = _in_scope(self, RunUrls(self.results_dir).urls(alive=True), 'attack')
 	if not target_urls:
 		logger.warning('No alive HTTP URLs to scan, skipping DAST stage')
 		self.error = f'{NOTHING_ASSESSED}: no alive HTTP URLs'  # still SUCCESS, never a scoring baseline
@@ -859,17 +800,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 
 		count = 0
 		for v in vulns:
-			http_url = v.get('http_url')
-			subdomain_name = get_subdomain_from_url(http_url) if http_url else None
-			subdomain = (Subdomain.objects
-					.filter(scan_history=self.scan, name=subdomain_name)
-					.first()) if subdomain_name else None
-			save_vulnerability(**{
-				**v,
-				'scan_history': self.scan,
-				'target_domain': self.domain,
-				'subdomain': subdomain,
-			})
+			save_vulnerability(**{**v, 'scan_history': self.scan})
 			count += 1
 		logger.info(f'DAST stage saved {count} vulnerabilities')
 		return count
@@ -908,7 +839,7 @@ def code_audit(self, urls=[], ctx={}, description=None):
 	for finding in findings:
 		source_url = crawl.artifact_source_url(finding.get('path', ''), mapping)
 		v = mantis.map_finding(finding, source_url=source_url)
-		save_vulnerability(**{**v, 'scan_history': self.scan, 'target_domain': self.domain})
+		save_vulnerability(**{**v, 'scan_history': self.scan})
 		count += 1
 	logger.info(f'Code audit saved {count} findings')
 	return count
@@ -924,8 +855,7 @@ def http_crawl(
 		track=True,
 		description=None,
 		is_ran_from_subdomain_scan=False,
-		should_remove_duplicate_endpoints=True,
-		duplicate_removal_fields=[]):
+		should_remove_duplicate_endpoints=True):
 	"""Use httpx to query HTTP URLs for important info like page titles, http
 	status, etc...
 
@@ -936,7 +866,6 @@ def http_crawl(
 		recrawl (bool, optional): If False, filter out URLs that have already
 			been crawled.
 		should_remove_duplicate_endpoints (bool): Whether to remove duplicate endpoints
-		duplicate_removal_fields (list): List of Endpoint model fields to check for duplicates
 
 	Returns:
 		list: httpx results.
@@ -949,6 +878,8 @@ def http_crawl(
 	threads = cfg.get(THREADS, DEFAULT_THREADS)
 	follow_redirect = cfg.get(FOLLOW_REDIRECT, True)
 	self.output_path = None
+	run_urls = RunUrls(self.results_dir)
+	project = getattr(self.domain, 'project', None)
 	input_path = f'{self.results_dir}/httpx_input.txt'
 	history_file = f'{self.results_dir}/commands.txt'
 	if urls: # direct passing URLs to check
@@ -958,12 +889,7 @@ def http_crawl(
 		with open(input_path, 'w') as f:
 			f.write('\n'.join(urls))
 	else:
-		urls = get_http_urls(
-			is_uncrawled=not recrawl,
-			write_filepath=input_path,
-			ctx=ctx
-		)
-		# logger.debug(urls)
+		urls = run_urls.urls(uncrawled=not recrawl)
 
 	# exclude urls by pattern
 	if self.excluded_paths:
@@ -1001,7 +927,7 @@ def http_crawl(
 	if follow_redirect:
 		cmd += ' -fr'
 	results = []
-	endpoint_ids = []
+	stored_urls = []
 	try:
 		lines = list(stream_command(
 			cmd,
@@ -1041,53 +967,40 @@ def http_crawl(
 			if rt[-2:] == 'ms':
 				response_time = response_time / 1000
 
-		# Create Subdomain object in DB
+		# Save the host as an Asset
 		subdomain_name = get_subdomain_from_url(http_url)
-		subdomain, _ = save_subdomain(subdomain_name, ctx=ctx)
+		host_asset = save_host(subdomain_name, ctx=ctx)
 
-		if not subdomain:
+		if not host_asset:
 			continue
 
-		# Save default HTTP URL to endpoint object in DB
-		endpoint, created = save_endpoint(
-			http_url,
-			crawl=False,
-			ctx=ctx,
-			subdomain=subdomain,
-			is_default=is_ran_from_subdomain_scan
-		)
-		if not endpoint:
+		# Save the URL (the root one of a host when run from the discovery stage) in the run's URL file
+		stored_url, created = record_url(
+			run_urls, http_url, self.domain,
+			is_default=is_ran_from_subdomain_scan,
+			http_status=http_status, page_title=page_title, content_length=content_length)
+		if not stored_url:
 			continue
-		endpoint.http_status = http_status
-		endpoint.page_title = page_title
-		endpoint.content_length = content_length
-		endpoint.webserver = webserver
-		endpoint.response_time = response_time
-		endpoint.content_type = content_type
-		endpoint.save()
 		endpoint_str = f'{http_url} [{http_status}] `{content_length}B` `{webserver}` `{rt}`'
 		logger.warning(endpoint_str)
-		if endpoint and endpoint.is_alive and endpoint.http_status != 403:
+		if is_alive(http_status) and http_status != 403:
 			self.notify(
 				fields={'Alive endpoint': f'• {endpoint_str}'},
 				add_meta_info=False)
 
-		# Add endpoint to results
+		# Add URL to results
 		line['_cmd'] = cmd
 		line['final_url'] = http_url
-		line['endpoint_id'] = endpoint.id
+		line['endpoint_url'] = stored_url
 		line['endpoint_created'] = created
 		line['is_redirect'] = is_redirect
 		results.append(line)
 
 		# Add technology objects to DB
+		tech_objects = []
 		for technology in techs:
 			tech, _ = Technology.objects.get_or_create(name=technology)
-			endpoint.techs.add(tech)
-			if is_ran_from_subdomain_scan:
-				subdomain.technologies.add(tech)
-				subdomain.save()
-			endpoint.save()
+			tech_objects.append(tech)
 		techs_str = ', '.join([f'`{tech}`' for tech in techs])
 		self.notify(
 			fields={'Technologies': techs_str},
@@ -1098,7 +1011,7 @@ def http_crawl(
 		for ip_address in a_records:
 			ip, created = save_ip_address(
 				ip_address,
-				subdomain,
+				host_asset,
 				cdn=cdn)
 		ips_str = '• ' + '\n• '.join([f'`{ip}`' for ip in a_records])
 		self.notify(
@@ -1109,40 +1022,28 @@ def http_crawl(
 		if host:
 			ip, created = save_ip_address(
 				host,
-				subdomain,
+				host_asset,
 				cdn=cdn)
 			if ip:
 				self.notify(
 					fields={'IPs': f'• `{ip.address}`'},
 					add_meta_info=False)
 
-		# Save subdomain and endpoint
+		# Write the probe result on the host's Asset
 		if is_ran_from_subdomain_scan:
-			# save subdomain stuffs
-			subdomain.http_url = http_url
-			subdomain.http_status = http_status
-			subdomain.page_title = page_title
-			subdomain.content_length = content_length
-			subdomain.webserver = webserver
-			subdomain.response_time = response_time
-			subdomain.content_type = content_type
-			subdomain.cname = ','.join(cname)
-			subdomain.is_cdn = cdn
-			if cdn:
-				subdomain.cdn_name = line.get('cdn_name')
-			subdomain.save()
-			from limes.tasks import inventory
-			inventory.mirror_subdomain_state(subdomain, getattr(self.domain, 'project', None))
-		endpoint.save()
-		endpoint_ids.append(endpoint.id)
+			inventory.record_host_state(
+				project, subdomain_name, technologies=tech_objects,
+				http_status=http_status, page_title=page_title, webserver=webserver,
+				content_type=content_type, content_length=content_length, response_time=response_time,
+				cname=','.join(cname), is_cdn=cdn, cdn_name=line.get('cdn_name') if cdn else None)
+		stored_urls.append(stored_url)
 
 	if should_remove_duplicate_endpoints:
 		# Remove 'fake' alive endpoints that are just redirects to the same page
-		remove_duplicate_endpoints(
-			self.scan_id,
-			self.domain_id,
-			filter_ids=endpoint_ids
-		)
+		# (no URL answered: this looks at every URL of the run, as the endpoint filter always did)
+		removed = run_urls.prune_duplicates(only=set(stored_urls))
+		if removed:
+			logger.warning(f'Deleted {len(removed)} URLs with the same content_length or page_title as others')
 
 	# Remove input file
 	run_command(

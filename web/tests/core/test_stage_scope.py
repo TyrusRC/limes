@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from dashboard.models import Project
 from limes.celery_custom_task import LimesTask
+from limes.run_urls import RunUrls
 from limes.tasks import stages
 from scanEngine.models import EngineType
 from startScan.models import Asset, IpAddress, ScanHistory
@@ -33,6 +34,11 @@ class StageScopeTest(TestCase):
         p.start()
         self.addCleanup(p.stop)
 
+    def seed_urls(self, urls, default=True, status=200):
+        store = RunUrls(self.dir)
+        for url in urls:
+            store.record(url, is_default=default, http_status=status)
+
     def read(self, name):
         path = os.path.join(self.dir, name)
         return open(path).read().split() if os.path.exists(path) else None
@@ -43,9 +49,48 @@ class StageScopeTest(TestCase):
         self.assertEqual(self.read('input_subdomains_port_scan.txt'), ['own.x.com'])
         sc.assert_called_once()
 
+    def stamp(self, scan_id, *values):
+        from limes.tasks import inventory
+        for a in Asset.objects.filter(value__in=values):
+            inventory._append_source(a, 'discovery', f'scan:{scan_id}')
+            a.save()
+
+    def test_port_scan_hosts_default_to_the_hosts_of_this_scan_and_still_pass_the_guard(self):
+        self.stamp(self.scan.id, 'own.x.com', 'priv.x.com', 'dep.x.com', 'cb.x.com')
+        self.stamp(self.scan.id + 1, 'elsewhere.x.com')  # an asset another scan saw is not this scan's host
+        Asset.objects.create(project=self.p, kind='hostname', value='elsewhere.x.com', scope_tier='owned_host')
+        with mock.patch.object(stages, 'stream_command', return_value=iter([])):
+            stages.port_scan(ctx=dict(self.ctx))
+        self.assertEqual(self.read('input_subdomains_port_scan.txt'), ['own.x.com'])
+
+    def test_port_scan_without_hosts_in_the_run_scans_nothing(self):
+        with mock.patch.object(stages, 'stream_command') as sc:
+            stages.port_scan(ctx=dict(self.ctx))
+        sc.assert_not_called()
+
+    def test_fetch_url_starts_from_the_default_urls_of_the_run_only(self):
+        self.seed_urls(['https://own.x.com/'])
+        self.seed_urls(['https://own.x.com/deep'], default=False)
+        self.seed_urls(['https://own.x.com/down'], status=503)
+        with mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')), \
+                mock.patch.object(stages, 'stream_command', return_value=iter([])), \
+                mock.patch.object(stages, 'run_command'):
+            stages.fetch_url(ctx=dict(self.ctx))
+        self.assertEqual(self.read('input_endpoints_fetch_url.txt'), ['https://own.x.com/'])
+
+    def test_vulnerability_scan_takes_authorised_co_brand_but_never_candidates_or_rejected(self):
+        for value, tier in (('cand.x.com', 'candidate'), ('rej.x.com', 'rejected')):
+            a = Asset.objects.create(project=self.p, kind='hostname', value=value, scope_tier=tier)
+            a.ip_addresses.add(IpAddress.objects.create(address='9.9.9.9'))
+        self.seed_urls([f'https://{h}.x.com/' for h in ('own', 'cand', 'rej', 'cb', 'dep', 'priv')])
+        with mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
+                mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
+            stages.vulnerability_scan(ctx=dict(self.ctx))
+        self.assertEqual(self.read('vigil_targets.txt'), ['https://cb.x.com/', 'https://own.x.com/'])
+
     def test_port_scan_all_refused_never_falls_back(self):
         with mock.patch.object(stages, 'stream_command') as sc, \
-                mock.patch.object(stages, 'get_subdomains') as gs:
+                mock.patch.object(stages.inventory, 'run_hostnames') as gs:
             stages.port_scan(hosts=['priv.x.com', 'dep.x.com'], ctx=dict(self.ctx))
         sc.assert_not_called()
         gs.assert_not_called()
@@ -65,30 +110,27 @@ class StageScopeTest(TestCase):
         sc.assert_called_once()
 
     def test_vulnerability_scan_attack_level(self):
-        urls = ['https://own.x.com/', 'https://priv.x.com/', 'https://dep.x.com/', 'https://cb.x.com/']
-        with mock.patch.object(stages, 'get_http_urls', return_value=urls), \
-                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
+        self.seed_urls(['https://own.x.com/', 'https://priv.x.com/', 'https://dep.x.com/', 'https://cb.x.com/'])
+        with mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')) as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))
-        self.assertEqual(self.read('vigil_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
+        self.assertEqual(self.read('vigil_targets.txt'), ['https://cb.x.com/', 'https://own.x.com/'])
         run.assert_called_once()
 
     def test_vulnerability_scan_that_assessed_nothing_says_so(self):
         # recorded on the SUCCESS activity, so scoring never takes this scan as a baseline
         from limes.definitions import NOTHING_ASSESSED
-        with mock.patch.object(stages, 'get_http_urls', return_value=[]):
-            stages.vulnerability_scan(ctx=dict(self.ctx))
+        stages.vulnerability_scan(ctx=dict(self.ctx))  # the run has no alive URL
         self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
-        with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
+        self.seed_urls(['https://own.x.com/'])
+        with mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
             stages.vulnerability_scan(ctx=dict(self.ctx))  # vigil wrote no report
         self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
 
     def test_screenshot_contact_level(self):
-        urls = ['https://own.x.com/', 'https://priv.x.com/']
-        with mock.patch.object(stages, 'get_http_urls', return_value=urls), \
-                mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
+        self.seed_urls(['https://own.x.com/', 'https://priv.x.com/'])
+        with mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
             stages.screenshot(ctx=dict(self.ctx))
         self.assertEqual(self.read('endpoints_alive.txt'), ['https://own.x.com/'])
 
@@ -131,9 +173,9 @@ class StageScopeTest(TestCase):
         calls = []
         patches = {
             'send_scan_notif': mock.patch.object(control, 'send_scan_notif'),
-            'save_imported_subdomains': mock.patch.object(control, 'save_imported_subdomains'),
-            'save_subdomain': mock.patch.object(control, 'save_subdomain', return_value=(mock.MagicMock(), True)),
-            'save_endpoint': mock.patch.object(control, 'save_endpoint', side_effect=lambda *a, **k: calls.append('probe') or (None, False)),
+            'save_imported_hosts': mock.patch.object(control, 'save_imported_hosts'),
+            'save_host': mock.patch.object(control, 'save_host'),
+            'probe_url': mock.patch.object(control, 'probe_url', side_effect=lambda *a, **k: calls.append('probe') or (None, False)),
             'resolve_domain': mock.patch.object(control.resolution, 'resolve_domain', side_effect=lambda *a, **k: calls.append('resolve' if k.get('root_only') else 'resolve-all') or 0),
             'build_workflow': mock.patch.object(control, 'build_workflow', return_value=mock.MagicMock(tasks=[])),
             'chain': mock.patch.object(control, 'chain'),
@@ -159,8 +201,8 @@ class StageScopeTest(TestCase):
 
     def test_unexpected_tool_blocks_the_scan(self):
         from limes.integrations import vigil
-        with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.vigil, 'prepare', side_effect=vigil.VigilError('sqlmap')), \
+        self.seed_urls(['https://own.x.com/'])
+        with mock.patch.object(stages.vigil, 'prepare', side_effect=vigil.VigilError('sqlmap')), \
                 mock.patch.object(stages.commands, 'run') as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))  # LimesTask records the failure
         self.assertIn('VigilError', stages.vulnerability_scan.error)
@@ -168,8 +210,8 @@ class StageScopeTest(TestCase):
 
     def test_scan_runs_with_resolved_binary_and_restricted_env(self):
         env = {'PATH': '/opt/limes/vigil-bin'}
-        with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', env)), \
+        self.seed_urls(['https://own.x.com/'])
+        with mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', env)), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')) as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))
         self.assertEqual(run.call_args.args[0][0], '/usr/bin/vigil')

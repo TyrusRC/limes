@@ -4,7 +4,7 @@ from django.utils import timezone
 from dashboard.models import Project
 from limes.tasks.persistence import save_vulnerability
 from scanEngine.models import EngineType
-from startScan.models import Asset, ScanHistory, Subdomain, Vulnerability
+from startScan.models import Asset, ScanHistory, Vulnerability
 from targetApp.models import Domain
 
 
@@ -23,9 +23,8 @@ class LinkTest(TestCase):
         save_vulnerability(scan_history=self.scan, name=f'n{Vulnerability.objects.count()}', severity=3, **kw)
         return Vulnerability.objects.latest('id')
 
-    def test_links_by_subdomain_then_url(self):
-        sub = Subdomain.objects.create(scan_history=self.scan, target_domain=self.domain, name='app.x.com')
-        self.assertEqual(self.save(subdomain=sub, http_url='https://other.x.com/').asset, self.host)
+    def test_links_by_the_host_of_the_url(self):
+        self.assertEqual(self.save(http_url='https://app.x.com/').asset, self.host)
         self.assertEqual(self.save(http_url='https://APP.x.com.:8443/login').asset, self.host)
         self.assertEqual(self.save(http_url='x.com/path').asset, self.root)
 
@@ -33,3 +32,17 @@ class LinkTest(TestCase):
         self.assertIsNone(self.save(http_url='https://api.x.com/').asset)  # only the other project has it
         self.assertIsNone(self.save(http_url='https://unknown.x.com/').asset)
         self.assertIsNone(self.save().asset)
+
+    def test_tags_cwes_and_references_are_kept_as_lists_without_duplicates(self):
+        v = self.save(http_url='https://app.x.com/', tags=['xss', 'xss', 'cve'], cwe_ids=['CWE-79', ''],
+                      references=['https://r/1', 'https://r/1', 'https://r/2'], cve_ids=['CVE-2024-1'])
+        self.assertEqual((v.tag_names, v.cwe_names, v.reference_urls), (['xss', 'cve'], ['CWE-79'], ['https://r/1', 'https://r/2']))
+        self.assertEqual([c.name for c in v.cve_ids.all()], ['CVE-2024-1'])
+
+    def test_saving_the_same_finding_again_merges_its_lists_and_is_not_a_new_row(self):
+        kw = dict(name='same', severity=3, http_url='https://app.x.com/')
+        first, created = save_vulnerability(scan_history=self.scan, tags=['a'], **kw)
+        again, created_again = save_vulnerability(scan_history=self.scan, tags=['a', 'b'], references=['https://r'], **kw)
+        self.assertEqual((first.id, created, created_again), (again.id, True, False))
+        again.refresh_from_db()
+        self.assertEqual((again.tag_names, again.reference_urls), (['a', 'b'], ['https://r']))

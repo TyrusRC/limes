@@ -2,7 +2,7 @@ from limes.tasks.base import *
 from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks import resolution
 from limes.tasks.notifications import send_scan_notif
-from limes.tasks.persistence import save_endpoint, save_imported_subdomains, save_subdomain
+from limes.tasks.persistence import probe_url, save_host, save_imported_hosts
 from limes.tasks.stages import code_audit, fetch_url, passive_intel, port_scan, risk_checks, screenshot, subdomain_discovery, vulnerability_scan
 
 #------------#
@@ -150,40 +150,19 @@ def initiate_scan(
 			status=CELERY_TASK_STATUS_MAP[scan.scan_status])
 
 		# Save imported subdomains in DB
-		save_imported_subdomains(imported_subdomains, ctx=ctx)
+		save_imported_hosts(imported_subdomains, ctx=ctx)
 
-		# Create initial subdomain in DB: make a copy of domain as a subdomain so
-		# that other tasks using subdomains can use it.
-		subdomain_name = domain.name
-		subdomain, _ = save_subdomain(subdomain_name, ctx=ctx)
+		# Save the root as a host too, so that the stages that start from the hosts of the run include it
+		save_host(domain.name, ctx=ctx)
 
-		# If enable_http_crawl is set, create an initial root HTTP endpoint so that
-		# HTTP crawling can start somewhere
+		# If enable_http_crawl is set, probe the root URL so that HTTP crawling can start somewhere
 		# Resolve first: the contact guard refuses unresolved hosts, so the root probe needs it.
 		# Root only: this runs under the short orchestration time limit; discovery resolves the rest.
 		resolution.resolve_domain(domain, scan.results_dir, root_only=True)
 		http_url = f'{domain.name}{starting_point_path}' if starting_point_path else domain.name
-		endpoint, _ = save_endpoint(
-			http_url,
-			ctx=ctx,
-			crawl=enable_http_crawl,
-			is_default=True,
-			subdomain=subdomain
-		)
-		if endpoint and endpoint.is_alive:
-			# TODO: add `root_endpoint` property to subdomain and simply do
-			# subdomain.root_endpoint = endpoint instead
-			logger.warning(f'Found subdomain root HTTP URL {endpoint.http_url}')
-			subdomain.http_url = endpoint.http_url
-			subdomain.http_status = endpoint.http_status
-			subdomain.response_time = endpoint.response_time
-			subdomain.page_title = endpoint.page_title
-			subdomain.content_type = endpoint.content_type
-			subdomain.content_length = endpoint.content_length
-			for tech in endpoint.techs.all():
-				subdomain.technologies.add(tech)
-			subdomain.save()
-
+		url, _ = probe_url(http_url, ctx, crawl=enable_http_crawl, is_default=True)
+		if url:
+			logger.warning(f'Found subdomain root HTTP URL {url}')
 
 		# Build Celery tasks, crafted according to the dependency graph below:
 		# subdomain_discovery --> port_scan --> fetch_url --> vulnerability_scan (vigil DAST)

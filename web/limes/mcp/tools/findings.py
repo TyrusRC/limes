@@ -72,7 +72,8 @@ def get_vulnerability(caller, project: Slug, vulnerability_id: RowId):
     if v is None:
         raise McpError('not_found', 'vulnerability not found')
     secrets = domain_secrets(v.scan_history.domain)
-    names = lambda qs, f='name': [untrusted(getattr(x, f)) for x in qs.all().order_by('id')[:NAME_LIST_CAP]]
+    names = lambda qs: [untrusted(x.name) for x in qs.all().order_by('id')[:NAME_LIST_CAP]]
+    plain = lambda values: [untrusted(x) for x in (values or [])[:NAME_LIST_CAP]]
     return {
         'id': v.id, 'name': untrusted(v.name), 'severity': v.severity, 'source': v.source and untrusted(v.source),
         'template_id': untrusted(v.template_id), 'http_url': _url(v.http_url), 'asset_id': v.asset_id,
@@ -83,8 +84,8 @@ def get_vulnerability(caller, project: Slug, vulnerability_id: RowId):
         'curl_command': _redacted(v.curl_command, secrets, 2000), 'request': _redacted(v.request, secrets),
         'response': _redacted(v.response, secrets),
         'extracted_results': [_redacted(r, secrets, 2000) for r in (v.extracted_results or [])[:EXTRACTED_CAP]],
-        'cve_ids': names(v.cve_ids), 'cwe_ids': names(v.cwe_ids), 'tags': names(v.tags),
-        'references': names(v.references, 'url')}
+        'cve_ids': names(v.cve_ids), 'cwe_ids': plain(v.cwe_names), 'tags': plain(v.tag_names),
+        'references': plain(v.reference_urls)}
 
 
 @tool(title='Search')
