@@ -37,11 +37,14 @@
   if (revoke) revoke.addEventListener('click', function () {
     LimesUx.post('/api/action/issue/revoke/', {project: project, issue_id: issueId}).then(function (d) { done(d, 'Revoked.'); }).catch(fail);
   });
-  var note = document.getElementById('rd_note_form');
-  if (note) note.addEventListener('submit', function (e) {
+  var ign = document.getElementById('rd_ignore_form');
+  if (ign) ign.addEventListener('submit', function (e) {
     e.preventDefault();
-    var box = document.getElementById('rd_note_text');
-    LimesUx.post('/api/issue/notes/', {project: project, issue_id: issueId, text: box.value}).then(function (d) { done(d, 'Note added.'); }).catch(fail);
+    LimesUx.post('/api/action/issue/ignore/', {project: project, issue_id: issueId, reason: document.getElementById('rd_ignore_reason').value}).then(function (d) { done(d, 'Ignored.'); }).catch(fail);
+  });
+  var unign = document.getElementById('rd_unignore');
+  if (unign) unign.addEventListener('click', function () {
+    LimesUx.post('/api/action/issue/unignore/', {project: project, issue_id: issueId}).then(function (d) { done(d, 'Active again.'); }).catch(fail);
   });
   // Scanner evidence for a finding, from the same project-scoped endpoint the API serves; scanner output only ever becomes textContent.
   var evBox = document.getElementById('rd_evidence');

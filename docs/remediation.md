@@ -57,3 +57,21 @@ need the modify-targets permission and the CSRF token.
 
 MCP read tools: `list_remediation_requests`, `get_remediation_request` (titles, messages and notes are wrapped as
 untrusted text).
+
+## Notes
+
+Plain-text notes (2000 characters, escaped everywhere) can be left on a remediation request, a waiver (Waivers page,
+Notes link) and an issue. They are append-only: no edit, and only the author can delete their own. Notes older than
+this feature (issue notes, request messages) show in the same timeline, read-only. A new note raises one project
+in-app notification naming the assignee, requester, waiver owner or approver (never the note text). Each user may add
+30 notes an hour (shared cache counter; it fails closed when the cache is down).
+
+- REST: `GET /api/notes/?project=&type=request|waiver|issue&id=`, `POST /api/notes/create/` (`project,type,id,body`),
+  `POST /api/notes/delete/` (`project,note_id`). Another project's ids are 404.
+- MCP: `list_notes(project, target_type, target_id)`, text wrapped as untrusted.
+
+## Ignoring a finding
+
+On a vulnerability finding's detail page, Ignore (with a reason) hides it from the Issues list and its counts; the
+Ignored chip lists them and Mark as active reverses it. Ignoring never changes the score; waive the issue for that.
+Checks cannot be ignored, only waived.

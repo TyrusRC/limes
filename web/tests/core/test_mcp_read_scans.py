@@ -343,6 +343,10 @@ class HostileTextTests(ScansBase):
                     args['query'] = 'ignore'
                 elif p.name == 'issue_ids':
                     args['issue_ids'] = [ids['issue_id']]
+                elif p.name == 'target_type':
+                    args['target_type'] = 'issue'
+                elif p.name == 'target_id':
+                    args['target_id'] = ids['issue_id']
                 elif p.name.endswith('_id'):
                     args[p.name] = ids[p.name]
                 elif p.default is inspect.Parameter.empty:

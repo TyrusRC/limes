@@ -1,0 +1,28 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}Waiver{% endblock title %}
+{% block page_title %}Waiver{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item"><a href="{% url 'waivers_page' current_project.slug %}">Waivers</a></li>
+<li class="breadcrumb-item active" aria-current="page">Waiver</li>
+{% endblock breadcrumb_title %}
+{% block custom_js_css_link %}<link rel="stylesheet" href="{% static 'limes/remediation.css' %}">{% endblock custom_js_css_link %}
+
+{% block main_content %}
+{% with can_write=user|can:'modify_targets' %}
+<div class="lx-detail">
+  <div class="lx-col">
+    <section class="card lx-block" aria-labelledby="wd_h">
+      <h3 id="wd_h">{% if w.issue_id %}<a href="{% url 'issue_detail' current_project.slug w.issue_id %}">{{ w.key }}</a>{% else %}<span class="mono">{{ w.key }}</span>{% endif %}</h3>
+      <p>{% if w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %}, {{ w.state }}. {% if w.scope == 'all' %}All assets, future included.{% else %}{{ w.asset }}{% endif %}</p>
+      <p class="rm-text">{{ w.reason }}</p>
+      <p class="l-hint mb-0">Set by {{ w.created_by|default:"unknown" }}{% if w.approver %}, approver {{ w.approver }}{% endif %}. Expires {% if w.expires_at %}{{ w.expires_at|date:'Y-m-d' }}{% else %}never{% endif %}.</p>
+    </section>
+  </div>
+  <aside class="lx-col" aria-label="Notes">
+    {% include 'remediation/_notes.html' with note_type='waiver' note_id=w.id %}
+  </aside>
+</div>
+{% endwith %}
+{% endblock main_content %}

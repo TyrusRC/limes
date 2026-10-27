@@ -45,7 +45,7 @@ class ScopingTests(McpBase):
     def test_every_id_parameter_is_swept(self):
         found = {p for spec in registry.REGISTRY.values() for p in inspect.signature(spec.raw).parameters
                  if p.endswith('_id') or p.endswith('_ids')}
-        self.assertEqual(found - set(ID_PARAMS), {'issue_ids', 'asset_ids'}, 'a new id parameter needs a sweep case')  # asset_ids: tag_assets, swept in test_mcp_tags
+        self.assertEqual(found - set(ID_PARAMS), {'issue_ids', 'asset_ids', 'target_id'}, 'a new id parameter needs a sweep case')  # asset_ids: tag_assets, swept in test_mcp_tags; target_id: list_notes, swept in test_notes
         a = {**self.ids}
         mine = self.call('forecast_score', project='p1', issue_ids=[a['issue_id']])
         gone = self.call('forecast_score', project='p1', issue_ids=[10**9])

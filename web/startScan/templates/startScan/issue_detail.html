@@ -171,25 +171,23 @@
     </section>
     {% endif %}
 
-    <section class="card lx-block" aria-labelledby="rd_notes">
-      <h3 id="rd_notes">Notes <span class="l-muted">{{ d.notes|length }}</span></h3>
-      <ul class="l-notes">
-        {% for n in d.notes %}
-        <li class="l-note">
-          <span class="l-note-avatar" aria-hidden="true">{{ n.author.username|default:"?"|slice:":2"|upper }}</span>
-          <div class="l-note-bubble"><div class="l-note-meta"><strong>{{ n.author.username|default:"unknown" }}</strong><span>{{ n.created_at|date:'Y-m-d H:i' }}</span></div>
-          <div class="l-note-text">{{ n.text }}</div></div>
-        </li>
-        {% empty %}<li class="l-hint">No notes yet.</li>{% endfor %}
-      </ul>
-      {% if can_write %}
-      <form class="l-field" id="rd_note_form" novalidate>
-        <label for="rd_note_text">Add a note</label>
-        <textarea id="rd_note_text" class="form-control" rows="3" maxlength="5000" placeholder="Context for your team. Visible to everyone on this project."></textarea>
-        <div class="l-form-actions"><button class="btn btn-light" type="submit"><i class="fe-message-square" aria-hidden="true"></i>Add note</button></div>
+    {% if issue.source == 'finding' and issue.status == 'open' %}
+    <section class="card lx-block" aria-labelledby="rd_ignore_h">
+      <h3 id="rd_ignore_h">Ignore</h3>
+      {% if issue.ignored_at %}
+      <p class="l-hint">Ignored on {{ issue.ignored_at|date:'Y-m-d' }}{% if issue.ignored_by %} by {{ issue.ignored_by.username }}{% endif %}: <span class="rm-text">{{ issue.ignored_reason }}</span> It is hidden from the Issues list and its counts, and still counts toward the score. Waive it to remove it from the score.</p>
+      {% if can_write %}<button type="button" class="btn btn-light" id="rd_unignore">Mark as active</button>{% endif %}
+      {% elif can_write %}
+      <p class="l-hint">Hide this finding from the Issues list and its counts. The score does not change; waive it for that.</p>
+      <form class="l-field" id="rd_ignore_form" novalidate>
+        <label for="rd_ignore_reason">Reason</label>
+        <input id="rd_ignore_reason" class="form-control" maxlength="300">
+        <div class="l-form-actions"><button class="btn btn-light" type="submit">Ignore</button></div>
       </form>
       {% endif %}
     </section>
+    {% endif %}
+    {% include 'remediation/_notes.html' with note_type='issue' note_id=issue.id %}
   </aside>
 </div>
 {% endwith %}

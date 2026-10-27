@@ -3,6 +3,7 @@ from django.shortcuts import render
 
 from dashboard.models import Project
 from limes import risk_detail
+from remediation import notes
 from startScan.models import TrackedIssue
 
 
@@ -12,4 +13,5 @@ def issue_detail(request, slug, issue_id):
     issue = TrackedIssue.objects.filter(id=issue_id, project=project).select_related('asset', 'project').first() if project else None
     if issue is None:
         raise Http404('issue not found')
-    return render(request, 'startScan/issue_detail.html', {'issues_active': 'active', 'd': risk_detail.build(issue)})
+    return render(request, 'startScan/issue_detail.html', {'issues_active': 'active', 'd': risk_detail.build(issue),
+                                                              'notes': notes.timeline(project, 'issue', issue.pk, request.user)})

@@ -1,0 +1,23 @@
+{% load static %}
+{% comment %}Notes timeline. Needs: notes, note_type (request|waiver|issue), note_id, can_write, current_project. Text is escaped, never marked safe.{% endcomment %}
+<section class="card lx-block" aria-labelledby="nt_h" id="nt" data-project="{{ current_project.slug }}" data-type="{{ note_type }}" data-id="{{ note_id }}">
+  <h3 id="nt_h">Notes <span class="l-muted">{{ notes|length }}</span></h3>
+  <ul class="l-notes">
+    {% for n in notes %}
+    <li class="l-note">
+      <span class="l-note-avatar" aria-hidden="true">{{ n.author|default:"?"|slice:":2"|upper }}</span>
+      <div class="l-note-bubble"><div class="l-note-meta"><strong>{{ n.author|default:"unknown" }}</strong><span>{{ n.created_at|date:'Y-m-d H:i' }}</span>
+        {% if n.mine %}<button type="button" class="btn btn-sm btn-link" data-note-delete="{{ n.id }}">Delete</button>{% endif %}</div>
+      <div class="l-note-text rm-text">{{ n.body }}</div></div>
+    </li>
+    {% empty %}<li class="l-hint">No notes yet.</li>{% endfor %}
+  </ul>
+  {% if can_write %}
+  <form class="l-field" id="nt_form" novalidate>
+    <label for="nt_text">Add a note</label>
+    <textarea id="nt_text" class="form-control" rows="3" maxlength="2000" placeholder="Plain text, up to 2000 characters. Visible to everyone on this project; it cannot be edited, only deleted by you."></textarea>
+    <div class="l-form-actions"><button class="btn btn-light" type="submit"><i class="fe-message-square" aria-hidden="true"></i>Add note</button></div>
+  </form>
+  {% endif %}
+</section>
+<script src="{% static 'limes/notes.js' %}"></script>

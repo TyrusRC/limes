@@ -51,3 +51,17 @@ class RemediationEvent(models.Model):
     text = models.CharField(max_length=300)
     actor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     created_at = models.DateTimeField(default=timezone.now)
+
+
+class Note(models.Model):
+    """A collaboration note on a remediation request, a waiver or an issue. Plain text, append-only (no edit; the
+    author may delete their own). target_id is checked against the project in remediation.notes, not by a foreign key."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='+')
+    target_type = models.CharField(max_length=10)  # request | waiver | issue
+    target_id = models.BigIntegerField()
+    author = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    body = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=['project', 'target_type', 'target_id', 'created_at'], name='note_target_idx')]

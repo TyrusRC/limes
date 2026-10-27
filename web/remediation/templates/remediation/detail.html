@@ -66,23 +66,7 @@
       <ul>{% for a in req.external_emails %}<li class="mono">{{ a }}</li>{% endfor %}</ul>
       <p class="l-hint mb-0">{% if req.email_status %}Email: {{ req.email_status }}.{% endif %}</p></section>
     {% endif %}
-    <section class="card lx-block" aria-labelledby="rm_notes">
-      <h3 id="rm_notes">Messages <span class="l-muted">{{ messages_|length }}</span></h3>
-      <ul class="l-notes rm-thread">
-        {% for m in messages_ %}
-        <li class="l-note"><span class="l-note-avatar" aria-hidden="true">{{ m.author.username|default:"?"|slice:":2"|upper }}</span>
-          <div class="l-note-bubble"><div class="l-note-meta"><strong>{{ m.author.username|default:"unknown" }}</strong><span>{{ m.created_at|date:'Y-m-d H:i' }}</span></div>
-          <div class="l-note-text rm-text">{{ m.text }}</div></div></li>
-        {% empty %}<li class="l-hint">No messages yet.</li>{% endfor %}
-      </ul>
-      {% if can_write %}
-      <form class="l-field" id="rm_msg_form" novalidate>
-        <label for="rm_msg_text">Add a message</label>
-        <textarea id="rm_msg_text" class="form-control" rows="3" maxlength="5000"></textarea>
-        <div class="l-form-actions"><button class="btn btn-light" type="submit"><i class="fe-message-square" aria-hidden="true"></i>Send</button></div>
-      </form>
-      {% endif %}
-    </section>
+    {% include 'remediation/_notes.html' with note_type='request' note_id=req.id %}
   </aside>
 </div>
 {% endwith %}

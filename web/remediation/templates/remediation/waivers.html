@@ -22,7 +22,7 @@
       <tbody>
       {% for w in rows %}
         <tr>
-          <td>{% if w.issue_id %}<a href="{% url 'issue_detail' current_project.slug w.issue_id %}">{{ w.key }}</a><div class="mono l-hint">{{ w.asset }}</div>{% else %}<span class="mono">{{ w.key }}</span>{% endif %}</td>
+          <td>{% if w.issue_id %}<a href="{% url 'issue_detail' current_project.slug w.issue_id %}">{{ w.key }}</a><div class="mono l-hint">{{ w.asset }}</div>{% else %}<span class="mono">{{ w.key }}</span>{% endif %}<div><a class="l-hint" href="{% url 'waiver_detail' current_project.slug w.id %}">Notes</a></div></td>
           <td>{% if w.scope == 'all' %}All assets, future included{% else %}This asset{% endif %}</td>
           <td>{% if w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %}</td>
           <td class="lx-hide-sm rm-text">{{ w.reason }}<div class="l-hint">{% if w.shared %}Shared{% else %}Internal only{% endif %}</div></td>
