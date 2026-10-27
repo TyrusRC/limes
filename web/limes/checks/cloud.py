@@ -77,6 +77,8 @@ def evaluate(probes, complete):
                  for p in hits[:MAX_LISTED]]
         return Result(CHECK, 'fail', {'buckets': shown, 'count': len(hits)})
     errors = sum(1 for p in probes if p['status'] == 'error')
+    if not any(isinstance(p['status'], int) for p in probes):  # nothing answered: no evidence either way
+        return Result(CHECK, 'error', {'reason': 'no request succeeded', 'tested': len(probes)})
     if not complete:
         return Result(CHECK, 'error', {'reason': 'sweep cut short', 'tested': len(probes)})
     if probes and errors * 2 > len(probes):

@@ -25,7 +25,7 @@ from startScan.models import RiskCheck
 log = logging.getLogger(__name__)
 
 PROVIDER = 'cloud_storage'
-# NOTE: a daily ceiling on probe GETs over all projects, plus a 0.25 s spacing between them. Upgrade path: a setting,
+# NOTE: a daily ceiling on probe GETs over all projects (a quarter each, ratelimit.take_shared), plus a 0.25 s spacing between them. Upgrade path: a setting,
 # or a per-project budget.
 DAILY_BUDGET = 2000
 INTERVAL = 0.25
@@ -34,6 +34,7 @@ BODY_CAP = 1024 * 1024
 TIMEOUT = 5
 ROOT_SECONDS = 120  # total wall clock for one root's sweep
 REFRESH = timedelta(hours=20)  # a root already swept inside this window is left alone
+ERROR_RETRY = timedelta(hours=6)  # an unfinished or failed sweep is retried no sooner than this
 
 
 class Stop(Exception):
@@ -49,10 +50,10 @@ def _read(resp):
     return buf
 
 
-def probe(get, provider, name, target, ua, sleep, clock=time.time):
+def probe(get, provider, name, target, ua, sleep, project_id=0, clock=time.time):
     """{'provider', 'name', 'status', 'objects'} for one GET. status: an int, None (no such host) or 'error'."""
     out = {'provider': provider, 'name': name, 'status': 'error', 'objects': None}
-    if not ratelimit.take_daily(PROVIDER, DAILY_BUDGET):
+    if not ratelimit.take_shared(PROVIDER, DAILY_BUDGET, project_id):
         raise Stop('budget')
     wait = ratelimit.reserve(PROVIDER, INTERVAL, clock())
     if wait is None or wait > MAX_WAIT:
@@ -69,8 +70,8 @@ def probe(get, provider, name, target, ua, sleep, clock=time.time):
             resp.close()
     except SoftTimeLimitExceeded:
         raise
-    except requests.exceptions.ConnectionError:
-        out['status'] = None  # the host does not exist or was refused: nothing there
+    except safe_fetch.NoSuchHost:
+        out['status'] = None  # NXDOMAIN: no such account. Every other failure (outage, TLS, timeout) stays 'error'
     except (requests.exceptions.RequestException, OSError, TimeoutError, ValueError):
         out['status'] = 'error'
     return out
@@ -88,7 +89,7 @@ def sweep_root(root, now, get, ua, sleep=time.sleep):
                     continue
                 if time.monotonic() > deadline:
                     raise Stop('time')
-                probes.append(probe(get, provider, name, target, ua, sleep))
+                probes.append(probe(get, provider, name, target, ua, sleep, root.project_id))
     except Stop as e:
         complete = False
         log.warning('cloud storage: sweep of a root stopped early (%s)', e)
@@ -99,7 +100,7 @@ def sweep_root(root, now, get, ua, sleep=time.sleep):
 
 def _due(root, now):
     row = RiskCheck.objects.filter(asset=root, check_id=cloud.CHECK).first()
-    return row is None or now - row.last_checked >= REFRESH or row.status == 'error'
+    return row is None or now - row.last_checked >= (ERROR_RETRY if row.status == 'error' else REFRESH)
 
 
 def discover(project, root, now=None, make_get=None, sleep=time.sleep):

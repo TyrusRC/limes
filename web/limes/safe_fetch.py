@@ -132,6 +132,9 @@ def _pools(deadline):
     return {'http': PlainPool, 'https': SecurePool}
 
 
+NOT_RESOLVED = 'does not resolve'
+
+
 def _address_class(value):
     ip = scope.parse_ip(value)
     if ip is None:
@@ -171,7 +174,7 @@ def resolve_vetted(host, resolve=collect._resolve):
             return None, f'DNS lookup failed for {name} ({rdtype})'
         found += got
     if not found:
-        return None, f'{name} does not resolve'
+        return None, f'{name} {NOT_RESOLVED}'
     bad = sorted({_address_class(a) for a in found if scope.is_reserved_ip(a)})
     if bad:  # the class only: the internal address itself is not repeated into stored reasons
         return None, f'{name} resolves to a {" / ".join(bad)} address'
@@ -280,6 +283,14 @@ def pinned_tls_connect(ip, create_connection=socket.create_connection, context_f
     return connect
 
 
+class NoSuchHost(requests.exceptions.ConnectionError):
+    """The name has no DNS answer at all: no such bucket, account or site."""
+
+
+class Refused(requests.exceptions.RequestException):
+    """The host was not contacted (DNS failed, or the answer was not public): unknown, never 'nothing there'."""
+
+
 LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
 
 
@@ -296,7 +307,7 @@ def allowlisted_get(exact=(), suffixes=(), resolve=collect._resolve, session_fac
     """A requests.get stand-in for third-party provider hosts (not scan targets): https on 443 only, and only a host
     that host_allowed() accepts. Each call resolves and vets the host, then pins that one request to the vetted IP
     (pinned_get), so redirects are never followed and a name that resolves to a private address is not contacted.
-    A refused or unresolvable host raises ConnectionError, which callers read as 'nothing there'."""
+    A name that definitely does not exist raises NoSuchHost; a lookup failure or a non-public answer raises Refused."""
     def get(url, **kw):
         bad = requests.exceptions.InvalidURL('refusing a URL that is not on an allowed host')
         if not url or '\\' in url:
@@ -312,7 +323,7 @@ def allowlisted_get(exact=(), suffixes=(), resolve=collect._resolve, session_fac
             raise bad
         ip, reason = resolve_vetted(host, resolve=resolve)
         if reason:
-            raise requests.exceptions.ConnectionError('host refused')
+            raise (NoSuchHost if reason.endswith(NOT_RESOLVED) else Refused)('host refused')
         # one deadline per request unless the caller shares one: a long sweep must not run out a single host's budget
         return pinned_get(host, ip, session_factory=session_factory, deadline=deadline or Deadline())(url, **kw)
     return get

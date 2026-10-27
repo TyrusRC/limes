@@ -1,5 +1,6 @@
 from unittest import mock
 
+import dns.exception
 import requests
 from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
@@ -79,9 +80,9 @@ class AllowlistTest(SimpleTestCase):
         get('https://b.s3.amazonaws.com/', timeout=5, allow_redirects=True)
         self.assertEqual(len(session.requests), 1)
         self.assertIn(PUBLIC, session.requests[0][0])  # the request goes to the vetted IP
-        with self.assertRaises(requests.exceptions.ConnectionError):
-            get('https://evil.s3.amazonaws.com/')
-        with self.assertRaises(requests.exceptions.ConnectionError):
+        with self.assertRaises(safe_fetch.Refused):
+            get('https://evil.s3.amazonaws.com/')  # a private answer is refused, and that is not 'no such host'
+        with self.assertRaises(safe_fetch.NoSuchHost):
             get('https://nothere.s3.amazonaws.com/')  # does not resolve
         self.assertEqual(len(session.requests), 1)
 
@@ -127,7 +128,7 @@ class SweepTest(Base):
         self.assertTrue(all(u.startswith('https://') for u in self.fake.urls))
 
     def test_budget_is_failing_closed(self):
-        with mock.patch.object(cloud_storage, 'DAILY_BUDGET', 5):
+        with mock.patch.object(cloud_storage, 'DAILY_BUDGET', 20):  # a project's share is 5
             self.run_sweep()
         self.assertEqual(len(self.fake.urls), 5)
         self.assertEqual(self.row().status, 'error')  # an unfinished sweep is never a pass
@@ -153,7 +154,7 @@ class SweepTest(Base):
         n = len(self.fake.urls)
         self.run_sweep()
         self.assertEqual(len(self.fake.urls), n)
-        RiskCheck.objects.filter(check_id='cloud.open_storage').update(status='error')
+        RiskCheck.objects.filter(check_id='cloud.open_storage').update(status='error', last_checked=self.now - cloud_storage.ERROR_RETRY)
         self.run_sweep()
         self.assertEqual(len(self.fake.urls), 2 * n)
 
@@ -166,6 +167,53 @@ class SweepTest(Base):
             self.run_sweep()
         self.assertEqual(seen, [cloud_storage.BODY_CAP])
         self.assertEqual(self.row().evidence['buckets'][0]['objects'], cloud.MAX_COUNT)
+
+    def test_dns_outage_is_an_error_never_a_pass(self):
+        def broken(name, rdtype):
+            raise dns.exception.Timeout()
+        session = FakeSession()
+        mk = lambda: safe_fetch.allowlisted_get(cloud.ALLOW_EXACT, cloud.ALLOW_SUFFIX, resolve=broken,
+                                                session_factory=lambda: session)
+        cloud_storage.discover(self.p, self.root, self.now, make_get=mk, sleep=lambda s: None)
+        self.assertEqual(session.requests, [])
+        self.assertEqual(self.row().status, 'error')
+
+    def test_only_a_definite_no_such_host_counts_as_absent(self):
+        # every name is NXDOMAIN: definite answers, but nothing was actually reached -> error, not pass
+        mk = lambda: safe_fetch.allowlisted_get(cloud.ALLOW_EXACT, cloud.ALLOW_SUFFIX, resolve=stub({}),
+                                                session_factory=lambda: FakeSession())
+        cloud_storage.discover(self.p, self.root, self.now, make_get=mk, sleep=lambda s: None)
+        self.assertEqual(self.row().status, 'error')
+        for exc in (requests.exceptions.SSLError, requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
+            probe = cloud_storage.probe(mock.Mock(side_effect=exc('x')), 's3', 'x-com', 'https://x-com.s3.amazonaws.com/',
+                                        'ua', lambda s: None, self.p.id)
+            self.assertEqual(probe['status'], 'error', exc)
+        probe = cloud_storage.probe(mock.Mock(side_effect=safe_fetch.NoSuchHost('x')), 'azure', 'x-com',
+                                    'https://xcom.blob.core.windows.net/x-com', 'ua', lambda s: None, self.p.id)
+        self.assertIsNone(probe['status'])
+
+    def test_a_reachable_provider_with_absent_azure_accounts_passes(self):
+        def one(url, **kw):
+            if 'blob.core' in url:
+                raise safe_fetch.NoSuchHost('gone')
+            return Resp(404, b'')
+        cloud_storage.discover(self.p, self.root, self.now, make_get=lambda: one, sleep=lambda s: None)
+        self.assertEqual(self.row().status, 'pass')
+
+    def test_error_rows_wait_six_hours_and_a_project_has_a_quarter_of_the_budget(self):
+        self.fake.routes = {}
+        with mock.patch.object(cloud_storage, 'DAILY_BUDGET', 40):  # a project's share is 10
+            self.run_sweep()
+        self.assertEqual(len(self.fake.urls), 10)
+        self.assertEqual(self.row().status, 'error')
+        self.fake.urls.clear()
+        RiskCheck.objects.update(last_checked=self.now - cloud_storage.ERROR_RETRY / 2)
+        self.run_sweep()
+        self.assertEqual(self.fake.urls, [])
+        RiskCheck.objects.update(last_checked=self.now - cloud_storage.ERROR_RETRY)
+        cache.clear()
+        self.run_sweep()
+        self.assertNotEqual(self.fake.urls, [])
 
     def test_provisional(self):
         self.assertIn('cloud.open_storage', PROVISIONAL)
