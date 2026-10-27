@@ -79,8 +79,12 @@
       {% if d.provisional %}
         <p>This is a provisional check: it is listed and tracked but not scored, so fixing it does not change the score.</p>
       {% elif d.impact and d.impact.score is not None %}
+        {% if d.impact.delta %}
         <p class="lx-gain">{% if d.impact.delta > 0 %}+{% endif %}{{ d.impact.delta }}</p>
         <p>Fixing this on every affected asset moves the score to {{ d.impact.score }} (grade {{ d.impact.grade }}).</p>
+        {% else %}
+        <p>Fixing this on every affected asset would not change the score of {{ d.impact.score }} (grade {{ d.impact.grade }}).</p>
+        {% endif %}
       {% else %}
         <p>No score change to forecast: the issue is waived, fixed, or the project has no score yet.</p>
       {% endif %}

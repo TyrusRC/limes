@@ -81,6 +81,24 @@ class IssueApiTest(TestCase):
         self.assertEqual([r['id'] for r in self.list(waived='true')], [self.i1.id])
         self.assertEqual([r['id'] for r in self.list(waived='false')], [self.i2.id])
 
+    def test_rows_carry_category_and_kind_for_the_grouped_list(self):
+        rows = {r['id']: r for r in self.list()}
+        self.assertEqual((rows[self.i1.id]['category'], rows[self.i1.id]['category_label']), ('web', 'Website'))
+        self.assertEqual(rows[self.i2.id]['category'], 'vulnerabilities')  # a finding
+        self.assertEqual(rows[self.i1.id]['asset_kind'], 'hostname')
+
+    def test_grouped_list(self):
+        b = Asset.objects.create(project=self.p, kind='hostname', value='b.x.com', scope_tier='owned_host')
+        j = TrackedIssue.objects.create(project=self.p, asset=b, key='web.hsts_missing', source='check', severity=2)
+        groups = self.as_user(self.admin).get('/api/issues/', {'project': 'p1', 'group': '1'}).json()
+        self.assertEqual([g['key'] for g in groups], ['<script>x', 'web.hsts_missing'])
+        g = groups[1]
+        self.assertEqual((g['count'], g['status'], sorted(a['asset'] for a in g['assets'])), (2, 'open', ['a.x.com', 'b.x.com']))
+        self.assertEqual(g['id'], self.i1.id)  # the oldest row
+        self.assertIn(j.id, g['unwaived_ids'])
+        other = self.as_user(self.admin).get('/api/issues/', {'project': 'p2', 'group': '1'}).json()
+        self.assertEqual([x['count'] for x in other], [1])
+
     def test_waiver_inactive_exactly_at_expires_at(self):
         exp = timezone.now() + timedelta(days=3)
         IssueWaiver.objects.create(issue=self.i1, kind='accepted_risk', reason='r', created_by=self.admin, expires_at=exp)
@@ -253,23 +271,17 @@ class IssuePageTest(TestCase):
         self.assertEqual(r.status_code, 200)
         return r.content.decode()
 
-    def test_category_select_rendered(self):
+    def test_category_chips_rendered(self):
         html = self.page('sys_admin')
-        self.assertIn('id="f_category"', html)
-        from limes import scoring  # the hand-written options must not drift from the category model
-        block = re.search(r'<select[^>]*id="f_category".*?</select>', html, re.S).group(0)
-        options = re.findall(r'<option value="([^"]*)">([^<]*)</option>', block)
-        self.assertEqual(options, [('', 'All categories')] + [(k, scoring.CATEGORY_LABELS[k]) for k in scoring.CATEGORIES])
+        from limes import scoring  # the hand-written chips must not drift from the category model
+        chips = re.findall(r'data-k="category" data-v="([^"]*)"[^>]*>([^<]*)</button>', html)
+        self.assertEqual(chips, [(k, scoring.CATEGORY_LABELS[k]) for k in scoring.CATEGORIES])
 
-    def test_forms_follow_write_permission(self):
+    def test_list_page_has_no_write_forms(self):
+        """Waiving and notes live on the risk detail page (tests.core.test_issue_detail checks them per role)."""
         html = self.page('sys_admin')
-        for needle in ('id="issue_waive_form"', 'id="issue_note_form"', 'data-can-write="1"'):
-            self.assertIn(needle, html)
-        html = self.page('auditor')
-        for needle in ('id="issue_waive_form"', 'id="issue_note_form"', 'id="issue_waive"', 'id="issue_note_add"'):
+        for needle in ('id="issue_waive_form"', 'id="issue_note_form"'):
             self.assertNotIn(needle, html)
-        self.assertIn('data-can-write="0"', html)
-        self.assertIn('You can view issues but not change them.', html)
 
 
 class IssueEvidenceApiTest(IssueApiTest):

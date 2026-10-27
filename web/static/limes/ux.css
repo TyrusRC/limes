@@ -10,6 +10,7 @@
 /* two-column detail: reading column plus a side column for status, impact, notes */
 .lx-detail { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-5); align-items: start; }
 .lx-col { display: grid; gap: var(--space-5); min-width: 0; }
+.lx-col > .card { margin-bottom: 0; }
 .lx-block { padding: var(--space-5); display: grid; gap: var(--space-3); min-width: 0; }
 .lx-block > h3 { margin: 0; font-size: var(--text-md); }
 .lx-block p { margin: 0; max-width: 72ch; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -95,4 +96,28 @@
 @media (prefers-reduced-motion: reduce) {
   .lx-expander i, .lx-chip, .lx-tab { transition: none; }
   html { scroll-behavior: auto; }
+}
+.lx-title { color: var(--ink); font-weight: 500; }
+.lx-title:hover { color: var(--brand-ink); }
+.lx-issues > tbody > tr > td { vertical-align: top; }
+.lx-issues .l-hint { margin-top: 2px; }
+
+@media (max-width: 767.98px) {
+  .lx-hide-sm { display: none; }
+  .lx-filters { padding: var(--space-3) var(--space-4); }
+  .lx-chip-group { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .lx-chip-group > * { flex: none; }
+}
+@media (max-width: 767.98px) {  /* issue rows become stacked cards: no sideways scrolling */
+  .lx-issues { min-width: 0; }
+  .lx-issues thead { display: none; }
+  .lx-issues > tbody > tr:not(.lx-subrow) { display: grid; grid-template-columns: 36px 36px minmax(0, 1fr); padding: var(--space-3); border-bottom: 1px solid var(--border); }
+  .lx-issues > tbody > tr:not(.lx-subrow) > td { display: block; border: 0; padding: 2px 4px; width: auto; min-width: 0; background: transparent; }
+  .lx-issues > tbody > tr > td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .lx-issues > tbody > tr > td:nth-child(2) { grid-column: 2; grid-row: 1; }
+  .lx-issues > tbody > tr > td:nth-child(n+3) { grid-column: 3; }
+  .lx-issues > tbody > tr.l-selected { background: var(--brand-tint); }
+  .lx-issues .lx-subrow > td { display: block; }
+  .lx-issues .lx-subrow { display: block; }
+  .lx-issues .l-col-wider { min-width: 0; }
 }

@@ -400,11 +400,16 @@ class IssueList(APIView):
 			expired = last if not w and last and not last.revoked_at and last.expires_at and last.expires_at <= now else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
-						'source': i.source, 'provisional': i.source == 'check' and i.key in PROVISIONAL, 'severity': i.severity, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
+						'source': i.source, 'provisional': i.source == 'check' and i.key in PROVISIONAL, 'severity': i.severity,
+						'category': scoring.category_of(i.key), 'category_label': scoring.CATEGORY_LABELS.get(scoring.category_of(i.key)),
+						'asset_kind': i.asset.kind, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
 						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count,
 						'expired_waiver': _waiver_json(expired) if expired else None,
 						'cves': exploit.cve_rows(found, marks),
 						'kev': hit['kev'], 'epss': hit['epss']})
+		if q.get('group') == '1':  # the Issues page: one row per risk with its assets
+			from limes.issue_groups import group
+			return Response(group(out))
 		return Response(out)
 
 

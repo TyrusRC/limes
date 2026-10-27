@@ -1,6 +1,5 @@
 {% extends 'base/base.html' %}
 {% load static %}
-{% load permission_tags %}
 {% block title %}
 Issues
 {% endblock title %}
@@ -8,51 +7,38 @@ Issues
 {% block page_title %}Issues{% endblock page_title %}
 
 {% block main_content %}
-{% with can_write=user|can:'modify_targets' %}
+<div id="iss" data-project="{{ current_project.slug }}" data-detail="{% url 'issue_detail' current_project.slug 0 %}">
 <p class="l-page-sub" id="issue_score" aria-live="polite"></p>
 
 <section class="card" aria-label="Filters">
-  <div class="l-filter-bar">
-    <div class="l-field">
-      <label for="f_severity">Severity</label>
-      <select id="f_severity" class="form-select">
-        <option value="">All severities</option>
-        <option value="4">Critical</option><option value="3">High</option><option value="2">Medium</option><option value="1">Low</option>
-      </select>
+  <div class="lx-filters">
+    <div class="lx-chip-group" role="group" aria-labelledby="fl_sev"><span class="lx-chip-label" id="fl_sev">Severity</span>
+      <button type="button" class="lx-chip" data-k="severity" data-v="4" aria-pressed="false">Critical</button>
+      <button type="button" class="lx-chip" data-k="severity" data-v="3" aria-pressed="false">High</button>
+      <button type="button" class="lx-chip" data-k="severity" data-v="2" aria-pressed="false">Medium</button>
+      <button type="button" class="lx-chip" data-k="severity" data-v="1" aria-pressed="false">Low</button>
     </div>
-    <div class="l-field">
-      <label for="f_category">Category</label>
-      <select id="f_category" class="form-select">
-        <option value="">All categories</option>
-        <option value="web">Website</option><option value="tls">Encryption</option><option value="email">Email</option>
-        <option value="dns">DNS</option><option value="network">Network</option><option value="vulnerabilities">Vulnerabilities</option>
-        <option value="reputation">IP Reputation</option><option value="data_leakage">Data Leakage</option>
-      </select>
+    <div class="lx-chip-group" role="group" aria-labelledby="fl_cat"><span class="lx-chip-label" id="fl_cat">Category</span>
+      <button type="button" class="lx-chip" data-k="category" data-v="web" aria-pressed="false">Website</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="tls" aria-pressed="false">Encryption</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="email" aria-pressed="false">Email</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="dns" aria-pressed="false">DNS</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="network" aria-pressed="false">Network</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="vulnerabilities" aria-pressed="false">Vulnerabilities</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="reputation" aria-pressed="false">IP Reputation</button>
+      <button type="button" class="lx-chip" data-k="category" data-v="data_leakage" aria-pressed="false">Data Leakage</button>
     </div>
-    <div class="l-field">
-      <label for="f_source">Source</label>
-      <select id="f_source" class="form-select">
-        <option value="">Findings and checks</option>
-        <option value="finding">Findings only</option><option value="check">Checks only</option>
-      </select>
+    <div class="lx-chip-group" role="group" aria-labelledby="fl_status"><span class="lx-chip-label" id="fl_status">Status</span>
+      <button type="button" class="lx-chip" data-k="waived" data-v="false" aria-pressed="false">Open</button>
+      <button type="button" class="lx-chip" data-k="waived" data-v="true" aria-pressed="false">Waived</button>
+      <button type="button" class="lx-chip" data-k="kev" data-v="true" aria-pressed="false">Known exploited</button>
+      <button type="button" class="lx-chip" data-k="source" data-v="check" aria-pressed="false">Checks only</button>
+      <button type="button" class="lx-chip" data-k="source" data-v="finding" aria-pressed="false">Findings only</button>
     </div>
-    <div class="l-field">
-      <label for="f_kev">Exploitability</label>
-      <select id="f_kev" class="form-select">
-        <option value="">Any</option>
-        <option value="true">Known exploited</option>
-      </select>
-    </div>
-    <div class="l-field">
-      <label for="f_tag">Tag</label>
-      <input type="text" id="f_tag" class="form-control" placeholder="Any tag" maxlength="40" autocomplete="off">
-    </div>
-    <div class="l-field">
-      <label for="f_waived">Waiver status</label>
-      <select id="f_waived" class="form-select">
-        <option value="">Waived and not waived</option>
-        <option value="false">Not waived</option><option value="true">Waived</option>
-      </select>
+    <div class="lx-chip-group" role="group" aria-labelledby="fl_tag" id="tag_chips" hidden><span class="lx-chip-label" id="fl_tag">Tag</span></div>
+    <div class="d-flex flex-wrap align-items-end gap-3">
+      <div class="l-field"><label for="iss_q">Search this list</label><input type="search" id="iss_q" class="form-control" placeholder="Issue or asset" maxlength="100" autocomplete="off"></div>
+      <button type="button" class="btn btn-light" id="iss_clear" hidden>Clear filters</button>
     </div>
   </div>
 </section>
@@ -68,92 +54,28 @@ Issues
   </div>
 </div>
 
-<section class="card l-table-card" aria-label="Issue list">
-  <table id="issue_results" class="table table-hover w-100" data-project="{{ current_project.slug }}" data-can-write="{% if can_write %}1{% else %}0{% endif %}">
-    <thead>
-      <tr>
-        <th class="l-col-check"><input type="checkbox" class="form-check-input" id="issue_pick_all" aria-label="Select all issues on this page"></th>
-        <th>Asset</th><th>Issue</th><th>Severity</th><th>KEV</th><th>EPSS</th><th>Source</th><th>First seen</th><th>Status</th><th>Notes</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</section>
-<p class="l-muted small mt-2">CISA KEV (CC0) &middot; EPSS by FIRST.org / Empirical Security</p>
-
-<div class="modal fade" id="issue_modal" tabindex="-1" aria-labelledby="im_title" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-scrollable l-issue-dialog">
-    <div class="modal-content">
-      <div class="modal-header align-items-start">
-        <div class="l-modal-head">
-          <h2 class="modal-title" id="im_title"></h2>
-          <div class="l-meta-row">
-            <span id="im_sev"></span>
-            <span class="mono" id="im_asset"></span>
-            <span id="im_source"></span>
-            <span>First seen <span id="im_first"></span></span>
-          </div>
-          <div class="l-meta-row" id="im_cves" hidden></div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body l-issue-body">
-        <div class="l-issue-col">
-          <h3 class="l-section-title">Current waiver</h3>
-          <div id="im_waiver"></div>
-          {% if can_write %}
-          <hr class="l-divider">
-          <form class="l-issue-form" id="issue_waive_form" novalidate>
-            <h3 class="l-section-title" id="im_form_title">Waive</h3>
-            <div class="l-form-row">
-              <div class="l-field">
-                <label for="issue_kind">Kind</label>
-                <select id="issue_kind" class="form-select"><option value="accepted_risk">Accepted risk</option><option value="false_positive">False positive</option></select>
-              </div>
-              <div class="l-field">
-                <label for="issue_expiry">Expires on</label>
-                <input type="date" id="issue_expiry" class="form-control" aria-describedby="issue_expiry_hint">
-              </div>
-            </div>
-            <div class="l-field">
-              <label for="issue_reason">Reason</label>
-              <textarea id="issue_reason" class="form-control" rows="3" maxlength="5000" required placeholder="Why is this acceptable? Required."></textarea>
-              <span class="l-hint" id="issue_expiry_hint">Accepted risk needs an expiry within 12 months. A false positive stays open-ended unless you pick a date.</span>
-            </div>
-            <div class="l-form-actions">
-              <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancel</button>
-              <button class="btn btn-primary" type="submit" id="issue_waive">Save waiver</button>
-            </div>
-          </form>
-          {% else %}
-          <p class="l-hint mb-0">You can view issues but not change them.</p>
-          {% endif %}
-        </div>
-        <div class="l-issue-col l-issue-evidence" id="im_evidence_box" hidden>
-          <h3 class="l-section-title">Scanner evidence</h3>
-          <div id="im_evidence"></div>
-        </div>
-        <div class="l-issue-col">
-          <h3 class="l-section-title">Notes <span class="l-muted" id="im_note_count"></span></h3>
-          <ul class="l-notes" id="issue_notes"></ul>
-          {% if can_write %}
-          <form class="l-field" id="issue_note_form" novalidate>
-            <label for="issue_note_text">Add a note</label>
-            <textarea id="issue_note_text" class="form-control" rows="3" maxlength="5000" placeholder="Context for your team. Visible to everyone on this project."></textarea>
-            <div class="l-form-actions"><button class="btn btn-light" type="submit" id="issue_note_add"><i class="fe-message-square" aria-hidden="true"></i>Add note</button></div>
-          </form>
-          {% endif %}
-        </div>
-      </div>
-    </div>
+<section class="card l-table-card" aria-label="Issue list" aria-busy="true" id="iss_card">
+  <div class="lx-dt-head l-dt-bar"><span id="iss_summary" aria-live="polite">Loading issues</span></div>
+  <div class="table-responsive">
+    <table class="table table-hover w-100 lx-issues">
+      <thead>
+        <tr>
+          <th scope="col" class="l-col-check"><input type="checkbox" class="form-check-input" id="iss_pick_all" aria-label="Select every risk shown"></th>
+          <th scope="col"><span class="visually-hidden">Expand</span></th>
+          <th scope="col">Severity</th><th scope="col">Issue</th><th scope="col" class="lx-hide-sm">Category</th>
+          <th scope="col">Affected assets</th><th scope="col" class="lx-hide-sm">First detected</th><th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody id="iss_body"></tbody>
+    </table>
   </div>
+  <div id="iss_state"></div>
+  <div class="l-dt-bar l-dt-foot" id="iss_more" hidden><button type="button" class="btn btn-light" id="iss_more_btn">Show more</button></div>
+</section>
+<p class="l-muted small mt-2">CISA KEV (CC0) &middot; EPSS by FIRST.org / Empirical Security. Informational means a provisional check: listed and tracked, not scored.</p>
 </div>
-{% endwith %}
 {% endblock main_content %}
 
 {% block page_level_script %}
-<script src="{% static 'custom/issues.js' %}"></script>
-<script type="text/javascript">
-$(document).ready(function() { issues_init(); });
-</script>
+<script src="{% static 'limes/issues.js' %}"></script>
 {% endblock page_level_script %}
