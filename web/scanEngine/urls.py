@@ -60,8 +60,4 @@ urlpatterns = [
         '<slug:slug>/proxy_settings',
         views.proxy_settings,
         name='proxy_settings'),
-    path(
-        '<slug:slug>/report_settings',
-        views.report_settings,
-        name='report_settings'),
 ]

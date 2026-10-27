@@ -30,7 +30,7 @@
       <li><a class="l-nav-link" href="{% url 'subscan_history' slug %}"{% if cur == 'subscan_history' %} aria-current="page"{% endif %}><i class="fe-layers" aria-hidden="true"></i>Subscans</a></li>
       <li><a class="l-nav-link" href="{% url 'scheduled_scan_view' slug %}"{% if cur == 'scheduled_scan_view' %} aria-current="page"{% endif %}><i class="fe-clock" aria-hidden="true"></i>Scheduled Scans</a></li>
     </ul>
-    {% if user|can:'modify_scan_configurations' or user|can:'modify_wordlists' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' or user|can:'modify_scan_report' %}
+    {% if user|can:'modify_scan_configurations' or user|can:'modify_wordlists' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' %}
     <div class="l-nav-section" id="nav-configure">Configure</div>
     <ul class="l-nav-list" aria-labelledby="nav-configure">
       {% if user|can:'modify_scan_configurations' %}
@@ -49,9 +49,6 @@
       {% if user|can:'modify_system_configurations' %}
       <li><a class="l-nav-link" href="{% url 'api_vault' slug %}"{% if cur == 'api_vault' %} aria-current="page"{% endif %}><i class="fe-lock" aria-hidden="true"></i>API Vault</a></li>
       <li><a class="l-nav-link" href="{% url 'llm_toolkit' slug %}"{% if cur == 'llm_toolkit' %} aria-current="page"{% endif %}><i class="fe-message-square" aria-hidden="true"></i>LLM Toolkit</a></li>
-      {% endif %}
-      {% if user|can:'modify_scan_report' %}
-      <li><a class="l-nav-link" href="{% url 'report_settings' slug %}"{% if cur == 'report_settings' %} aria-current="page"{% endif %}><i class="fe-file-text" aria-hidden="true"></i>Report Settings</a></li>
       {% endif %}
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'notification_settings' slug %}"{% if cur == 'notification_settings' %} aria-current="page"{% endif %}><i class="fe-bell" aria-hidden="true"></i>Notification Settings</a></li>

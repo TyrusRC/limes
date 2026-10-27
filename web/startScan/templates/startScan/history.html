@@ -197,10 +197,6 @@ Quick Scan History
                           {% endif %}
                           <div class="dropdown-divider"></div>
                         {% endif %}
-                        {% if scan.scan_status != -1%}
-                          <a href="#" class="dropdown-item text-dark" onclick="initiate_report(id={{scan_history.id}}, has_subdomain_scan={% if 'subdomain_discovery' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, has_vulnerability_scan={% if 'vulnerability_scan' in scan_history.scan_type.tasks %}true{% else %}false{% endif %}, domain_name='{{ scan_history.domain.name|escapejs }}')">
-                          <i class="fe-download"></i>&nbsp;Scan Report</a>
-                        {% endif %}
                         </div>
                       </div>
                     </div>
@@ -211,91 +207,6 @@ Quick Scan History
           </tbody>
         </table>
       </form>
-    </div>
-  </div>
-</div>
-<div class="modal fade" id="generateReportModal" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
-    <div class="modal-content border-0 shadow">
-      <div class="modal-header bg-light border-bottom-0">
-        <h5 class="modal-title" id="modalLabel">Generate Report</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="container-fluid">
-          <h6 class="text-primary mb-3">Select Report Type</h6>
-          <div class="row g-3 mb-4">
-            <div class="col-md-4">
-              <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="form-check">
-                    <input class="form-check-input" type="radio" name="reportType" id="report_type_checkbox" value="full" checked>
-                      <label class="form-check-label w-100" for="fullScan">
-                      <h6 class="mb-2">Full Scan</h6>
-                      <p class="text-muted small mb-0">Comprehensive analysis including Recon and Vulnerabilities</p>
-                    </label>
-                  </div>
-                </div>
-                <div class="card-footer border-0 text-primary bg-soft-primary"> Complete Overview </div>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="form-check">
-                    <input class="form-check-input" type="radio" name="reportType" id="report_type_checkbox" value="recon" disabled>
-                    <label class="form-check-label w-100" for="reconReport">
-                      <h6 class="mb-2">Reconnaissance</h6>
-                      <p class="text-muted small mb-0">Report containing detailed overview of discovered assets only</p>
-                    </label>
-                  </div>
-                </div>
-                <div class="card-footer border-0 text-info bg-soft-info"> Asset Mapping </div>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                  <div class="form-check">
-                    <input class="form-check-input" type="radio" name="reportType" id="report_type_checkbox" value="vuln" disabled>
-                    <label class="form-check-label w-100" for="vulnReport">
-                      <h6 class="mb-2">Vulnerability</h6>
-                      <p class="text-muted small mb-0">Report focused on the identified vulnerabilities and remediation</p>
-                    </label>
-                  </div>
-                </div>
-                <div class="card-footer border-0 text-danger bg-soft-danger"> Risk Assessment </div>
-              </div>
-            </div>
-          </div>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <h6 class="text-primary mb-3">Report Template</h6>
-              <select id="templateSelect" class="form-select" aria-label="Select report template">
-                <option value="modern">Modern Template</option>
-                <option value="default">Default Template</option>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <h6 class="text-primary mb-3">Additional Options</h6>
-              <div class="form-check form-switch" id="report_info_vuln_div">
-                <input class="form-check-input" type="checkbox" id="excludeInfoFindings" name="excludeInfoFindings" checked>
-                <label class="form-check-label" for="excludeInfoFindings"> Exclude Informational Findings </label>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer bg-light border-top-0">
-        <div class="container-fluid">
-          <div class="row justify-content-end">
-            <div class="col-auto">
-              <button type="button" class="btn btn-outline-primary me-2" id="previewReportBtn">Preview Report</button>
-              <button type="button" class="btn btn-primary" id="generateReportBtn">Download Report</button>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </div>
@@ -630,93 +541,5 @@ Quick Scan History
     }
   }
 
-$('input[name="reportType"]').on('change', function() {
-  if (this.value === 'recon') {
-    $('input[name="excludeInfoFindings"]').prop('disabled', true);
-  } else {
-    $('input[name="excludeInfoFindings"]').prop('disabled', false);
-  }
-});
-
-function initiate_report(id, has_subdomain_scan, has_vulnerability_scan, domain_name) {
-  console.log(has_subdomain_scan, has_vulnerability_scan, domain_name);
-  //select full report type by default
-  $('input[name="reportType"][value="full"]').prop('checked', true);
-  $('input[name="excludeInfoFindings"]').prop('checked', true);
-  $('#templateSelect').val('modern');
-  $('#generateReportModal').modal('show');
-  if (has_subdomain_scan) {
-    $('input[name="reportType"][value="recon"]').prop('disabled', false);
-  } else {
-    $('input[name="reportType"][value="recon"]').prop('disabled', true);
-  }
-
-  if (has_vulnerability_scan) {
-    $('input[name="reportType"][value="vuln"]').prop('disabled', false);
-  } else {
-    $('input[name="reportType"][value="vuln"]').prop('disabled', true);
-  }
-
-  $('#generateReportBtn').attr('onClick', `generate_report(${id}, '${jsEscape(domain_name)}')`);
-  $('#previewReportBtn').attr('onClick', `preview_report(${id}, '${jsEscape(domain_name)}')`);
-}
-
-function preview_report(id, domain_name){
-  var report_type = $('input[name="reportType"]:checked').val();
-  var is_ignore_info_vuln = $('#excludeInfoFindings').is(":checked");
-  var report_template = $('#templateSelect').val();
-  var url = `/scan/create_report/${id}?report_type=${encodeURIComponent(report_type)}`;
-  url += `&report_template=${encodeURIComponent(report_template)}`;
-  if (is_ignore_info_vuln) {
-    url += `&ignore_info_vuln`
-  }
-  $('#generateReportModal').modal('hide');
-  window.open(url, '_blank').focus();
-}
-
-  function generate_report(id, domain_name) {
-    var report_type = $('input[name="reportType"]:checked').val();
-    var is_ignore_info_vuln = $('#excludeInfoFindings').is(":checked");
-    var report_template = $('#templateSelect').val();
-    var url = `/scan/create_report/${id}?report_type=${encodeURIComponent(report_type)}&download`;
-    url += `&report_template=${encodeURIComponent(report_template)}`;
-    if (is_ignore_info_vuln) {
-      url += `&ignore_info_vuln`
-    }
-    $('#generateReportModal').modal('hide');
-    swal.queue([{
-      title: 'Generating Report!',
-      text: `Please wait until we generate a report for you!`,
-      padding: '2em',
-      onOpen: function() {
-        swal.showLoading()
-        return fetch(url, {
-          method: 'POST',
-          credentials: "same-origin",
-          headers: {
-            "X-CSRFToken": getCookie("csrftoken")
-          }
-        })
-        .then(function(response) {
-          return response.blob();
-        }).then(function(blob) {
-          const file = new Blob([blob], {type: 'application/pdf'});
-          // process to auto download it
-          const fileURL = URL.createObjectURL(file);
-          const link = document.createElement('a');
-          link.href = fileURL;
-          link.download = domain_name + ".pdf";
-          link.click();
-          swal.close();
-        })
-        .catch(function() {
-          swal.insertQueueStep({
-            type: 'error',
-            title: 'Oops! Unable to generate report!'
-          })
-        })
-      }
-    }]);
-  }
 </script>
 {% endblock page_level_script %}

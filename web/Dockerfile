@@ -70,13 +70,13 @@ ENV DATABASE="postgres" \
     GOPATH=/go \
     PATH="${PATH}:/go/bin"
 
-# Runtime libraries only: libpq for psycopg2, pango for weasyprint, libpcap for naabu.
+# Runtime libraries only: libpq for psycopg2, libpcap for naabu.
 # git is needed to clone vulscan and to install mantis from its repo below.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3-pip ca-certificates curl wget git netcat nmap geoip-bin geoip-database \
-    libpq5 libpango-1.0-0 libpangoft2-1.0-0 libpcap0.8 python3-netaddr
+    libpq5 libpcap0.8 python3-netaddr
 
 WORKDIR /usr/src/app
 

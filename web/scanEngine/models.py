@@ -102,18 +102,3 @@ class Proxy(models.Model):
     id = models.AutoField(primary_key=True)
     use_proxy = models.BooleanField(default=False)
     proxies = models.TextField(blank=True, null=True)
-
-
-class VulnerabilityReportSetting(models.Model):
-    id = models.AutoField(primary_key=True)
-    primary_color = models.CharField(max_length=10, null=True, blank=True, default='#FFB74D')
-    secondary_color = models.CharField(max_length=10, null=True, blank=True, default='#212121')
-    company_name = models.CharField(max_length=100, null=True, blank=True)
-    company_address = models.CharField(max_length=200, null=True, blank=True)
-    company_email = models.CharField(max_length=100, null=True, blank=True)
-    company_website = models.CharField(max_length=100, null=True, blank=True)
-    show_limes_banner = models.BooleanField(default=True)
-    show_executive_summary = models.BooleanField(default=True)
-    executive_summary_description = models.TextField(blank=True, null=True)
-    show_footer = models.BooleanField(default=False)
-    footer_text = models.CharField(max_length=200, null=True, blank=True)

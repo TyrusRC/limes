@@ -26,7 +26,6 @@ NAV = {
     'tool_settings': 'modify_scan_configurations',
     'api_vault': 'modify_system_configurations',
     'llm_toolkit': 'modify_system_configurations',
-    'report_settings': 'modify_scan_report',
     'limes_settings': 'modify_system_configurations',
     'notification_settings': 'modify_scan_configurations',
 }
@@ -70,7 +69,6 @@ class NavigationTest(TestCase):
             self.assertIn(self.href(name), side)
         # the auditor role really is gated: some Configure links must be hidden
         self.assertNotIn(self.href('api_vault'), side)
-        self.assertIn(self.href('report_settings'), side)
 
     def test_user_without_role_sees_no_gated_links(self):
         nobody = User.objects.create_user('nobody', password='p')
@@ -81,18 +79,17 @@ class NavigationTest(TestCase):
         self.assertNotIn('aria-label="Quick add"', top)
 
     def test_each_configure_gate_checked_on_its_own(self):
-        # sys_admin minus the two permissions the auditor holds: the Configure section still
-        # renders, so each inner gate (not just the section gate) has to hide its link
+        # sys_admin minus one permission: the Configure section still renders, so each inner
+        # gate (not just the section gate) has to hide its link
         user = User.objects.create_user('partial', password='p')
         assign_role(user, 'sys_admin')
-        for perm in ('modify_interesting_lookup', 'modify_scan_report'):
+        for perm in ('modify_interesting_lookup',):
             revoke_permission(user, perm)
         side, _ = self.shell(user)
         for name, perm in NAV.items():
             self.assertEqual(self.href(name) in side, perm is None or has_permission(user, perm), name)
         self.assertNotIn(self.href('interesting_lookup'), side)
-        self.assertNotIn(self.href('report_settings'), side)
-        self.assertIn(self.href('api_vault'), side)
+        self.assertIn(self.href('scan_engine_index'), side)
 
     def test_quick_add_items_gated_one_by_one(self):
         # a user holding exactly one of the three Quick add permissions sees the menu with only that item

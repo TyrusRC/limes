@@ -18,10 +18,6 @@ urlpatterns = [
         '<slug:slug>/detail/<int:id>',
         views.detail_scan,
         name='detail_scan'),
-    path(
-        'create_report/<int:id>',
-        views.create_report,
-        name='create_report'),
     path('<slug:slug>/assets', views.assets, name='assets'),
     path('<slug:slug>/issues', views.issues, name='issues'),
     path('<slug:slug>/lookalikes', views.lookalikes, name='lookalikes'),

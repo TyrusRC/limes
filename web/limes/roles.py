@@ -8,7 +8,6 @@ class SysAdmin(AbstractUserRole):
         PERM_MODIFY_SCAN_RESULTS: True,
         PERM_MODIFY_WORDLISTS: True,
         PERM_MODIFY_INTERESTING_LOOKUP: True,
-        PERM_MODIFY_SCAN_REPORT: True,
         PERM_INITATE_SCANS_SUBSCANS: True,
         PERM_MODIFY_TARGETS: True,
     }
@@ -21,7 +20,6 @@ class PenetrationTester(AbstractUserRole):
         PERM_MODIFY_SCAN_RESULTS: True,
         PERM_MODIFY_WORDLISTS: True,
         PERM_MODIFY_INTERESTING_LOOKUP: True,
-        PERM_MODIFY_SCAN_REPORT: True,
         PERM_INITATE_SCANS_SUBSCANS: True,
         PERM_MODIFY_TARGETS: True,
     }
@@ -34,7 +32,6 @@ class Auditor(AbstractUserRole):
         PERM_MODIFY_SCAN_RESULTS: True,
         PERM_MODIFY_WORDLISTS: False,
         PERM_MODIFY_INTERESTING_LOOKUP: True,
-        PERM_MODIFY_SCAN_REPORT: True,
         PERM_INITATE_SCANS_SUBSCANS: False,
         PERM_MODIFY_TARGETS: False,
     }

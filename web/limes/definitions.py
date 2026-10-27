@@ -261,7 +261,6 @@ PERM_MODIFY_TARGETS = 'modify_targets' # projects and targets
 PERM_MODIFY_SCAN_RESULTS = 'modify_scan_results'
 PERM_MODIFY_WORDLISTS = 'modify_wordlists'
 PERM_MODIFY_INTERESTING_LOOKUP = 'modify_interesting_lookup'
-PERM_MODIFY_SCAN_REPORT = 'modify_scan_report'
 PERM_INITATE_SCANS_SUBSCANS = 'initiate_scans_subscans'
 
 # 404 page url

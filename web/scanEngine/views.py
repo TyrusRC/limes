@@ -356,47 +356,6 @@ def proxy_settings(request, slug):
     return render(request, 'scanEngine/settings/proxy.html', context)
 
 
-@has_permission_decorator(PERM_MODIFY_SCAN_REPORT, redirect_url=FOUR_OH_FOUR_URL)
-def report_settings(request, slug):
-    context = {}
-    form = ReportForm()
-    context['form'] = form
-
-    primary_color = '#FFB74D'
-    secondary_color = '#212121'
-
-    report = None
-    if VulnerabilityReportSetting.objects.all().exists():
-        report = VulnerabilityReportSetting.objects.all()[0]
-        primary_color = report.primary_color
-        secondary_color = report.secondary_color
-        form.set_value(report)
-    else:
-        form.set_initial()
-
-    if request.method == "POST":
-        if report:
-            form = ReportForm(request.POST, instance=report)
-        else:
-            form = ReportForm(request.POST or None)
-
-        if form.is_valid():
-            form.save()
-            messages.add_message(
-                request,
-                messages.INFO,
-                'Report Settings updated.')
-            return http.HttpResponseRedirect(reverse('report_settings', kwargs={'slug': slug}))
-
-
-    context['settings_nav_active'] = 'active'
-    context['report_settings_li'] = 'active'
-    context['settings_ul_show'] = 'show'
-    context['primary_color'] = primary_color
-    context['secondary_color'] = secondary_color
-    return render(request, 'scanEngine/settings/report.html', context)
-
-
 @has_permission_decorator(PERM_MODIFY_SYSTEM_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)
 def llm_toolkit_section(request, slug):
     context = {}

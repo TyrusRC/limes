@@ -122,7 +122,7 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
   monitors it, and "This is ours" only opens the add-asset form for you to confirm. Lookalike names
   are shown as text, never links.
 - **Untrusted data.** Finding names, hostnames, banners and logs come from the hosts you scan and are
-  escaped everywhere they are shown, including in PDF reports.
+  escaped everywhere they are shown.
 
 ## Upgrading
 
