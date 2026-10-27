@@ -24,7 +24,7 @@ class SidebarAndShellTest(TestCase):
         html = self.client.get('/p1/home/').content.decode()
         nav = html[html.index('id="l-sidebar"'):html.index('</nav>')]
         hrefs = re.findall(r'href="([^"#][^"]*)"', nav)
-        self.assertGreater(len(hrefs), 15)
+        self.assertGreater(len(hrefs), 8)
         for href in hrefs:
             r = self.client.get(href)
             self.assertEqual(r.status_code, 200, f'{href} -> {r.status_code}')

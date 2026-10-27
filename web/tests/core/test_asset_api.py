@@ -540,6 +540,9 @@ class FullScanAssetApiTest(RescanAssetApiTest):
         c.force_login(user)
         return c.post('/api/action/asset/fullscan/', body, format='json')
 
+    test_batch_rescan_reports_each_asset = test_batch_is_capped_at_fifty = test_batch_needs_a_list_of_ids = None  # rescan-only
+    test_batch_with_a_foreign_id_is_a_404_and_runs_nothing = None
+
     def test_root_domain_enqueues_asm_scan(self):  # overrides the inherited ASM-mode test with the full-mode one
         r = self._post(self.admin, asset_id=self.root.id, engine_id=self.engine.id)
         self.assertEqual(r.json(), {'status': True, 'message': 'Full scan started for x.com'})
