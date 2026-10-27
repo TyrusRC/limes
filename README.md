@@ -24,6 +24,7 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | **IP reputation** | Owned IPs, ranges and ASNs are checked against Spamhaus DROP and ASN-DROP and the abuse.ch Feodo list (opt-in: blocklist.de, CINS; optional Spamhaus DQS). Provisional until the feeds prove themselves: shown, alerted, never scored. |
 | **Exploitability** | Findings and InternetDB banner CVEs carry CISA KEV and EPSS markers; Top risks use them only to break ties, and the Issues page filters on "Known exploited". |
 | **Exposure and leaks** | Exposed AI services (Ollama, OpenAI-compatible APIs, Triton, Gradio, Jupyter, Ray) on owned IPs, Supabase secret keys in client JavaScript, and, with a key, Have I Been Pwned domain breaches (counts only). |
+| **Cloud, takeover and code leaks** | Three more provisional checks (shown and tracked, never scored). `cloud.open_storage` tests up to 24 bucket names per owned root (the label with suffixes like `-backup` or `-assets`) on S3, Azure Blob and GCS with one GET each, and flags only a response that proves anonymous listing; it keeps provider, name and an object count, never object names. `dns.dangling_takeover` flags an owned hostname whose CNAME points at a takeover-prone provider (GitHub Pages, Heroku, S3, Azure, Fastly, Shopify, Netlify, Surge and a few more) when the target no longer resolves or the provider answers with its "unclaimed" page; it reuses stored DNS data first and keeps a fingerprint id, not the page. `leak.public_code` (opt-in, needs `LIMES_CODE_SEARCH_TOKEN`) searches GitHub code for each owned root and flags a repository only when the domain and a credential shape sit on the same line; it keeps repository, path and a masked shape. Only the providers' own hostnames are fetched, daily budgets fail closed. |
 | **Lookalikes** | Typo, homoglyph, TLD-swap and keyword variants of each owned root are checked through DNS, RDAP and certificate transparency. Registered ones land in a review queue (watch, ignore, this is ours, abuse-report text to copy); the Overview has a Brand card. Limes never sends the report. |
 | **Portal** | An Overview, an Issues page, an Assets page (with tag and API filters) and a Lookalikes page, in light and dark themes. |
 
@@ -66,6 +67,8 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 | `LIMES_FEEDS_OPTIN` | empty | Comma list of opt-in feeds with unclear terms: `blocklist_de`, `cins`. |
 | `LIMES_ABUSECH_AUTH_KEY` | empty | abuse.ch key, sent when set (downloads work without one today). |
 | `LIMES_SPAMHAUS_DQS_KEY` | empty | Spamhaus DQS key for per-IP ZEN lookups; off when empty, never logged. |
+| `LIMES_CLOUD_CHECKS` | `true` | Bucket listing probes (`cloud.open_storage`) for owned roots: at most 72 GETs per root and day to S3, Azure Blob and GCS, 2000 a day in all. `false` turns them off. |
+| `LIMES_CODE_SEARCH_TOKEN` | empty | GitHub token for code search (`leak.public_code`); off when empty. Sent only in an `Authorization` header to `api.github.com`; never logged or stored. |
 | `LIMES_HIBP_API_KEY` | empty | Have I Been Pwned key for domain breaches of owned roots; off when empty, sent only in a header. |
 
 Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under Notification Settings.
@@ -139,7 +142,7 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
   `poll_ct_api` (every 60 s; it only calls Cert Spotter when `LIMES_CERTSPOTTER_API_KEY` is set) and the
   `drain-events` tick (`monitor_assets` with `events_only`, every 15 s), which drains the event-driven check queue.
 - The first run of each new feed and the first lookalike sweep of each root are silent baselines: they
-  record what exists and send no alerts. IP reputation, exposed AI services and the leak checks are provisional: they
+  record what exists and send no alerts. IP reputation, exposed AI services, the leak checks, open cloud storage and dangling-DNS takeover are provisional: they
   appear as issues but do not change any score.
 - Tags are now per project. The migration copies each existing global tag into every project that used
   it, and keeps names that cannot be normalised as `tag-<id>`. APIs are a new asset kind (`api`); they
