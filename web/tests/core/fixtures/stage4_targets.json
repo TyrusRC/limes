@@ -1,0 +1,513 @@
+{
+ "crawl_disabled": {
+  "fetch_url": {
+   "final": [],
+   "raw": []
+  },
+  "hosts": {
+   "hostname:a.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.3"
+    ]
+   ],
+   "hostname:b.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.4"
+    ]
+   ],
+   "hostname:cand.x.com": [
+    "candidate",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.6"
+    ]
+   ],
+   "hostname:dead.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    []
+   ],
+   "hostname:dep.x.com": [
+    "dependency",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.7"
+    ]
+   ],
+   "hostname:imp.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.2"
+    ]
+   ],
+   "hostname:old.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.5"
+    ]
+   ],
+   "hostname:p.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "10.0.0.5"
+    ]
+   ],
+   "hostname:rej.x.com": [
+    "rejected",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.8"
+    ]
+   ],
+   "hostname:url.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.9"
+    ]
+   ],
+   "hostname:x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.1"
+    ]
+   ],
+   "hostname:x.com.evil.org": [
+    "owned_host",
+    null,
+    null,
+    [],
+    []
+   ],
+   "root_domain:x.com": [
+    "owned_root",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.1"
+    ]
+   ]
+  },
+  "ip_assets": [
+   [
+    "8.8.1.1",
+    "dependency"
+   ],
+   [
+    "8.8.1.3",
+    "dependency"
+   ]
+  ],
+  "nmap_vulns": [
+   [
+    "n1",
+    "a.x.com:8443",
+    "a.x.com"
+   ],
+   [
+    "n2",
+    "a.x.com",
+    "a.x.com"
+   ],
+   [
+    "n3",
+    "zz.x.com:22",
+    null
+   ]
+  ],
+  "port_scan": {
+   "final": [
+    "a.x.com",
+    "b.x.com",
+    "imp.x.com",
+    "old.x.com",
+    "url.x.com",
+    "x.com"
+   ],
+   "raw": [
+    "a.x.com",
+    "b.x.com",
+    "cand.x.com",
+    "dead.x.com",
+    "dep.x.com",
+    "imp.x.com",
+    "old.x.com",
+    "p.x.com",
+    "rej.x.com",
+    "url.x.com",
+    "x.com",
+    "x.com.evil.org"
+   ]
+  },
+  "port_scan_file": [
+   "a.x.com",
+   "b.x.com",
+   "imp.x.com",
+   "old.x.com",
+   "url.x.com",
+   "x.com"
+  ],
+  "screenshot": {
+   "final": [],
+   "raw": []
+  },
+  "vigil": {
+   "final": [],
+   "raw": []
+  },
+  "vigil_file": null
+ },
+ "crawl_enabled": {
+  "fetch_url": {
+   "final": [
+    "https://a.x.com",
+    "https://a.x.com/",
+    "https://a.x.com/api",
+    "https://a.x.com/gone",
+    "https://a.x.com/login",
+    "https://a.x.com/p1",
+    "https://a.x.com/p10",
+    "https://a.x.com/p11",
+    "https://a.x.com/p12",
+    "https://a.x.com/p2",
+    "https://a.x.com/p3",
+    "https://a.x.com/p4",
+    "https://a.x.com/p5",
+    "https://a.x.com/p6",
+    "https://a.x.com/p7",
+    "https://a.x.com/p8",
+    "https://a.x.com/p9",
+    "https://new.x.com",
+    "https://x.com"
+   ],
+   "raw": [
+    "https://a.x.com",
+    "https://a.x.com/",
+    "https://a.x.com/api",
+    "https://a.x.com/gone",
+    "https://a.x.com/login",
+    "https://a.x.com/p1",
+    "https://a.x.com/p10",
+    "https://a.x.com/p11",
+    "https://a.x.com/p12",
+    "https://a.x.com/p2",
+    "https://a.x.com/p3",
+    "https://a.x.com/p4",
+    "https://a.x.com/p5",
+    "https://a.x.com/p6",
+    "https://a.x.com/p7",
+    "https://a.x.com/p8",
+    "https://a.x.com/p9",
+    "https://new.x.com",
+    "https://x.com"
+   ]
+  },
+  "hosts": {
+   "hostname:a.x.com": [
+    "owned_host",
+    200,
+    "A",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.3",
+     "8.8.8.8"
+    ]
+   ],
+   "hostname:b.x.com": [
+    "owned_host",
+    404,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.4"
+    ]
+   ],
+   "hostname:cand.x.com": [
+    "candidate",
+    200,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.6"
+    ]
+   ],
+   "hostname:dead.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    []
+   ],
+   "hostname:dep.x.com": [
+    "dependency",
+    200,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.7"
+    ]
+   ],
+   "hostname:imp.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.2"
+    ]
+   ],
+   "hostname:new.x.com": [
+    "owned_host",
+    301,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.5"
+    ]
+   ],
+   "hostname:old.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.5"
+    ]
+   ],
+   "hostname:p.x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "10.0.0.5"
+    ]
+   ],
+   "hostname:rej.x.com": [
+    "rejected",
+    200,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.8"
+    ]
+   ],
+   "hostname:url.x.com": [
+    "owned_host",
+    500,
+    "T",
+    [
+     "nginx"
+    ],
+    [
+     "8.8.1.9"
+    ]
+   ],
+   "hostname:x.com": [
+    "owned_host",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.1"
+    ]
+   ],
+   "hostname:x.com.evil.org": [
+    "owned_host",
+    null,
+    null,
+    [],
+    []
+   ],
+   "root_domain:x.com": [
+    "owned_root",
+    null,
+    null,
+    [],
+    [
+     "8.8.1.1"
+    ]
+   ]
+  },
+  "ip_assets": [
+   [
+    "8.8.1.1",
+    "dependency"
+   ],
+   [
+    "8.8.1.3",
+    "dependency"
+   ],
+   [
+    "8.8.1.4",
+    "dependency"
+   ],
+   [
+    "8.8.1.5",
+    "dependency"
+   ],
+   [
+    "8.8.1.6",
+    "dependency"
+   ],
+   [
+    "8.8.1.7",
+    "dependency"
+   ],
+   [
+    "8.8.1.8",
+    "dependency"
+   ],
+   [
+    "8.8.1.9",
+    "dependency"
+   ],
+   [
+    "8.8.8.8",
+    "dependency"
+   ]
+  ],
+  "nmap_vulns": [
+   [
+    "n1",
+    "https://a.x.com:8443",
+    "a.x.com"
+   ],
+   [
+    "n2",
+    "https://a.x.com",
+    "a.x.com"
+   ],
+   [
+    "n3",
+    "zz.x.com:22",
+    null
+   ]
+  ],
+  "port_scan": {
+   "final": [
+    "a.x.com",
+    "b.x.com",
+    "imp.x.com",
+    "new.x.com",
+    "old.x.com",
+    "url.x.com",
+    "x.com"
+   ],
+   "raw": [
+    "a.x.com",
+    "b.x.com",
+    "cand.x.com",
+    "dead.x.com",
+    "dep.x.com",
+    "imp.x.com",
+    "new.x.com",
+    "old.x.com",
+    "p.x.com",
+    "rej.x.com",
+    "url.x.com",
+    "x.com",
+    "x.com.evil.org"
+   ]
+  },
+  "port_scan_file": [
+   "a.x.com",
+   "b.x.com",
+   "imp.x.com",
+   "new.x.com",
+   "old.x.com",
+   "url.x.com",
+   "x.com"
+  ],
+  "screenshot": {
+   "final": [
+    "https://a.x.com",
+    "https://cand.x.com",
+    "https://dep.x.com",
+    "https://new.x.com",
+    "https://rej.x.com",
+    "https://x.com"
+   ],
+   "raw": [
+    "https://a.x.com",
+    "https://cand.x.com",
+    "https://dep.x.com",
+    "https://new.x.com",
+    "https://rej.x.com",
+    "https://x.com"
+   ]
+  },
+  "vigil": {
+   "final": [
+    "https://a.x.com",
+    "https://a.x.com:8443",
+    "https://a.x.com/api",
+    "https://a.x.com/login",
+    "https://new.x.com",
+    "https://x.com"
+   ],
+   "raw": [
+    "https://a.x.com",
+    "https://a.x.com:8443",
+    "https://a.x.com/api",
+    "https://a.x.com/login",
+    "https://cand.x.com",
+    "https://dep.x.com",
+    "https://new.x.com",
+    "https://rej.x.com",
+    "https://x.com"
+   ]
+  },
+  "vigil_file": [
+   "https://a.x.com",
+   "https://a.x.com:8443",
+   "https://a.x.com/api",
+   "https://a.x.com/login",
+   "https://new.x.com",
+   "https://x.com"
+  ]
+ }
+}
