@@ -14,6 +14,7 @@
   <div class="l-sidebar-body">
     <div class="l-nav-section" id="nav-monitor">Monitor</div>
     <ul class="l-nav-list" aria-labelledby="nav-monitor">
+      <li><a class="l-nav-link" href="{% url 'home' slug %}"{% if cur == 'home' %} aria-current="page"{% endif %}><i class="fe-home" aria-hidden="true"></i>Home</a></li>
       <li><a class="l-nav-link" href="{% url 'dashboardIndex' slug %}"{% if cur == 'dashboardIndex' %} aria-current="page"{% endif %}><i class="fe-grid" aria-hidden="true"></i>Overview</a></li>
       <li><a class="l-nav-link" href="{% url 'issues' slug %}"{% if cur == 'issues' %} aria-current="page"{% endif %}><i class="fe-alert-octagon" aria-hidden="true"></i>Issues</a></li>
       <li><a class="l-nav-link" href="{% url 'assets' slug %}"{% if cur == 'assets' %} aria-current="page"{% endif %}><i class="fe-box" aria-hidden="true"></i>Assets</a></li>

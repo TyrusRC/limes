@@ -1,0 +1,35 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}Home{% endblock title %}
+{% block page_title %}Home{% endblock page_title %}
+
+{% block main_content %}
+<div id="home" data-project="{{ current_project.slug }}">
+  <div class="lx-tabs mb-3" role="tablist" aria-label="Home feed" id="home_tabs">
+    <button type="button" role="tab" class="lx-tab" id="ht_activity" aria-controls="hp_activity" aria-selected="true" tabindex="0">All activity<span class="lx-count" id="hc_activity">{{ activity|length }}</span></button>
+    <button type="button" role="tab" class="lx-tab" id="ht_tasks" aria-controls="hp_tasks" aria-selected="false" tabindex="-1">My tasks<span class="lx-count" id="hc_tasks">{{ tasks|length }}</span></button>
+  </div>
+
+  <section class="lx-tabpanel" role="tabpanel" id="hp_activity" aria-labelledby="ht_activity" tabindex="0">
+    <div class="lx-feed-head"><p class="l-hint mb-0">Changes from the last 30 days: new and fixed issues, assets, certificates, score moves.</p>
+      <button type="button" class="btn btn-light btn-sm" data-dismiss-all="hp_activity"{% if not activity %} hidden{% endif %}>Dismiss all</button></div>
+    <ul class="lx-feed" data-feed>
+      {% for c in activity %}{% include 'dashboard/_home_card.html' %}{% endfor %}
+    </ul>
+    <div class="lx-state" data-caught-up{% if activity %} hidden{% endif %}><i class="fe-check-circle" aria-hidden="true"></i><strong>You're all caught up</strong><span>New changes show up here as they happen.</span></div>
+  </section>
+
+  <section class="lx-tabpanel" role="tabpanel" id="hp_tasks" aria-labelledby="ht_tasks" tabindex="0" hidden>
+    <div class="lx-feed-head"><p class="l-hint mb-0">Waivers ending within a week, new critical and high issues, and assets waiting for you to confirm them.</p>
+      <button type="button" class="btn btn-light btn-sm" data-dismiss-all="hp_tasks"{% if not tasks %} hidden{% endif %}>Dismiss all</button></div>
+    <ul class="lx-feed" data-feed>
+      {% for c in tasks %}{% include 'dashboard/_home_card.html' %}{% endfor %}
+    </ul>
+    <div class="lx-state" data-caught-up{% if tasks %} hidden{% endif %}><i class="fe-check-circle" aria-hidden="true"></i><strong>You're all caught up</strong><span>Nothing needs your attention right now.</span></div>
+  </section>
+</div>
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'limes/home.js' %}"></script>
+{% endblock page_level_script %}

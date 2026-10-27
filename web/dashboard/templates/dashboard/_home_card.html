@@ -1,0 +1,12 @@
+<li class="lx-card" data-key="{{ c.key }}">
+  <span class="lx-card-icon{% if c.tone %} is-{{ c.tone }}{% endif %}" aria-hidden="true"><i class="{{ c.icon }}"></i></span>
+  <div>
+    <div class="lx-card-title">{{ c.title }}</div>
+    {% if c.description %}<div class="lx-card-desc">{{ c.description }}</div>{% endif %}
+  </div>
+  <time class="lx-card-time" datetime="{{ c.when|date:'c' }}" title="{{ c.when|date:'Y-m-d H:i' }}">{% if c.upcoming %}in {{ c.when|timeuntil }}{% else %}{{ c.when|timesince }} ago{% endif %}</time>
+  <div class="lx-card-actions">
+    {% if c.url %}<a class="btn btn-primary btn-sm" href="{{ c.url }}">{{ c.action_label|default:"Open" }}</a>{% endif %}
+    <button type="button" class="btn btn-light btn-sm" data-dismiss aria-label="Dismiss: {{ c.title }}">Dismiss</button>
+  </div>
+</li>

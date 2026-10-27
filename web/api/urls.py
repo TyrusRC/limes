@@ -4,6 +4,7 @@ from rest_framework import routers
 
 from .views import *
 from .alert_rules import Integration, JiraTest, RuleDetail, RuleList, RuleTest
+from .feed import DismissFeedItems
 from .lookalikes import DecideLookalike, LookalikeList, LookalikeReport
 
 app_name = 'api'
@@ -39,6 +40,7 @@ urlpatterns = [
     path('action/issue/revoke/', RevokeIssueWaiver.as_view(), name='revoke_issue_waiver'),
     path('issue/evidence/', IssueEvidence.as_view(), name='issue_evidence'),
     path('issue/notes/', IssueNotes.as_view(), name='issue_notes'),
+    path('action/feed/dismiss/', DismissFeedItems.as_view(), name='dismiss_feed_items'),
     path('score_forecast/', ScoreForecast.as_view(), name='score_forecast'),
     path(
         'getFileContents/',

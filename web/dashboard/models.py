@@ -75,3 +75,15 @@ class McpCallLog(models.Model):
 	write = models.BooleanField(default=False)
 	duration_ms = models.IntegerField()
 	created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+
+class FeedDismissal(models.Model):
+	"""A Home-feed card one user dismissed. item is 'event:<id>', 'notice:<id>' or 'task:<kind>:<id>'; dismissals are private to the user."""
+	user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='feed_dismissals')
+	project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='feed_dismissals')
+	item = models.CharField(max_length=80)
+	created_at = models.DateTimeField(default=timezone.now)
+
+	class Meta:
+		constraints = [models.UniqueConstraint(fields=['user', 'project', 'item'], name='feeddismissal_user_project_item')]
+		indexes = [models.Index(fields=['user', 'project', 'created_at'], name='feeddismissal_recent')]

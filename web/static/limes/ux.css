@@ -122,3 +122,6 @@
   .lx-issues .l-col-wider { min-width: 0; }
 }
 #asset_results .l-tag-chip { overflow-wrap: normal; white-space: nowrap; }
+.lx-state[hidden] { display: none; }
+.lx-feed-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin-bottom: var(--space-3); }
+.lx-feed { max-width: 860px; }

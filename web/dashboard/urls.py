@@ -1,13 +1,17 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from . import live, views
+from . import home_views, live, views
 
 urlpatterns = [
     path(
         '',
         views.onboarding,
         name='onboarding'),
+    path(
+        '<slug:slug>/home/',
+        home_views.home_page,
+        name='home'),
     path(
         '<slug:slug>/dashboard/',
         views.index,
