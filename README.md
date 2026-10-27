@@ -57,6 +57,7 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 | Variable | Default | What it does |
 |---|---|---|
 | `LIMES_BIND` / `LIMES_BIND6` / `LIMES_HTTP_PORT` / `LIMES_HTTPS_PORT` | `127.0.0.1` / `::1` / `8082` / `443` | Where the plain HTTP proxy (and the optional TLS proxy) listen. `LIMES_BIND=0.0.0.0` serves other hosts; the login is then in clear text, so add TLS. |
+| `DOMAIN_NAME` / `LIMES_PUBLIC_SCHEME` | `localhost:8000` / `http` | Host and scheme of the links Limes puts in chat notifications (`http` or `https`). Set `https` when you turn TLS on. |
 | `LIMES_CONTINUOUS_SCANS` | `true` | Rediscover owned roots on their cadence. `false` stops all automatic scans and monitoring. |
 | `LIMES_ATTRIBUTION_AUTO_CONFIRM` | `true` | Auto-confirm candidates that pass ownership scoring and a registry-verified delegation. `false` only flags them. |
 | `LIMES_ALERT_WEBHOOK_URL` / `LIMES_ALERT_WEBHOOK_SECRET` | empty | Signed JSON webhook for change alerts (HMAC-SHA256 in `X-Limes-Signature`); both must be set. HTTP is refused unless `LIMES_ALERT_WEBHOOK_ALLOW_HTTP=true`. |
@@ -162,6 +163,15 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
   Issues modal, the top-bar search covers assets and issues, and Scan History lists runs with Stop. The tables for
   organizations, interesting-lookup keywords, search history, countries and subscans are dropped by migrations.
   The scan-detail links in old in-app notifications now open Scan History.
+- The scan pipeline no longer reads or writes the Subdomain and EndPoint tables, and the migrations drop them. The
+  hosts of a scan are hostname assets (each stamped with the scan that saved it); the URLs a scan probed are listed in
+  `endpoints.jsonl` in its results folder, which the screenshot, crawl, vigil and nmap stages read. Probe and
+  screenshot results go straight onto the host asset. New and missing hosts are change alerts, so the separate
+  "Subdomain changes" chat message is gone (its toggle in Notification settings now does nothing). A finding's tags,
+  CWE ids and reference links are stored on the finding itself (CVE ids stay linked rows); the migration copies the
+  existing ones, and `get_vulnerability` and the Issues evidence return the same data as before. The per-scan
+  subdomain and endpoint counts are gone from the scan bar. Links in chat notifications use `LIMES_PUBLIC_SCHEME`
+  (default `http`). Per-scan URL files exist only for scans run after this upgrade.
 - The DAST tool is installed from `TyrusRC/vigil`. Rebuild the image (`make build`) to pick up the
   `vigil` binary.
 - The certificate watch is off by default. `make up REALTIME=1` with `LIMES_CT_WATCH=true` starts it and

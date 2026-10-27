@@ -109,6 +109,10 @@ LOOKALIKE_HTTP = env.bool('LIMES_LOOKALIKE_HTTP', default=False)
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
 DOMAIN_NAME = env('DOMAIN_NAME', default='localhost:8000')
+# Scheme of the links Limes writes into chat notifications; plain HTTP is the default install, `https` once TLS is on
+LIMES_PUBLIC_SCHEME = env('LIMES_PUBLIC_SCHEME', default='http').strip().lower()
+if LIMES_PUBLIC_SCHEME not in ('http', 'https'):
+    raise ValueError(f'LIMES_PUBLIC_SCHEME must be http or https, not {LIMES_PUBLIC_SCHEME!r}')
 SECRET_FILE = os.path.join(LIMES_HOME, 'secret')
 DEFAULT_ENABLE_HTTP_CRAWL = env.bool('DEFAULT_ENABLE_HTTP_CRAWL', default=True)
 DEFAULT_RATE_LIMIT = env.int('DEFAULT_RATE_LIMIT', default=150) # requests / second

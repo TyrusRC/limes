@@ -46,3 +46,23 @@ class ScanLinkTest(TestCase):
         path = url.split('/', 3)[3]
         self.assertEqual(resolve('/' + path).url_name, 'scan_history')
         self.assertIsNone(get_scan_url(None))
+
+    def test_scheme_follows_the_setting_and_defaults_to_plain_http(self):
+        from types import SimpleNamespace as NS
+        from limes import common_func
+        scan = NS(id=7, domain=NS(project=NS(slug='acme')))
+        with mock.patch.object(common_func, 'DOMAIN_NAME', 'limes.test'):
+            with mock.patch.object(common_func, 'LIMES_PUBLIC_SCHEME', 'http'):
+                self.assertEqual(common_func.get_scan_url(scan), 'http://limes.test/scan/acme/history/scan')
+            with mock.patch.object(common_func, 'LIMES_PUBLIC_SCHEME', 'https'):
+                self.assertEqual(common_func.get_scan_url(scan), 'https://limes.test/scan/acme/history/scan')
+        from django.conf import settings
+        self.assertEqual(settings.LIMES_PUBLIC_SCHEME, 'http')
+
+    def test_a_bad_scheme_is_refused_at_startup(self):
+        import subprocess, sys, os
+        env = {**os.environ, 'LIMES_PUBLIC_SCHEME': 'ftp', 'DJANGO_SETTINGS_MODULE': 'limes.settings'}
+        res = subprocess.run([sys.executable, '-c', 'import django; django.setup()'], env=env,
+                             capture_output=True, text=True, cwd=os.path.join(os.path.dirname(__file__), '..', '..'))
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('LIMES_PUBLIC_SCHEME', res.stderr)
