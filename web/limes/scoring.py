@@ -114,8 +114,11 @@ def _root_of(value, roots):
 
 def issue_assets(project):
     """Assets whose issues are tracked: scored_assets plus owned ranges and ASNs (reputation listings live there) and
-    APIs (provisional api.* checks only: an API never joins scored_assets, so it cannot move any score)."""
-    return _owned_assets(project, ('root_domain', 'hostname', 'ip', 'cidr', 'asn', 'api'))
+    APIs (provisional api.* checks only: an API never joins scored_assets, so it cannot move any score). An API counts
+    only while its parent host is owned and not retired, whatever tier the API row still carries."""
+    kinds = ('root_domain', 'hostname', 'ip', 'cidr', 'asn')
+    return _owned_assets(project, kinds + ('api',)).filter(
+        Q(kind__in=kinds) | (Q(parent__scope_tier__in=('owned_root', 'owned_host')) & ~Q(parent__state='retired')))
 
 
 def _fresh_checks(project, now=None, assets=None):

@@ -33,6 +33,9 @@ BODY_CAP = 2 * 1024 * 1024
 MAX_PROBE_PATHS = 20
 MAX_HOSTS = 100
 MAX_SERVERS = 10
+MAX_APIS_PER_HOST = 10
+MAX_SPECS_PER_HOST = 3  # valid documents followed per host
+WEB_PORTS = (None, 443, 8443)  # a document may name only these (https only); anything else is text
 MAX_SPEC_PATHS = 5000  # operations read from one document
 HOST_SECONDS = 90  # one host's total wall clock (safe_fetch.Deadline)
 TIMEOUT = 5
@@ -48,6 +51,10 @@ DEFAULT_PORTS = {'http': 80, 'https': 443}
 
 class BudgetSpent(Exception):
     """The daily request budget is used up (or could not be read): stop, fail closed."""
+
+
+class HostDeadline(Exception):
+    """The host's time is up: no more requests to it, and no budget spent on requests that cannot happen."""
 
 
 def clip(value, n=200):
@@ -85,8 +92,11 @@ def canonical(url, host, scheme='https'):
     path = parts.path.rstrip('/')
     if len(path) > 200 or not PATH_OK.match(path) or '..' in path.split('/'):
         return None, None
-    shown = f'{s}://{name}{"" if port in (None, DEFAULT_PORTS[s]) else f":{port}"}{path}'
-    if name != host:
+    if port == DEFAULT_PORTS[s]:
+        port = None
+    shown = f'{s}://{name}{"" if port is None else f":{port}"}{path}'
+    # the document picks neither the scheme nor the port of what we request: https on 443/8443 of this host only
+    if name != host or s != 'https' or port not in WEB_PORTS:
         return 'other', clip(shown, 200)
     return 'same', shown
 
@@ -103,8 +113,11 @@ def read_body(resp):
     return buf, len(buf), False
 
 
-def fetch(get, url, ua, counter):
-    """{'status': int | 'error', 'size': int, 'json': object | None}. One GET; JSON only for a 200 within the cap."""
+def fetch(get, url, ua, counter, deadline):
+    """{'status': int | 'error', 'size': int, 'json': object | None}. One GET; JSON only for a 200 within the cap.
+    The host deadline is checked before the budget is touched, so a late request costs nothing."""
+    if deadline.expired():
+        raise HostDeadline()
     if not ratelimit.take_daily(PROVIDER, DAILY_BUDGET):
         raise BudgetSpent()
     counter['requests'] = counter.get('requests', 0) + 1
@@ -188,24 +201,40 @@ def _tier(parent):
 
 
 def _upsert(host, value, enrichment, now):
+    """The api asset for this sighting, or None when a person (reject) or time (retired) has settled it: those are
+    left exactly as they are. An existing asset follows its parent's tier and is seen like any other asset."""
     asset, created = Asset.objects.get_or_create(
         project_id=host.project_id, kind='api', value=value,
         defaults={'parent': host, 'scope_tier': _tier(host), 'active_authorized': host.active_authorized,
                   'sources': [{'source': 'api_discovery', 'evidence': host.value, 'seen_at': now.isoformat()}],
                   'enrichment': enrichment, 'first_seen': now, 'last_seen': now})
-    if not created:
-        asset.enrichment, asset.state, asset.missed_count, asset.last_seen = enrichment, 'active', 0, now
-        asset.scope_tier, asset.active_authorized = _tier(host), host.active_authorized
-        asset.save(update_fields=['enrichment', 'state', 'missed_count', 'last_seen', 'scope_tier', 'active_authorized'])
+    if created:
+        return asset
+    if asset.scope_tier == 'rejected' or asset.state == 'retired':
+        return None
+    asset.enrichment, asset.scope_tier, asset.active_authorized = enrichment, _tier(host), host.active_authorized
+    asset.save(update_fields=['enrichment', 'scope_tier', 'active_authorized'])  # (a rejected asset returned above)
+    asset.mark_missing_or_seen(True)  # a sighting resets the miss count and revives a missing or stale asset
     return asset
 
 
-def _probe(get, base, paths, ua, counter):
-    """Unauthenticated GET of each documented path once; 'open' = answered 200 with a JSON body."""
+def _probe(get, base, paths, ua, counter, budget, deadline):
+    """Unauthenticated GET of each documented path once; 'open' = answered 200 with a JSON body. The host's probe
+    budget (20 URLs) is shared by all its APIs, and a URL already fetched is not fetched again. A path the host's
+    time did not allow counts as an error, so a sweep cut short is never a pass."""
     probe = {'tested': 0, 'errors': 0, 'open': []}
-    for path in paths[:MAX_PROBE_PATHS]:
-        r = fetch(get, base + path, ua, counter)
+    for path in paths:
+        url = base + path
+        if url in budget['seen'] or budget['left'] <= 0:
+            continue
+        budget['seen'].add(url)
+        budget['left'] -= 1
         probe['tested'] += 1
+        try:
+            r = fetch(get, url, ua, counter, deadline)
+        except HostDeadline:
+            probe['errors'] += 1
+            continue
         if r['status'] == 'error':
             probe['errors'] += 1
         elif r['status'] == 200 and r['json'] is not None:
@@ -220,18 +249,28 @@ def _write_checks(asset, results, now):
             defaults={'status': r.status, 'severity': CHECKS[r.check].severity, 'evidence': r.evidence, 'last_checked': now})
 
 
-def discover_host(host, get, ua, now, counter):
-    """Find and record the APIs served from one host; returns the api assets seen."""
+def discover_host(host, get, ua, now, counter, deadline):
+    """Find and record the APIs served from one host; returns the api assets seen. Per host: 12 documentation GETs,
+    at most MAX_SPECS_PER_HOST documents followed, MAX_APIS_PER_HOST assets and one shared 20-URL probe budget."""
     scheme = 'https'
     base = f'{scheme}://{host.value}'
-    docs = {p: fetch(get, base + p, ua, counter) for p in DOC_PATHS}
+    docs = {}
+    for p in DOC_PATHS:
+        try:
+            docs[p] = fetch(get, base + p, ua, counter, deadline)
+        except HostDeadline:
+            docs[p] = {'status': 'error', 'size': 0, 'json': None}
+    answered = any(isinstance(r['status'], int) for r in docs.values())
     ui = [{'path': p, 'status': docs[p]['status'], 'size': docs[p]['size']} for p in UI_PATHS if docs[p]['status'] == 200]
-    found = {}  # value -> {'enrichment', 'obs'}
+    found, followed = {}, 0  # value -> {'enrichment', 'spec', ...}
     for path in SPEC_PATHS:
         r = docs[path]
         spec = parse_spec(r['json']) if r['status'] == 200 else None
         if spec is None:
             continue
+        followed += 1
+        if followed > MAX_SPECS_PER_HOST:
+            break
         same, other = [], []
         for url in spec['servers']:
             kind, value = canonical(url, host.value, scheme)
@@ -239,7 +278,6 @@ def discover_host(host, get, ua, now, counter):
                 same.append(value)
             elif kind == 'other':
                 other.append(value)
-        probe_ok = bool(same)
         for value in (same or [base]):
             if value in found:
                 continue
@@ -249,45 +287,75 @@ def discover_host(host, get, ua, now, counter):
                 enrichment['other_servers'] = sorted(set(other))[:5]  # text only: no asset, no request
             if ui:
                 enrichment['docs_ui'] = ui
-            found[value] = {'enrichment': enrichment, 'spec': spec, 'path': path, 'size': r['size'], 'probe_ok': probe_ok}
+            found[value] = {'enrichment': enrichment, 'spec': spec, 'path': path, 'size': r['size'], 'probe_ok': bool(same)}
     if looks_like_graphql(docs[GRAPHQL_PATH]):
         value = base + GRAPHQL_PATH
         found.setdefault(value, {'enrichment': {'protocol': 'graphql', 'spec_url': value, 'status': docs[GRAPHQL_PATH]['status'],
                                                 'size': docs[GRAPHQL_PATH]['size']}, 'spec': None})
+    budget = {'left': MAX_PROBE_PATHS, 'seen': set()}
     assets = []
-    for value, f in found.items():
+    for value, f in list(found.items())[:MAX_APIS_PER_HOST]:
         asset = _upsert(host, value, f['enrichment'], now)
+        if asset is None:  # rejected by a person or retired: untouched, and not probed
+            continue
         assets.append(asset)
         if f['spec'] is None:
             _write_checks(asset, api_checks.evaluate({'protocol': 'graphql'}), now)
             continue
         spec = f['spec']
-        probe = _probe(get, value, spec['get_paths'], ua, counter) if spec['schemes'] and f['probe_ok'] else None
+        probe = _probe(get, value, spec['get_paths'], ua, counter, budget, deadline) if spec['schemes'] and f['probe_ok'] else None
         _write_checks(asset, api_checks.evaluate({'spec': {'path': f['path'], 'status': 200, 'size': f['size'],
                                                            'schemes': spec['schemes']}, 'probe': probe}), now)
-    seen = {a.pk for a in assets}
-    for old in Asset.objects.filter(parent=host, kind='api').exclude(pk__in=seen):
-        old.mark_missing_or_seen(False)  # the host answered, the API did not show: ages like any asset
+    if answered:  # only a host that answered can say an API is gone; an outage ages nothing
+        stale = Asset.objects.filter(parent=host, kind='api').exclude(pk__in={a.pk for a in assets}) \
+            .exclude(scope_tier='rejected').exclude(state='retired')
+        for old in stale:
+            old.mark_missing_or_seen(False)
     return assets
+
+
+def sync_tiers(project):
+    """An API's tier follows its parent's (an owned_root parent gives owned_host): a host that was rejected or fell
+    back to candidate takes its APIs with it, and gives them back when it is owned again. A reject made on the API
+    itself stays: only a 'rejected' set here (marked rejected_with_parent) is ever undone here."""
+    changed = []
+    for api in Asset.objects.filter(project=project, kind='api').select_related('parent'):
+        if api.parent is None:
+            continue
+        enrichment = dict(api.enrichment or {})
+        by_parent = enrichment.get('rejected_with_parent') is True
+        if api.scope_tier == 'rejected' and not by_parent:
+            continue  # a person's decision
+        want = _tier(api.parent)
+        if want == api.scope_tier and not (by_parent and want != 'rejected'):
+            continue
+        if want == 'rejected':
+            enrichment['rejected_with_parent'] = True
+        else:
+            enrichment.pop('rejected_with_parent', None)
+        api.scope_tier, api.active_authorized, api.enrichment = want, api.parent.active_authorized, enrichment
+        changed.append(api)
+    if changed:
+        Asset.objects.bulk_update(changed, ['scope_tier', 'active_authorized', 'enrichment'])
 
 
 # --- the stage ----------------------------------------------------------------------------------------------------
 
 def _hosts(project, root):
     cands = [a for a in Asset.objects.filter(project=project, kind__in=('hostname', 'root_domain'), http_status__isnull=False,
-                                             scope_tier__in=OWNED + ('co_brand',)).exclude(state='retired')
+                                             scope_tier__in=OWNED).exclude(state='retired')
              if _root_of(a.value, [root.value])]
-    allowed, _refused = scope.may_attack(project, [a.value for a in cands])  # active scanning allowed, public addresses
+    allowed, _refused = scope.may_attack(project, [a.value for a in cands], allow_co_brand=False)  # owned, public addresses
     ok = set(allowed)
     return sorted((a for a in cands if a.value in ok), key=lambda a: a.value)[:MAX_HOSTS]
 
 
-def _pinned(host):
+def _pinned(host, deadline):
     ip, reason = safe_fetch.resolve_vetted(host)
     if reason:
         log.info('api discovery: %s not contacted: %s', host, reason)
         return None
-    return safe_fetch.pinned_get(host, ip, deadline=safe_fetch.Deadline(HOST_SECONDS))
+    return safe_fetch.pinned_get(host, ip, deadline=deadline)
 
 
 def discover(project, root, now=None, make_get=_pinned):
@@ -295,13 +363,15 @@ def discover(project, root, now=None, make_get=_pinned):
     now = now or timezone.now()
     counter, apis, hosts = {'requests': 0}, 0, 0
     try:
+        sync_tiers(project)
         for host in _hosts(project, root):
-            get = make_get(host.value)
+            deadline = safe_fetch.Deadline(HOST_SECONDS)  # one clock for the pinned fetcher and for our own checks
+            get = make_get(host.value, deadline)
             if get is None:
                 continue
             ua = ScanIdentity.for_domain(host if host.request_headers else root).ua
             try:
-                apis += len(discover_host(host, get, ua, now, counter))
+                apis += len(discover_host(host, get, ua, now, counter, deadline))
                 hosts += 1
             except (BudgetSpent, SoftTimeLimitExceeded):
                 raise

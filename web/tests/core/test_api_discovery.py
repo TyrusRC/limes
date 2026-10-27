@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 import requests
 from django.core.cache import cache
+from django.test import SimpleTestCase
 
 from limes import api_discovery as ad, continuous, monitor, safe_fetch, scope, scoring
 from limes.alerts.issues import sync_issues
@@ -41,8 +42,9 @@ class FakeWeb:
         body = doc if isinstance(doc, bytes) else json.dumps(doc).encode()
         self.routes[(host, path)] = (status, body)
 
-    def make_get(self, host):
+    def make_get(self, host, deadline=None):
         self.made.append(host)
+        self.deadlines = getattr(self, 'deadlines', []) + [deadline]
 
         def get(url, **kw):
             assert set(kw) <= {'headers', 'timeout', 'allow_redirects', 'stream'}, kw
@@ -201,8 +203,9 @@ class DiscoveryTest(DiscoveryBase):
         self.host('rej.x.com', tier='rejected')
         Asset.objects.create(project=self.p, kind='hostname', value='silent.x.com', scope_tier='owned_host')  # never probed
         self.host('auth.x.com', tier='co_brand', authorized=True)
+        self.host('gone.x.com', state='retired')
         self.run_discovery()
-        self.assertEqual(self.web.hosts_called(), {'ok.x.com', 'auth.x.com'})
+        self.assertEqual(self.web.hosts_called(), {'ok.x.com'})  # owned tiers only: not even an authorised co-brand host
 
     def test_budget_fails_closed(self):
         self.host('a.x.com')
@@ -226,7 +229,9 @@ class DiscoveryTest(DiscoveryBase):
         self.assertEqual(c('v1'), ('same', 'https://a.x.com/v1'))
         self.assertEqual(c('/'), ('same', 'https://a.x.com'))
         self.assertEqual(c('https://A.X.com:443/Base?x=1#y'), ('same', 'https://a.x.com/Base'))
-        self.assertEqual(c('http://a.x.com:8080/b'), ('same', 'http://a.x.com:8080/b'))
+        self.assertEqual(c('https://a.x.com:8443/b'), ('same', 'https://a.x.com:8443/b'))
+        for url in ('http://a.x.com:8080/b', 'http://a.x.com/b', 'https://a.x.com:6379/k', 'https://a.x.com:22/x', 'http://a.x.com:443/b'):
+            self.assertEqual(c(url)[0], 'other', url)  # evidence text only: never requested, never an asset
         self.assertEqual(c('//a.x.com/v2'), ('same', 'https://a.x.com/v2'))
         self.assertEqual(c('https://evil.example/v1')[0], 'other')
         self.assertEqual(c('https://a.x.com.evil.example/v1')[0], 'other')
@@ -270,7 +275,8 @@ class ApiNeverATargetTest(DiscoveryBase):
         self.assertEqual(ensure_scan_target(api), (None, None))
         self.assertFalse(Domain.objects.filter(name__contains='/').exists())
         self.assertEqual(monitor.monitor_state(api)['interval'], None)
-        self.assertNotIn(api.id, scoring.issue_assets(self.p).exclude(kind='api').values_list('id', flat=True))
+        self.assertIn(api.id, scoring.issue_assets(self.p).values_list('id', flat=True))  # tracked for api.* checks only
+        self.assertNotIn(api.id, scoring.scored_assets(self.p).values_list('id', flat=True))
         # port scan and nuclei take their targets from the scan, never from the inventory
         src = (WEB / 'limes/tasks/stages.py').read_text()
         for fn in ('port_scan', 'nmap', 'vulnerability_scan'):
@@ -278,7 +284,7 @@ class ApiNeverATargetTest(DiscoveryBase):
             body = body[:body.index('\n@app.task')] if '\n@app.task' in body else body
             self.assertNotIn('Asset', body, fn)
         self.assertEqual(scope.may_attack(self.p, [api.value])[0], [api.value])  # judged by its host, as any URL is
-        self.assertEqual(host.scope_tier, 'owned_host')
+        self.assertEqual((api.scope_tier, api.parent_id), ('owned_host', host.id))
 
 
 class ApiIsolationTest(DiscoveryBase):
@@ -380,7 +386,7 @@ class McpApiTest(McpBase):
         self.assertNotIn('secret.y.com', json.dumps(d))
         self.assertEqual(self.data(self.call('list_assets', project='p2', kind='api'))['items'][0]['value']['untrusted_text'],
                          'https://secret.y.com/v1')
-        self.assertNotIn('api', self.data(self.call('list_assets', project='p1', kind='hostname'))['items'] or [{}][0])
+        self.assertNotIn('api', (self.data(self.call('list_assets', project='p1', kind='hostname'))['items'] or [{}])[0])
 
 
 class OverviewApiCountTest(DiscoveryBase):
@@ -393,3 +399,138 @@ class OverviewApiCountTest(DiscoveryBase):
         Asset.objects.create(project=self.other, kind='api', value='https://y.com/v1', scope_tier='owned_host')
         inv = asm_stats(self.p)['inventory']
         self.assertEqual((inv['api'], inv['owned_root'], inv['owned_host']), (2, 1, 1))  # an API is never a root or a host
+
+
+class VolumeAndLifecycleTest(DiscoveryBase):
+    """Findings 1-5 of the Part B review."""
+
+    def many_servers(self, host, n=10):
+        return [{'url': f'/s{i}'} for i in range(n)]
+
+    def test_the_probe_budget_is_per_host_and_the_apis_per_host_are_capped(self):
+        self.host('a.x.com')
+        paths = {f'/p{i:02d}': {'get': {}} for i in range(20)}
+        for i, path in enumerate(ad.SPEC_PATHS[:4]):
+            self.web.serve('a.x.com', path, oas3([{'url': f'/d{i}s{j}'} for j in range(10)], paths=paths))
+        counts = self.run_discovery()
+        self.assertEqual(self.web.count('a.x.com') - 12, 20)  # one sweep for the whole host
+        self.assertEqual(len(self.apis()), ad.MAX_APIS_PER_HOST)
+        self.assertEqual(counts['requests'], 32)
+        self.assertEqual(len({p for _, p in self.web.calls}), 32)  # nothing fetched twice
+        later = [a for a in self.apis().values() if not RiskCheck.objects.filter(asset=a, check_id='api.unauthenticated_access', status__in=('pass', 'fail')).exists()]
+        self.assertTrue(later)  # the APIs after the budget ran out say 'not applicable', not 'pass'
+
+    def test_only_a_few_documents_are_followed_per_host(self):
+        self.host('a.x.com')
+        for i, path in enumerate(ad.SPEC_PATHS):
+            self.web.serve('a.x.com', path, oas3([{'url': f'/doc{i}'}], secure=False))
+        self.run_discovery()
+        self.assertEqual(set(self.apis()), {f'https://a.x.com/doc{i}' for i in range(ad.MAX_SPECS_PER_HOST)})
+
+    def test_no_budget_is_spent_once_the_host_deadline_has_passed(self):
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}]))
+        spent = []
+        real = ad.safe_fetch.Deadline
+
+        def expired_after_docs(seconds, clock=None):
+            d = real(seconds)
+            d.expired = lambda: len(self.web.calls) >= 12
+            return d
+        with mock.patch('limes.api_discovery.safe_fetch.Deadline', expired_after_docs), \
+                mock.patch('limes.intel.ratelimit.take_daily', side_effect=lambda *a, **k: spent.append(1) or True):
+            self.run_discovery()
+        self.assertEqual((len(self.web.calls), len(spent)), (12, 12))  # the probe's 2 would-be requests cost nothing
+        a = self.apis()['https://a.x.com/v1']
+        self.assertEqual(self.check(a, 'api.unauthenticated_access').status, 'error')  # cut short is inconclusive
+
+    def test_a_rerun_leaves_a_rejected_api_alone_and_does_not_revive_a_retired_one(self):
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}, {'url': '/v2'}, {'url': '/v3'}]))
+        self.run_discovery()
+        apis = self.apis()
+        Asset.objects.filter(pk=apis['https://a.x.com/v1'].pk).update(scope_tier='rejected', decision_reason='not ours')
+        Asset.objects.filter(pk=apis['https://a.x.com/v2'].pk).update(state='retired')
+        before = {a.value: (a.scope_tier, a.state, a.enrichment, a.last_seen, a.decision_reason) for a in Asset.objects.filter(kind='api')}
+        self.run_discovery()
+        after = {a.value: (a.scope_tier, a.state, a.enrichment, a.last_seen, a.decision_reason) for a in Asset.objects.filter(kind='api')}
+        self.assertEqual(after['https://a.x.com/v1'], before['https://a.x.com/v1'])
+        self.assertEqual(after['https://a.x.com/v2'], before['https://a.x.com/v2'])
+        self.assertEqual(self.apis()['https://a.x.com/v3'].state, 'active')
+
+    def test_a_missing_api_comes_back_when_it_is_seen_again(self):
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}]))
+        self.run_discovery()
+        Asset.objects.filter(kind='api').update(state='missing', missed_count=3)
+        self.run_discovery()
+        self.assertEqual(self.apis()['https://a.x.com/v1'].state, 'active')
+
+    def test_rejecting_or_demoting_the_parent_takes_its_apis_out(self):
+        from dashboard.stats import asm_stats
+        parent = self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}], secure=False))
+        self.scan()
+        self.run_discovery()
+        api = self.apis()['https://a.x.com/v1']
+        sync_issues(self.p, now=self.now)
+        tracked = lambda: api.id in scoring.issue_assets(self.p).values_list('id', flat=True)
+        self.assertEqual((tracked(), asm_stats(self.p)['inventory']['api']), (True, 1))
+        for tier in ('rejected', 'candidate'):
+            Asset.objects.filter(pk=parent.pk).update(scope_tier=tier)
+            self.assertEqual((tracked(), asm_stats(self.p)['inventory']['api']), (False, 0), tier)  # at once, before any rerun
+            self.assertNotIn(api.id, [c for c in scoring.current_issues(self.p, self.now)[0]])
+            self.run_discovery()  # the host is skipped, but its APIs follow it
+            api.refresh_from_db()
+            self.assertEqual(api.scope_tier, tier)
+            Asset.objects.filter(pk=parent.pk).update(scope_tier='owned_host')
+            self.run_discovery()
+            api.refresh_from_db()
+            self.assertEqual((api.scope_tier, tracked()), ('owned_host', True))
+        Asset.objects.filter(pk=parent.pk).update(state='retired')
+        self.assertEqual(tracked(), False)
+
+    def test_a_host_outage_ages_nothing(self):
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([{'url': '/v1'}]))
+        self.run_discovery()
+        self.web.routes.clear()
+
+        def down(host, deadline=None):
+            def get(url, **kw):
+                raise requests.exceptions.ConnectionError('refused')
+            return get
+        for _ in range(4):
+            ad.discover(self.p, self.root, self.now, make_get=down)
+        api = self.apis()['https://a.x.com/v1']
+        self.assertEqual((api.state, api.missed_count), ('active', 0))
+        for _ in range(3):  # the host answers (404) and the API is not there: now it ages
+            self.run_discovery()
+        self.assertEqual(self.apis()['https://a.x.com/v1'].state, 'missing')
+
+    def test_a_document_cannot_pick_the_port_or_the_scheme(self):
+        self.host('a.x.com')
+        self.web.serve('a.x.com', '/openapi.json', oas3([
+            {'url': 'http://a.x.com:6379/k'}, {'url': 'https://a.x.com:22/x'}, {'url': 'http://a.x.com/clear'},
+            {'url': 'https://a.x.com:8443/ok'}, {'url': '/v1'}]))
+        self.run_discovery()
+        self.assertEqual(set(self.apis()), {'https://a.x.com:8443/ok', 'https://a.x.com/v1'})
+        self.assertFalse(any(p.startswith(('/k', '/x', '/clear')) for _, p in self.web.calls))
+        self.assertEqual(sorted(self.apis()['https://a.x.com/v1'].enrichment['other_servers']),
+                         ['http://a.x.com/clear', 'http://a.x.com:6379/k', 'https://a.x.com:22/x'])
+
+
+class SweepVerdictTest(SimpleTestCase):
+    def verdict(self, tested, errors, open_=()):
+        from limes.checks import api as api_checks
+        spec = {'path': '/openapi.json', 'status': 200, 'size': 1, 'schemes': 1}
+        r = api_checks.evaluate({'spec': spec, 'probe': {'tested': tested, 'errors': errors, 'open': list(open_)}})
+        return {x.check: x.status for x in r}['api.unauthenticated_access']
+
+    def test_a_sweep_that_mostly_failed_is_inconclusive(self):
+        self.assertEqual(self.verdict(20, 19), 'error')
+        self.assertEqual(self.verdict(20, 20), 'error')
+        self.assertEqual(self.verdict(20, 11), 'error')
+        self.assertEqual(self.verdict(20, 10), 'pass')
+        self.assertEqual(self.verdict(20, 0), 'pass')
+        self.assertEqual(self.verdict(20, 19, [{'path': '/a', 'status': 200, 'size': 1}]), 'fail')  # an open route is a fail

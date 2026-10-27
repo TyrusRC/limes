@@ -21,8 +21,8 @@ def evaluate(obs):
     elif probe['open']:
         out.append(Result('api.unauthenticated_access', 'fail',
                           {'tested': probe['tested'], 'open': probe['open'][:MAX_OPEN_LISTED], 'open_count': len(probe['open'])}))
-    elif probe['errors'] == probe['tested']:
-        out.append(Result('api.unauthenticated_access', 'error', {'tested': probe['tested']}))  # unknown, never a pass
+    elif probe['errors'] * 2 > probe['tested']:  # most of the sweep failed or was cut short: inconclusive, never a pass
+        out.append(Result('api.unauthenticated_access', 'error', {'tested': probe['tested'], 'errors': probe['errors']}))
     else:
-        out.append(Result('api.unauthenticated_access', 'pass', {'tested': probe['tested']}))
+        out.append(Result('api.unauthenticated_access', 'pass', {'tested': probe['tested'], 'errors': probe['errors']}))
     return out
