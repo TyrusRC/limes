@@ -7,7 +7,6 @@ the scope guard are real."""
 import json
 import os
 import shlex
-import subprocess
 import tempfile
 from types import SimpleNamespace
 from unittest import mock
@@ -79,10 +78,9 @@ def fake_stream(cmd, **kw):
 
 
 def fake_run_command(cmd, **kw):
-    if isinstance(cmd, str) and cmd.startswith(('cat ', 'sort ')):
-        subprocess.run(cmd, shell=True, check=True)  # test-only: the real merge of the tools' files
-    elif isinstance(cmd, str) and cmd.startswith('subfinder'):
-        out = cmd.split(' -o ')[1].split()[0]
+    if cmd.startswith('subfinder'):
+        argv = shlex.split(cmd)
+        out = argv[argv.index('-o') + 1]
         with open(out, 'w') as f:
             f.write(SUBFINDER_OUT)
 
@@ -141,9 +139,6 @@ class Scenario:
             mock.patch.object(control, 'build_workflow', return_value=mock.MagicMock(tasks=[])),
             mock.patch.object(control, 'chain'),
             mock.patch.object(LimesTask, 'notify'),
-            # NOTE: the real command builder refuses the '#<scan id>' in the output file name; that is outside
-            # this characterization, which is about which URL nmap findings are matched to.
-            mock.patch.object(stages, 'get_nmap_cmd', return_value='nmap a.x.com'),
         ]
         for p in patches:
             p.start()

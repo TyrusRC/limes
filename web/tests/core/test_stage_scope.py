@@ -102,11 +102,15 @@ class StageScopeTest(TestCase):
         rc.assert_not_called()
 
     def test_http_crawl_contact_level(self):
-        # run_command is mocked too: http_crawl ends with `rm <input file>`
-        with mock.patch.object(stages, 'stream_command', return_value=iter([])) as sc, \
-                mock.patch.object(stages, 'run_command'):
+        seen = {}
+
+        def fake_stream(cmd, **kw):  # the input file is removed when the stage ends, so read it while httpx "runs"
+            seen['input'] = self.read('httpx_input.txt')
+            return iter([])
+        with mock.patch.object(stages, 'stream_command', side_effect=fake_stream) as sc:
             stages.http_crawl(urls=['own.x.com', 'priv.x.com', 'dep.x.com', 'cb.x.com'], ctx=dict(self.ctx))
-        self.assertEqual(sorted(self.read('httpx_input.txt')), ['cb.x.com', 'dep.x.com', 'own.x.com'])
+        self.assertEqual(sorted(seen['input']), ['cb.x.com', 'dep.x.com', 'own.x.com'])
+        self.assertIsNone(self.read('httpx_input.txt'))  # removed in Python, no `rm`
         sc.assert_called_once()
 
     def test_vulnerability_scan_attack_level(self):

@@ -1,3 +1,5 @@
+import re
+import shlex
 import whatportis
 import socket
 import json
@@ -461,20 +463,12 @@ def fmt_traceback(exc):
 # CLI BUILDERS #
 #--------------#
 
-def _build_cmd(cmd, options, flags, sep=" "):
-	for k,v in options.items():
-		if not v:
-			continue
-		cmd += f" {k}{sep}{v}"
+NMAP_ARG = re.compile(r'^[A-Za-z0-9_.,*/:=@+-]+$')  # scripts, script args, flags: one argv element, no shell syntax
+NMAP_PORTS = re.compile(r'^[0-9][0-9,-]*$')
+NMAP_HOST = re.compile(r'^[A-Za-z0-9_.:\[\]-]+$')
 
-	for flag in flags:
-		if not flag:
-			continue
-		cmd += f" --{flag}"
 
-	return cmd
-
-def get_nmap_cmd(
+def get_nmap_argv(
 		input_file,
 		cmd=None,
 		host=None,
@@ -484,31 +478,51 @@ def get_nmap_cmd(
 		script_args=None,
 		max_rate=None,
 		service_detection=True,
-		flags=[]):
-	if not cmd:
-		cmd = 'nmap'
+		flags=()):
+	"""The nmap argv for one run, or None when any untrusted piece is refused.
 
-	options = {
-		"-sV": service_detection,
-		"-p": ports,
-		"--script": script,
-		"--script-args": script_args,
-		"--max-rate": max_rate,
-		"-oX": output_file
-	}
-	cmd = _build_cmd(cmd, options, flags)
-
-	is_nmap_valid = is_valid_nmap_command(cmd)
-	if not is_nmap_valid:
+	cmd is the engine's custom base command ("nmap -Pn -T4"); it goes through is_valid_nmap_command. Scripts, script
+	args, ports, rate, flags, host and input file are checked one by one: the result is executed without a shell, so
+	each piece must be a single safe argument (and no host or file may look like an option).
+	"""
+	try:
+		argv = shlex.split(cmd) if cmd else ['nmap']
+	except ValueError:
+		return None
+	if not argv or argv[0] != 'nmap' or not is_valid_nmap_command(shlex.join(argv)):
 		logger.error(f'Invalid nmap command or potentially dangerous: {cmd}')
 		return None
-
-	if not input_file:
-		cmd += f" {host}" if host else ""
-	else:
-		cmd += f" -iL {input_file}"
-
-	return cmd
+	if service_detection:
+		argv.append('-sV')
+	if ports:
+		if not NMAP_PORTS.match(str(ports)):
+			return None
+		argv += ['-p', str(ports)]
+	for option, value in (('--script', script), ('--script-args', script_args)):
+		if value:
+			if not NMAP_ARG.match(str(value)):
+				return None
+			argv += [option, str(value)]
+	if max_rate:
+		if not re.fullmatch(r'[0-9]+', str(max_rate)):
+			return None
+		argv += ['--max-rate', str(max_rate)]
+	if output_file:
+		argv += ['-oX', str(output_file)]
+	for flag in flags or ():
+		if flag:
+			if not NMAP_ARG.match(str(flag)):
+				return None
+			argv.append(f'--{flag}')
+	if input_file:
+		if str(input_file).startswith('-') or any(c.isspace() for c in str(input_file)):
+			return None
+		argv += ['-iL', str(input_file)]
+	elif host:
+		if str(host).startswith('-') or not NMAP_HOST.match(str(host)):
+			return None
+		argv.append(str(host))
+	return argv
 
 
 def create_scan_object(host_id, engine_id, initiated_by_id=None):
@@ -732,9 +746,9 @@ def create_inappnotification(
 
 def is_valid_nmap_command(cmd):
 	"""
-		Check if the nmap command is valid or not
-		This is to check the nmap command before executing it so as to avoid
-		command injection attacks
+		Check the engine's custom base nmap command ("nmap -Pn -T4"), not the full
+		command line: Limes' own pieces (output path, host) are added after this check
+		as separate arguments (see get_nmap_argv).
 		Args:
 			cmd: str: nmap command
 		Returns:

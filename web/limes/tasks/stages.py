@@ -1,3 +1,5 @@
+import glob
+
 from celery.exceptions import SoftTimeLimitExceeded
 from limes.tasks.base import *
 from limes import scope
@@ -102,13 +104,17 @@ def subdomain_discovery(
 				continue
 
 			elif tool == 'subfinder':
-				cmd = f'subfinder -d {host} -o {self.results_dir}/subdomains_subfinder.txt'
-				use_subfinder_config = config.get(USE_SUBFINDER_CONFIG, False)
-				cmd += ' -config /root/.config/subfinder/config.yaml' if use_subfinder_config else ''
-				cmd += f' -proxy {proxy}' if proxy else ''
-				cmd += f' -timeout {timeout}' if timeout else ''
-				cmd += f' -t {threads}' if threads else ''
-				cmd += f' -silent'
+				argv = ['subfinder', '-d', host, '-o', f'{self.results_dir}/subdomains_subfinder.txt']
+				if config.get(USE_SUBFINDER_CONFIG, False):
+					argv += ['-config', '/root/.config/subfinder/config.yaml']
+				if proxy:
+					argv += ['-proxy', str(proxy)]
+				if timeout:
+					argv += ['-timeout', str(timeout)]
+				if threads:
+					argv += ['-t', str(threads)]
+				argv.append('-silent')
+				cmd = shlex.join(argv)
 
 		else:
 			logger.warning(
@@ -119,7 +125,6 @@ def subdomain_discovery(
 		try:
 			run_command(
 				cmd,
-				shell=True,
 				history_file=self.history_file,
 				scan_id=self.scan_id,
 				activity_id=self.activity_id)
@@ -130,18 +135,13 @@ def subdomain_discovery(
 
 	# Gather all the tools' results in one single file. Write subdomains into
 	# separate files, and sort all subdomains.
-	run_command(
-		f'cat {self.results_dir}/subdomains_*.txt > {self.output_path}',
-		shell=True,
-		history_file=self.history_file,
-		scan_id=self.scan_id,
-		activity_id=self.activity_id)
-	run_command(
-		f'sort -u {self.output_path} -o {self.output_path}',
-		shell=True,
-		history_file=self.history_file,
-		scan_id=self.scan_id,
-		activity_id=self.activity_id)
+	# (cat subdomains_*.txt | sort -u) done in Python: every line of every tool's file, once, sorted
+	names = set()
+	for path in sorted(glob.glob(f'{self.results_dir}/subdomains_*.txt')):
+		with open(path, errors='replace') as f:
+			names.update(line.strip() for line in f if line.strip())
+	with open(self.output_path, 'w') as f:
+		f.writelines(f'{name}\n' for name in sorted(names))
 
 	with open(self.output_path) as f:
 		lines = f.readlines()
@@ -396,33 +396,37 @@ def port_scan(self, hosts=[], ctx={}, description=None):
 		f.write('\n'.join(hosts))
 
 	# Build cmd
-	cmd = 'naabu -json -exclude-cdn'
-	cmd += f' -list {input_file}' if len(hosts) > 0 else f' -host {hosts[0]}'
+	argv = ['naabu', '-json', '-exclude-cdn', '-list', input_file]
 	if 'full' in ports or 'all' in ports:
-		ports_str = ' -p "-"'
+		argv += ['-p', '-']
 	elif 'top-100' in ports:
-		ports_str = ' -top-ports 100'
+		argv += ['-top-ports', '100']
 	elif 'top-1000' in ports:
-		ports_str = ' -top-ports 1000'
+		argv += ['-top-ports', '1000']
 	else:
-		ports_str = ','.join(ports)
-		ports_str = f' -p {ports_str}'
-	cmd += ports_str
-	cmd += ' -config /root/.config/naabu/config.yaml' if use_naabu_config else ''
-	cmd += f' -proxy "{proxy}"' if proxy else ''
-	cmd += f' -c {threads}' if threads else ''
-	cmd += f' -rate {rate_limit}' if rate_limit > 0 else ''
-	cmd += f' -timeout {timeout}s' if timeout > 0 else ''
-	cmd += f' -passive' if passive else ''
-	cmd += f' -exclude-ports {exclude_ports_str}' if exclude_ports else ''
-	cmd += f' -silent'
+		argv += ['-p', ','.join(ports)]
+	if use_naabu_config:
+		argv += ['-config', '/root/.config/naabu/config.yaml']
+	if proxy:
+		argv += ['-proxy', str(proxy)]
+	if threads:
+		argv += ['-c', str(threads)]
+	if rate_limit > 0:
+		argv += ['-rate', str(rate_limit)]
+	if timeout > 0:
+		argv += ['-timeout', f'{timeout}s']
+	if passive:
+		argv.append('-passive')
+	if exclude_ports:
+		argv += ['-exclude-ports', exclude_ports_str]
+	argv.append('-silent')
+	cmd = shlex.join(argv)
 
 	# Execute cmd and gather results
 	results = []
 	ports_data = {}
 	for line in stream_command(
 			cmd,
-			shell=True,
 			history_file=self.history_file,
 			scan_id=self.scan_id,
 			activity_id=self.activity_id):
@@ -547,7 +551,7 @@ def nmap(
 	logger.warning(f'Running nmap on {host}:{ports}')
 
 	# Build cmd
-	nmap_cmd = get_nmap_cmd(
+	nmap_argv = get_nmap_argv(
 		cmd=cmd,
 		ports=ports_str,
 		script=script,
@@ -557,14 +561,13 @@ def nmap(
 		input_file=input_file,
 		output_file=output_file_xml)
 	
-	if not nmap_cmd:
+	if not nmap_argv:
 		logger.error('Could not build nmap command')
 		return
 
-	# Run cmd
+	# Run cmd (an argv, no shell)
 	run_command(
-		nmap_cmd,
-		shell=True,
+		shlex.join(nmap_argv),
 		history_file=self.history_file,
 		scan_id=self.scan_id,
 		activity_id=self.activity_id)
@@ -873,7 +876,6 @@ def http_crawl(
 	logger.info('Initiating HTTP Crawl')
 	if is_ran_from_subdomain_scan:
 		logger.info('Running From Subdomain Scan...')
-	cmd = '/go/bin/httpx'
 	cfg = self.yaml_configuration.get(HTTP_CRAWL) or {}
 	threads = cfg.get(THREADS, DEFAULT_THREADS)
 	follow_redirect = cfg.get(FOLLOW_REDIRECT, True)
@@ -913,19 +915,23 @@ def http_crawl(
 	proxy = get_random_proxy()
 
 	# Run command
-	cmd += f' -cl -ct -rt -location -td -websocket -cname -asn -cdn -probe'
-	cmd += f' -t {threads}' if threads > 0 else ''
-	cmd += f' --http-proxy {proxy}' if proxy else ''
+	argv = ['/go/bin/httpx', '-cl', '-ct', '-rt', '-location', '-td', '-websocket', '-cname', '-asn', '-cdn', '-probe']
+	if threads > 0:
+		argv += ['-t', str(threads)]
+	if proxy:
+		argv += ['--http-proxy', str(proxy)]
 	ident = identity.ScanIdentity.for_domain(self.domain)
 	header_argv, hdr_tmps = identity.render_httpx(ident)
 	secrets = identity.redaction_secrets(ident)
-	cmd += ' ' + shlex.join(header_argv)
-	cmd += f' -json'
-	cmd += f' -u {urls[0]}' if len(urls) == 1 else f' -l {input_path}'
-	cmd += f' -x {method}' if method else ''
-	cmd += f' -silent'
+	argv += header_argv
+	argv.append('-json')
+	argv += ['-u', urls[0]] if len(urls) == 1 else ['-l', input_path]
+	if method:
+		argv += ['-x', method]
+	argv.append('-silent')
 	if follow_redirect:
-		cmd += ' -fr'
+		argv.append('-fr')
+	cmd = shlex.join(argv)
 	results = []
 	stored_urls = []
 	try:
@@ -1046,11 +1052,9 @@ def http_crawl(
 			logger.warning(f'Deleted {len(removed)} URLs with the same content_length or page_title as others')
 
 	# Remove input file
-	run_command(
-		f'rm {input_path}',
-		shell=True,
-		history_file=self.history_file,
-		scan_id=self.scan_id,
-		activity_id=self.activity_id)
+	try:
+		os.remove(input_path)
+	except FileNotFoundError:
+		pass
 
 	return results
