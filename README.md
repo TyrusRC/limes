@@ -150,6 +150,13 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - Removed: the PDF scan report, the local LLM service (`make up LLM=1`), the LLM toolkit and stored
   OpenAI/Netlas/Chaos keys, wordlist upload, Swagger docs, the recon notes and the WHOIS and domain-info
   pages. Their tables are dropped by migrations. Discord alert state is stored as JSON instead of pickle.
+- Removed: the old results pages (Subdomains, Endpoints, Vulnerabilities, the per-scan detail page), the Targets and
+  Organizations pages, subscans, scheduled scans from the UI, the interesting-lookup keywords and the country lookup of
+  IP addresses. Start a full scan (port scan, crawl, vigil, mantis) with **Full scan** on an owned root on the Assets
+  page, or `POST /api/action/asset/fullscan/`; one scan runs per project at a time. A finding's evidence is in the
+  Issues modal, the top-bar search covers assets and issues, and Scan History lists runs with Stop. The tables for
+  organizations, interesting-lookup keywords, search history, countries and subscans are dropped by migrations.
+  The scan-detail links in old in-app notifications now open Scan History.
 - The DAST tool is installed from `TyrusRC/vigil`. Rebuild the image (`make build`) to pick up the
   `vigil` binary.
 - The certificate watch is off by default. `make up REALTIME=1` with `LIMES_CT_WATCH=true` starts it and

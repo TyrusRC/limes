@@ -606,22 +606,6 @@ input[type="search"], input[type="tel"], input[type="date"], input[type="datetim
 .invalid-feedback { color: var(--sev-critical-ink); }
 .valid-feedback { color: var(--ok-ink); }
 .was-validated .form-control:valid, .form-control.is-valid { border-color: var(--brand); }
-/* select2 */
-:root .select2-container--default .select2-selection--single,
-:root .select2-container--default .select2-selection--multiple { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); min-height: 36px; }
-:root .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--ink); }
-:root .select2-container--default.select2-container--focus .select2-selection--multiple,
-:root .select2-container--default.select2-container--open .select2-selection--single { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
-:root .select2-dropdown { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
-:root .select2-container--default .select2-results__option--highlighted[aria-selected],
-:root .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable { background: var(--brand-tint); color: var(--brand-ink); }
-:root .select2-container--default .select2-results__option[aria-selected=true] { background: var(--surface-2); color: var(--ink); }
-:root .select2-container--default .select2-search--dropdown .select2-search__field { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
-:root .select2-container .select2-selection--multiple .select2-selection__choice {
-  color: var(--brand-ink) !important; background: var(--brand-tint) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-sm) !important;
-}
-:root .select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: var(--brand-ink) !important; }
-
 /* ---------- Modals + offcanvas ---------- */
 :root .modal-backdrop { background-color: var(--backdrop); }
 :root .modal-backdrop.show { opacity: 1; }

@@ -75,7 +75,7 @@ ENV DATABASE="postgres" \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 python3-pip ca-certificates curl wget git netcat nmap geoip-bin geoip-database \
+    python3.10 python3-pip ca-certificates curl wget git netcat nmap \
     libpq5 libpcap0.8 python3-netaddr
 
 WORKDIR /usr/src/app
