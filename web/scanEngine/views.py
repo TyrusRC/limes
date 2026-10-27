@@ -3,7 +3,6 @@ import os
 import re
 import shutil
 
-from datetime import datetime
 from django import http
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, render
@@ -266,82 +265,3 @@ def proxy_settings(request, slug):
     context['settings_ul_show'] = 'show'
 
     return render(request, 'scanEngine/settings/proxy.html', context)
-
-
-@has_permission_decorator(PERM_MODIFY_SYSTEM_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)
-def llm_toolkit_section(request, slug):
-    context = {}
-    list_all_models_url = f'{OLLAMA_INSTANCE}/api/tags'
-    response = requests.get(list_all_models_url)
-    all_models = []
-    selected_model = None
-    all_models = DEFAULT_GPT_MODELS.copy()
-    if response.status_code == 200:
-        models = response.json()
-        ollama_models = models.get('models')
-        date_format = "%Y-%m-%dT%H:%M:%S"
-        for model in ollama_models:
-           all_models.append({**model, 
-                'modified_at': datetime.strptime(model['modified_at'].split('.')[0], date_format),
-                'is_local': True,
-            })
-    # find selected model name from db
-    selected_model = OllamaSettings.objects.first()
-    if selected_model:
-        selected_model = {'selected_model': selected_model.selected_model}
-    else:
-        # use gpt3.5-turbo as default
-        selected_model = {'selected_model': 'gpt-3.5-turbo'}
-    for model in all_models:
-        if model['name'] == selected_model['selected_model']:
-            model['selected'] = True
-    context['installed_models'] = all_models
-    # show error message for openai key, if any gpt is selected
-    openai_key = get_open_ai_key()
-    if not openai_key and 'gpt' in selected_model['selected_model']:
-        context['openai_key_error'] = True
-    return render(request, 'scanEngine/settings/llm_toolkit.html', context)
-
-
-@has_permission_decorator(PERM_MODIFY_SYSTEM_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)
-def api_vault(request, slug):
-    context = {}
-    if request.method == "POST":
-        key_openai = request.POST.get('key_openai')
-        key_netlas = request.POST.get('key_netlas')
-        key_chaos = request.POST.get('key_chaos')
-
-
-        if key_openai:
-            openai_api_key = OpenAiAPIKey.objects.first()
-            if openai_api_key:
-                openai_api_key.key = key_openai
-                openai_api_key.save()
-            else:
-                OpenAiAPIKey.objects.create(key=key_openai)
-
-        if key_netlas:
-            netlas_api_key = NetlasAPIKey.objects.first()
-            if netlas_api_key:
-                netlas_api_key.key = key_netlas
-                netlas_api_key.save()
-            else:
-                NetlasAPIKey.objects.create(key=key_netlas)
-
-        if key_chaos:
-            chaos_api_key = ChaosAPIKey.objects.first()
-            if chaos_api_key:
-                chaos_api_key.key = key_chaos
-                chaos_api_key.save()
-            else:
-                ChaosAPIKey.objects.create(key=key_chaos)
-
-    openai_key = OpenAiAPIKey.objects.first()
-    netlas_key = NetlasAPIKey.objects.first()
-    chaos_key = ChaosAPIKey.objects.first()
-
-    context['openai_key'] = openai_key
-    context['netlas_key'] = netlas_key
-    context['chaos_key'] = chaos_key
-    
-    return render(request, 'scanEngine/settings/api.html', context)

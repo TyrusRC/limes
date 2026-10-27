@@ -239,9 +239,6 @@ def onboarding(request):
         create_username = request.POST.get('create_username')
         create_password = request.POST.get('create_password')
         create_user_role = request.POST.get('create_user_role')
-        key_openai = request.POST.get('key_openai')
-        key_netlas = request.POST.get('key_netlas')
-        key_chaos = request.POST.get('key_chaos')
 
         insert_date = timezone.now()
 
@@ -266,34 +263,5 @@ def onboarding(request):
         except Exception as e:
             error = ' Could not create User, Error: ' + str(e)
 
-        if key_openai:
-            openai_api_key = OpenAiAPIKey.objects.first()
-            if openai_api_key:
-                openai_api_key.key = key_openai
-                openai_api_key.save()
-            else:
-                OpenAiAPIKey.objects.create(key=key_openai)
-
-        if key_netlas:
-            netlas_api_key = NetlasAPIKey.objects.first()
-            if netlas_api_key:
-                netlas_api_key.key = key_netlas
-                netlas_api_key.save()
-            else:
-                NetlasAPIKey.objects.create(key=key_netlas)
-
-        if key_chaos:
-            chaos_api_key = ChaosAPIKey.objects.first()
-            if chaos_api_key:
-                chaos_api_key.key = key_chaos
-                chaos_api_key.save()
-            else:
-                ChaosAPIKey.objects.create(key=key_chaos)
-
     context['error'] = error
-    
-
-    context['openai_key'] = OpenAiAPIKey.objects.first()
-    context['netlas_key'] = NetlasAPIKey.objects.first()
-    context['chaos_key'] = ChaosAPIKey.objects.first()
     return render(request, 'dashboard/onboarding.html', context)

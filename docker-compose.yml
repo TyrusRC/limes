@@ -203,14 +203,6 @@ services:
       - scan_results:/usr/src/scan_results
     networks: [limes_network]
 
-  ollama:
-    image: ollama/ollama
-    profiles: [llm]  # optional local LLM (~9 GB image): `make up LLM=1`
-    restart: unless-stopped
-    volumes:
-      - ollama_data:/root/.ollama
-    networks: [limes_network]
-
   ct-watch:
     <<: *app
     profiles: [realtime]  # opt-in certificate watch (~157 GB/day inbound, inferred): `make up REALTIME=1`
@@ -247,7 +239,6 @@ volumes:
   wordlist:
   scan_results:
   static_volume:
-  ollama_data:
   ct_state:
 
 secrets:

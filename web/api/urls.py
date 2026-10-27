@@ -114,14 +114,6 @@ urlpatterns = [
         CVEDetails.as_view(),
         name='cve_details'),
     path(
-        'tools/gpt_get_possible_attacks/',
-        GPTAttackSuggestion.as_view(),
-        name='gpt_get_possible_attacks'),
-	path(
-        'tool/ollama/',
-        OllamaManager.as_view(),
-        name='ollama_manager'),
-    path(
         'action/subdomain/delete/',
         DeleteSubdomain.as_view(),
         name='delete_subdomain'),

@@ -43,10 +43,6 @@
       <li><a class="l-nav-link" href="{% url 'proxy_settings' slug %}"{% if cur == 'proxy_settings' %} aria-current="page"{% endif %}><i class="fe-shuffle" aria-hidden="true"></i>Proxies</a></li>
       <li><a class="l-nav-link" href="{% url 'tool_settings' slug %}"{% if cur == 'tool_settings' %} aria-current="page"{% endif %}><i class="fe-sliders" aria-hidden="true"></i>Tool Settings</a></li>
       {% endif %}
-      {% if user|can:'modify_system_configurations' %}
-      <li><a class="l-nav-link" href="{% url 'api_vault' slug %}"{% if cur == 'api_vault' %} aria-current="page"{% endif %}><i class="fe-lock" aria-hidden="true"></i>API Vault</a></li>
-      <li><a class="l-nav-link" href="{% url 'llm_toolkit' slug %}"{% if cur == 'llm_toolkit' %} aria-current="page"{% endif %}><i class="fe-message-square" aria-hidden="true"></i>LLM Toolkit</a></li>
-      {% endif %}
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'notification_settings' slug %}"{% if cur == 'notification_settings' %} aria-current="page"{% endif %}><i class="fe-bell" aria-hidden="true"></i>Notification Settings</a></li>
       {% endif %}

@@ -30,7 +30,6 @@ from limes.command_log import DbCommandRecorder
 from limes.common_func import *
 from limes.definitions import *
 from limes.settings import *
-from limes.llm import *
 from limes.utilities import *
 from limes.urlfiles import merge_url_files
 from scanEngine.models import (EngineType, Notification, Proxy)

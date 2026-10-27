@@ -29,14 +29,6 @@ urlpatterns = [
         views.tool_specific_settings,
         name='tool_settings'),
     path(
-        '<slug:slug>/api_vault',
-        views.api_vault,
-        name='api_vault'),
-	path(
-        '<slug:slug>/llm_toolkit',
-        views.llm_toolkit_section,
-        name='llm_toolkit'),
-    path(
         '<slug:slug>/limes_settings',
         views.limes_settings,
         name='limes_settings'),

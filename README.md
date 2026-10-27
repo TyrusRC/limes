@@ -71,7 +71,7 @@ Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under No
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Build and start / stop the stack. `make up LLM=1` adds the optional local LLM; `make up REALTIME=1` adds the certificate watch. |
+| `make up` / `make down` | Build and start / stop the stack. `make up REALTIME=1` adds the certificate watch. |
 | `make username` | Create the first admin user |
 | `make logs` | Tail service logs |
 | `make test` | Run the core test suite in containers |

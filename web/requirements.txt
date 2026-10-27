@@ -16,9 +16,6 @@ drf-yasg==1.21.3
 gunicorn==22.0.0
 gevent==24.2.1
 humanize==4.3.0
-langchain-community==0.2.7
-netlas==0.5.1
-openai==0.28.0
 cryptography==43.0.1
 PyYAML==6.0.1
 PySocks==1.7.1

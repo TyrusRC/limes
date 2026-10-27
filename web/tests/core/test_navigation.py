@@ -23,8 +23,6 @@ NAV = {
     'interesting_lookup': 'modify_interesting_lookup',
     'proxy_settings': 'modify_scan_configurations',
     'tool_settings': 'modify_scan_configurations',
-    'api_vault': 'modify_system_configurations',
-    'llm_toolkit': 'modify_system_configurations',
     'limes_settings': 'modify_system_configurations',
     'notification_settings': 'modify_scan_configurations',
 }
@@ -67,7 +65,7 @@ class NavigationTest(TestCase):
         for name in ('issues', 'assets'):
             self.assertIn(self.href(name), side)
         # the auditor role really is gated: some Configure links must be hidden
-        self.assertNotIn(self.href('api_vault'), side)
+        self.assertNotIn(self.href('limes_settings'), side)
 
     def test_user_without_role_sees_no_gated_links(self):
         nobody = User.objects.create_user('nobody', password='p')

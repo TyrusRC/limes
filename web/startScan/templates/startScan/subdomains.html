@@ -265,7 +265,6 @@ $(document).ready(function() {
 					"render": function ( data, type, row ) {
 						return `
 						<div class="btn-group mt-2">
-							<button type="button" data-toggle="tooltip" data-placement="top" title="Show Attack Surface" class="btn btn-sm btn-soft-primary me-1 bs-tooltip" onclick="show_attack_surface_modal(${row['id']})"><i class="fe-eye"></i></button>
 							<button type="button" data-toggle="tooltip" data-placement="top" title="Further Scan Subdomain" class="btn btn-sm btn-soft-primary btn-scan-subdomain me-1 bs-tooltip" id="${row['id']}"><i class="fe-zap"></i></button>
 							<button class="btn btn-sm btn-soft-primary me-1 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="mdi mdi-dots-horizontal"></i></button>
 							<div class="dropdown-menu dropdown-menu-end">

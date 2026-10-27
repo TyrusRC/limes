@@ -850,16 +850,6 @@ def get_nmap_cmd(
 	return cmd
 
 
-def get_open_ai_key():
-	openai_key = OpenAiAPIKey.objects.all()
-	return openai_key[0] if openai_key else None
-
-
-def get_netlas_key():
-	netlas_key = NetlasAPIKey.objects.all()
-	return netlas_key[0] if netlas_key else None
-
-
 def create_scan_object(host_id, engine_id, initiated_by_id=None):
 	'''
 	create task with pending status so that celery task will execute when

@@ -54,25 +54,6 @@
           </select>
         </div>
       </section>
-      <section class="card mb-0" aria-labelledby="ob-keys">
-        <div class="card-body">
-          <h2 class="h6 mb-2" id="ob-keys"><i class="fe-lock me-2" aria-hidden="true"></i>API keys</h2>
-          <p class="text-muted">Enter your API keys for various services to enhance Limes's capabilities.</p>
-          <div class="mb-3">
-            <label for="key_openai" class="form-label">OpenAI key</label>
-            <input class="form-control" type="text" id="key_openai" name="key_openai" placeholder="Enter OpenAI Key" value="{{openai_key}}" aria-describedby="key_openai_help">
-            <small class="text-muted" id="key_openai_help">Used for generating vulnerability descriptions, remediation, impact, and report writing using ChatGPT.</small>
-          </div>
-          <div class="mb-3">
-            <label for="key_netlas" class="form-label">Netlas key</label>
-            <input class="form-control" type="text" id="key_netlas" name="key_netlas" placeholder="Enter Netlas Key" value="{{netlas_key}}" aria-describedby="key_netlas_help">
-            <small class="text-muted" id="key_netlas_help">Used to get whois information and other OSINT data.</small>
-          </div>
-          <label for="key_chaos" class="form-label">Chaos key</label>
-          <input class="form-control" type="text" id="key_chaos" name="key_chaos" placeholder="Enter Chaos Key" value="{{chaos_key}}" aria-describedby="key_chaos_help">
-          <small class="text-muted" id="key_chaos_help">Enhances subdomain enumeration. <a href="https://cloud.projectdiscovery.io" target="_blank" rel="noopener noreferrer">Get your API key</a></small>
-        </div>
-      </section>
       <div class="text-end">
         <button class="btn btn-primary" type="submit">Complete setup</button>
       </div>

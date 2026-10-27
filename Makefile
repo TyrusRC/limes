@@ -8,11 +8,6 @@ COMPOSE_PREFIX_CMD := COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 
 COMPOSE_ALL_FILES := -f docker-compose.yml
 SERVICES          := db redis pgbouncer migrate web worker-scan worker-io worker-orch beat proxy
-# The local LLM is optional and large: `make up LLM=1` adds it.
-ifeq ($(LLM), 1)
-SERVICES += ollama
-COMPOSE_ALL_FILES += --profile llm
-endif
 # The MCP server is optional: `make up MCP=1` adds it.
 ifeq ($(MCP), 1)
 SERVICES += mcp
@@ -44,7 +39,7 @@ certs:		    ## Generate certificates.
 setup:			## Generate certificates.
 	@make certs
 
-up:				## Build and start all services (HTTPS=1 adds TLS on 443, REALTIME=1 adds the certificate watch, LLM=1 the local LLM).
+up:				## Build and start all services (HTTPS=1 adds TLS on 443, REALTIME=1 adds the certificate watch).
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} up -d --build ${SERVICES}
 
 build:			## Build all services.

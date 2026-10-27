@@ -266,69 +266,6 @@ PERM_INITATE_SCANS_SUBSCANS = 'initiate_scans_subscans'
 FOUR_OH_FOUR_URL = '/404/'
 
 
-###############################################################################
-# OLLAMA DEFINITIONS
-###############################################################################
-OLLAMA_INSTANCE = 'http://ollama:11434'
-
-DEFAULT_GPT_MODELS = [
-    {
-        'name': 'gpt-3',
-        'model': 'gpt-3',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~175B',
-        }
-    },
-    {
-        'name': 'gpt-3.5-turbo',
-        'model': 'gpt-3.5-turbo',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~7B',
-        }
-    },
-    {
-        'name': 'gpt-4',
-        'model': 'gpt-4',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~1.7T',
-        }
-    },
-    {
-        'name': 'gpt-4-turbo',
-        'model': 'gpt-4',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~1.7T',
-        }
-    }
-]
-
-
-ATTACK_SUGGESTION_GPT_SYSTEM_PROMPT = """
-    You are a highly skilled penetration tester who has recently completed a reconnaissance on a target.
-    As a penetration tester, you've conducted a thorough reconnaissance on a specific subdomain.
-    Based on the reconnaissance you will be given with a
-        - Subdomain Name
-        - Subdomain Page Title
-        - Open Ports if any detected
-        - HTTP Status
-        - Technologies Detected
-        - Content Type
-        - Web Server
-        - Page Content Length
-    I'm seeking insights into potential technical web application attacks that could be executed on this subdomain, along with explanations for why these attacks are feasible given the discovered information.
-    Please provide a detailed list of these attack types and their underlying technical rationales on every attacks you suggested.
-    Also suggest if any CVE ID, known exploits, existing vulnerabilities, any news articles URL related to the information provided to you.
-"""
-
-
 # In App Notification Definitions
 SYSTEM_LEVEL_NOTIFICATION = 'system'
 PROJECT_LEVEL_NOTIFICATION = 'project'
