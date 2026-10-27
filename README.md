@@ -42,7 +42,7 @@ to the host. Review it before continuing, and set `PGBOUNCER_TAG` to a tested
 `edoburu/pgbouncer` tag. Compose refuses to start while it is empty.
 
 Limes is then served over plain HTTP at `http://localhost:8082`, on this machine only
-(`LIMES_BIND=0.0.0.0` in `.env` serves other hosts, and `LIMES_HTTP_PORT` changes the port). TLS is
+(`LIMES_BIND=0.0.0.0` and `LIMES_BIND6=::` in `.env` serve other hosts, and `LIMES_HTTP_PORT` changes the port; the IPv6 loopback is published too because `localhost` resolves to it first on many hosts). TLS is
 optional: `make certs`, then `make up HTTPS=1`, and Limes is also at `https://<host>` (443,
 `LIMES_HTTPS_PORT`). Every container runs under the compose project `limes`
 (`docker compose ps`). Create the first admin user with `make username`.
@@ -53,7 +53,7 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 
 | Variable | Default | What it does |
 |---|---|---|
-| `LIMES_BIND` / `LIMES_HTTP_PORT` / `LIMES_HTTPS_PORT` | `127.0.0.1` / `8082` / `443` | Where the plain HTTP proxy (and the optional TLS proxy) listen. `LIMES_BIND=0.0.0.0` serves other hosts; the login is then in clear text, so add TLS. |
+| `LIMES_BIND` / `LIMES_BIND6` / `LIMES_HTTP_PORT` / `LIMES_HTTPS_PORT` | `127.0.0.1` / `::1` / `8082` / `443` | Where the plain HTTP proxy (and the optional TLS proxy) listen. `LIMES_BIND=0.0.0.0` serves other hosts; the login is then in clear text, so add TLS. |
 | `LIMES_CONTINUOUS_SCANS` | `true` | Rediscover owned roots on their cadence. `false` stops all automatic scans and monitoring. |
 | `LIMES_ATTRIBUTION_AUTO_CONFIRM` | `true` | Auto-confirm candidates that pass ownership scoring and a registry-verified delegation. `false` only flags them. |
 | `LIMES_ALERT_WEBHOOK_URL` / `LIMES_ALERT_WEBHOOK_SECRET` | empty | Signed JSON webhook for change alerts (HMAC-SHA256 in `X-Limes-Signature`); both must be set. HTTP is refused unless `LIMES_ALERT_WEBHOOK_ALLOW_HTTP=true`. |
