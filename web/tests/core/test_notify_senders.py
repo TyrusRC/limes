@@ -1,3 +1,4 @@
+import json
 from unittest import mock
 
 import requests
@@ -45,3 +46,48 @@ class SenderFailureTest(TestCase):
                 mock.patch.object(notifications, 'send_telegram_message') as telegram:
             notifications.send_notif('hello', title='')
         telegram.assert_called_once_with('hello')
+
+
+class FakeCache:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+
+def reply(status=200, body=b'{"id": "777"}'):
+    return mock.Mock(status_code=status, content=body)
+
+
+class DiscordEmbedStateTest(TestCase):
+    """The message id and embed kept between two alerts are JSON, never a pickle."""
+    def setUp(self):
+        Notification.objects.create(send_to_discord=True, discord_hook_url=HOOK)
+        self.cache = FakeCache()
+        patcher = mock.patch.object(common_func, 'DISCORD_WEBHOOKS_CACHE', self.cache)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_second_message_edits_the_first(self):
+        with mock.patch('requests.post', return_value=reply()) as post, \
+                mock.patch('requests.patch', return_value=reply()) as patch:
+            common_func.send_discord_message('m', title='Scan 1', fields={'Status': 'RUNNING'})
+            state = json.loads(self.cache.data['discord:Scan 1'])
+            self.assertEqual(state['id'], '777')
+            common_func.send_discord_message('m', title='Scan 1', fields={'Engine': 'quick'})
+        post.assert_called_once()
+        self.assertTrue(patch.call_args.args[0].endswith('/messages/777'))
+        names = [f['name'] for f in patch.call_args.kwargs['json']['embeds'][0]['fields']]
+        self.assertEqual(names, ['Status', 'Engine'])
+
+    def test_cache_value_that_is_not_json_is_ignored(self):
+        self.cache.data['discord:Scan 2'] = b'\x80\x04\x95not json'
+        with mock.patch('requests.post', return_value=reply()) as post, \
+                mock.patch('requests.patch') as patch:
+            common_func.send_discord_message('m', title='Scan 2', fields={'Status': 'RUNNING'})
+        post.assert_called_once()
+        patch.assert_not_called()

@@ -2,7 +2,6 @@ import whatportis
 import socket
 import json
 import os
-import pickle
 import random
 import traceback
 import ipaddress
@@ -544,6 +543,33 @@ def send_lark_message(message):
 	except requests.exceptions.RequestException as exc:
 		logger.warning('Lark notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
 
+# Embed attributes that may come back from the cache. The cache holds JSON only: a
+# pickle there would let anyone who can write the broker run code in a worker.
+DISCORD_EMBED_KEYS = ('title', 'description', 'url', 'footer', 'image', 'thumbnail', 'video',
+		'provider', 'author', 'fields', 'color', 'timestamp')
+
+
+def _discord_state_load(title):
+	"""Message id and embed of the last Discord message sent under this title, or None."""
+	raw = DISCORD_WEBHOOKS_CACHE.get('discord:' + title) if title else None
+	try:
+		state = json.loads(raw) if raw else None
+	except ValueError:
+		return None
+	if not isinstance(state, dict):
+		return None
+	message_id = state.get('id') if isinstance(state.get('id'), str) else None
+	embed = state.get('embed')
+	if not isinstance(embed, dict) or not isinstance(embed.get('fields', []), list):
+		embed = None
+	return {'id': message_id, 'embed': embed}
+
+
+def _discord_state_save(title, message_id, embed):
+	state = {'id': message_id, 'embed': {k: v for k, v in embed.__dict__.items() if k in DISCORD_EMBED_KEYS}}
+	DISCORD_WEBHOOKS_CACHE.set('discord:' + title, json.dumps(state))
+
+
 def send_discord_message(
 		message,
 		title='',
@@ -579,28 +605,20 @@ def send_discord_message(
 	if use_discord_embed:
 		message = '' # no need for message in embeds
 
-	# Check for cached response in cache, using title as key
-	cached_response = DISCORD_WEBHOOKS_CACHE.get(title) if title else None
-	if cached_response:
-		cached_response = pickle.loads(cached_response)
+	# State of the previous message with this title: lets us edit it instead of posting again
+	state = _discord_state_load(title)
+	message_id = state['id'] if state else None
+	webhook = DiscordWebhook(
+		url=notif.discord_hook_url,
+		rate_limit_retry=False,
+		content=message)
+	webhook.timeout = CHAT_TIMEOUT
+	webhook.id = message_id
 
-	# Get existing webhook if found in cache
-	cached_webhook = DISCORD_WEBHOOKS_CACHE.get(title + '_webhook') if title else None
-	if cached_webhook:
-		webhook = pickle.loads(cached_webhook)
-		webhook.remove_embeds()
-	else:
-		webhook = DiscordWebhook(
-			url=notif.discord_hook_url,
-			rate_limit_retry=False,
-			content=message)
-	webhook.timeout = CHAT_TIMEOUT  # also for webhooks unpickled from the cache
-
-	# Get existing embed if found in cache
 	embed = None
-	cached_embed = DISCORD_WEBHOOKS_CACHE.get(title + '_embed') if title else None
-	if cached_embed:
-		embed = pickle.loads(cached_embed)
+	if state and state['embed']:
+		embed = DiscordEmbed(title=title)
+		embed.__dict__.update({k: v for k, v in state['embed'].items() if k in DISCORD_EMBED_KEYS})
 	elif use_discord_embed:
 		embed = DiscordEmbed(title=title)
 
@@ -643,9 +661,8 @@ def send_discord_message(
 
 		webhook.add_embed(embed)
 
-		# Add webhook and embed objects to cache, so we can pick them up later
-		DISCORD_WEBHOOKS_CACHE.set(title + '_webhook', pickle.dumps(webhook))
-		DISCORD_WEBHOOKS_CACHE.set(title + '_embed', pickle.dumps(embed))
+		# Keep the embed so a later message with this title can update it
+		_discord_state_save(title, message_id, embed)
 
 	# Add files to webhook
 	if files:
@@ -656,16 +673,15 @@ def send_discord_message(
 
 	# Edit webhook if it already existed, otherwise send new webhook
 	try:
-		if cached_response:
-			response = webhook.edit(cached_response)
+		if message_id:
+			response = webhook.edit()
 		else:
 			response = webhook.execute()
 	except requests.exceptions.RequestException as exc:
 		logger.warning('Discord notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
 		return False
-	if not cached_response:
-		if use_discord_embed and response.status_code == 200:
-			DISCORD_WEBHOOKS_CACHE.set(title, pickle.dumps(response))
+	if not message_id and embed and response.status_code == 200 and isinstance(webhook.id, str):
+		_discord_state_save(title, webhook.id, embed)
 
 	# Get status code
 	if response.status_code == 429:
