@@ -176,8 +176,8 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 91  # a rise must be justified in review; merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured
-WARM_QUERIES = 18  # a cached GET: session, project, prefs and page chrome, plus the Real-time card's three (it is never cached)
+OVERVIEW_QUERIES = 88  # a rise must be justified in review; merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured; -3 when the sidebar lost its wordlist, API vault and report permission checks
+WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome, plus the Real-time card's three (it is never cached)
 
 
 class OverviewPageBase(OverviewPageTest):
