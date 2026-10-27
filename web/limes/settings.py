@@ -95,12 +95,10 @@ LOOKALIKE_HTTP = env.bool('LIMES_LOOKALIKE_HTTP', default=False)
 # Common env vars
 DEBUG = env.bool('DEBUG', default=False)
 DOMAIN_NAME = env('DOMAIN_NAME', default='localhost:8000')
-TEMPLATE_DEBUG = env.bool('TEMPLATE_DEBUG', default=False)
 SECRET_FILE = os.path.join(LIMES_HOME, 'secret')
 DEFAULT_ENABLE_HTTP_CRAWL = env.bool('DEFAULT_ENABLE_HTTP_CRAWL', default=True)
 DEFAULT_RATE_LIMIT = env.int('DEFAULT_RATE_LIMIT', default=150) # requests / second
 DEFAULT_HTTP_TIMEOUT = env.int('DEFAULT_HTTP_TIMEOUT', default=5) # seconds
-DEFAULT_RETRIES = env.int('DEFAULT_RETRIES', default=1)
 DEFAULT_THREADS = env.int('DEFAULT_THREADS', default=30)
 
 # Globals
@@ -164,7 +162,6 @@ INSTALLED_APPS = [
     'django_ace',
     'django_celery_beat',
     'mathfilters',
-    'drf_yasg',
     'rolepermissions'
 ]
 MIDDLEWARE = [
@@ -274,8 +271,6 @@ CELERY_BROKER_URL = env("CELERY_BROKER", default="redis://redis:6379/0")
 CELERY_RESULT_BACKEND = env("CELERY_BROKER", default="redis://redis:6379/0")
 CELERY_ENABLE_UTC = False
 CELERY_TIMEZONE = 'UTC'
-CELERY_IGNORE_RESULTS = False
-CELERY_EAGER_PROPAGATES_EXCEPTIONS = True
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',

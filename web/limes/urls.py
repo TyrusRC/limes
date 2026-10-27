@@ -1,31 +1,14 @@
 from django.conf import settings
-from django.conf.urls import url
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
-from drf_yasg import openapi
-from drf_yasg.views import get_schema_view
-from rest_framework import permissions
 
 from limes.health import healthz
 from limes.views import serve_protected_media
 
-schema_view = get_schema_view(
-   openapi.Info(
-      title="Limes API",
-      default_version='v1',
-      description="Limes: An Automated reconnaissance framework.",
-      contact=openapi.Contact(email="yogesh.ojha11@gmail.com"),
-   ),
-   public=True,
-   permission_classes=[permissions.AllowAny],
-)
-
 urlpatterns = [
     path('healthz', healthz, name='healthz'),
-    url(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
-    url(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path(
         'admin/',
         admin.site.urls),
