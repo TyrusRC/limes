@@ -7,6 +7,11 @@ Lookalikes
 
 {% block page_title %}Lookalikes{% endblock page_title %}
 
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Lookalikes</li>
+{% endblock breadcrumb_title %}
+
 {% block main_content %}
 {% with can_write=user|can:'modify_targets' %}
 <p class="l-page-sub" id="lk_summary" aria-live="polite"></p>

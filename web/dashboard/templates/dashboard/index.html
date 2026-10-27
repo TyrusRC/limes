@@ -8,6 +8,11 @@ Overview
 
 {% block page_title %}Overview{% endblock page_title %}
 
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Overview</li>
+{% endblock breadcrumb_title %}
+
 
 {% block main_content %}
 {% url 'assets' slug=project.slug as assets_url %}
