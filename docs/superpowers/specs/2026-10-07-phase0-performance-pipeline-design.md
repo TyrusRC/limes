@@ -21,7 +21,7 @@ Scans get stuck, the UI drifts from what the workers are doing, the dashboard is
 | R10 | Every task start/end enqueues a notification task even when notifications are off | `celery_custom_task.py:220-234` |
 | R11 | Dashboard runs ~30 separate COUNT queries through 2-3 joins, uncached; `CACHES` is per-process LocMem | `dashboard/views.py:39-100`, `settings.py:340` |
 | R12 | Production serves Django with `manage.py runserver` (single-process dev server); three containers run `migrate` concurrently at start | `web/entrypoint.sh`, `beat-entrypoint.sh` |
-| R13 | Overlapping tools (5 crawlers, 6 subdomain tools, dalfox/crlfuzz/wafw00f duplicating assay) waste CPU, RAM and image size | `tasks.py`, `Dockerfile`, entrypoint |
+| R13 | Overlapping tools (5 crawlers, 6 subdomain tools, dalfox/crlfuzz/wafw00f duplicating vigil) waste CPU, RAM and image size | `tasks.py`, `Dockerfile`, entrypoint |
 | S1 | Commands built as strings and run with `shell=True` with target-derived values interpolated (command injection) | many call sites in `tasks.py` |
 | S2 | `ollama` publishes 11434 on all interfaces without auth | `docker-compose.yml:143-151` |
 | S3 | `.env` with credentials is tracked in git (upstream defaults, publicly known) | `.env` |
@@ -58,7 +58,7 @@ Task routing is declared once in settings (`CELERY_TASK_ROUTES`) instead of per-
 
 `web/limes/sizing.py`, run by each service's entrypoint, reads the container's real limits: cgroup v2 `cpu.max` and `memory.max`, falling back to `os.cpu_count()` and `/proc/meminfo`. It prints shell exports:
 
-- `SCAN_SLOTS = clamp(min(cpus, (mem - reserve) // per_slot_mem), 1, 32)`, with `per_slot_mem = 1.5 GiB` (assay may launch headless Chrome) and `reserve = 1 GiB`.
+- `SCAN_SLOTS = clamp(min(cpus, (mem - reserve) // per_slot_mem), 1, 32)`, with `per_slot_mem = 1.5 GiB` (vigil may launch headless Chrome) and `reserve = 1 GiB`.
 - `IO_CONCURRENCY = min(50, pool_size)`.
 - `WEB_WORKERS = clamp(2 * cpus + 1, 2, 9)`.
 
@@ -97,10 +97,10 @@ Replaces the tool-selection logic in `tasks.py` with fixed stages; profiles (`qu
 3. Ports: naabu; nmap `-sV` only on open ports.
 4. HTTP probe: httpx with title, status, tech, TLS, and screenshots (replaces EyeWitness).
 5. Crawl: katana (`-jc`, scope locked per host with `-fs fqdn`) + gau; JS, source maps and exposed `.git` content saved under the scan's results directory.
-6. DAST: assay as a subprocess with `--json`, profile mapped from the scan profile, destructive flags never passed, crawl URLs as targets. Findings map to `Vulnerability` (severity, confidence, CWE, OWASP, CVSS, `verified`, evidence, remediation).
+6. DAST: vigil as a subprocess with `--json`, profile mapped from the scan profile, destructive flags never passed, crawl URLs as targets. Findings map to `Vulnerability` (severity, confidence, CWE, OWASP, CVSS, `verified`, evidence, remediation).
 7. Code audit: `mantis.audit(dir, packs=["secrets", "web"])` on stage 5 artifacts, SAST only. Findings map to `Vulnerability` with source `mantis`.
 
-Removed from tasks, Dockerfile and entrypoint: sublist3r, oneforall, ctfr, tlsx-as-discovery, gospider, hakrawler, waybackurls, EyeWitness, Firefox/geckodriver, the standalone nuclei task (nuclei stays installed because assay uses it), dalfox, crlfuzz, wafw00f, GooFuzz. theHarvester, h8mail, dorking and ffuf are disabled in the default pipeline (code kept behind a disabled stage until their sub-project decides).
+Removed from tasks, Dockerfile and entrypoint: sublist3r, oneforall, ctfr, tlsx-as-discovery, gospider, hakrawler, waybackurls, EyeWitness, Firefox/geckodriver, the standalone nuclei task (nuclei stays installed because vigil uses it), dalfox, crlfuzz, wafw00f, GooFuzz. theHarvester, h8mail, dorking and ffuf are disabled in the default pipeline (code kept behind a disabled stage until their sub-project decides).
 
 Existing scan engine YAML is mapped to the nearest profile by a data migration; unknown keys are ignored and logged.
 
@@ -123,8 +123,8 @@ Existing scan engine YAML is mapped to the nearest profile by a data migration; 
 
 - Project-level identity (User-Agent + headers), per-target override via the existing `Domain.request_headers`. Each header has `secret: bool`.
 - Secret values are encrypted at rest with a key from `LIMES_SECRET_KEY_ENCRYPTION` (Fernet from `cryptography`).
-- Applied to httpx (explicit `User-Agent`, `-random-agent` disabled), katana, and assay (written into assay's `--config` YAML: `user_agent`, `headers`). Secrets reach tools only through 0600 temp files under the scan's results dir, deleted when the task ends (including on failure).
-- Full coverage of assay traffic paths (headless, raw sockets, nuclei UA) depends on the separate assay `RequestIdentity` change; until it lands, the UI states which assay detectors may not carry the identity.
+- Applied to httpx (explicit `User-Agent`, `-random-agent` disabled), katana, and vigil (written into vigil's `--config` YAML: `user_agent`, `headers`). Secrets reach tools only through 0600 temp files under the scan's results dir, deleted when the task ends (including on failure).
+- Full coverage of vigil traffic paths (headless, raw sockets, nuclei UA) depends on the separate vigil `RequestIdentity` change; until it lands, the UI states which vigil detectors may not carry the identity.
 
 ### 9. Security fixes (S2, S3)
 
@@ -143,7 +143,7 @@ Bug fixes start with a failing test that reproduces the bug:
 - S1: the runner rejects strings; a hostname containing `;`, `$()` or backticks is rejected at intake and never reaches a shell.
 - Redaction: a secret header value never appears in `Command`, `commands.txt` or logs.
 - Sizing: unit tests over fake cgroup files (limits set, `max`, missing files).
-- Pipeline mapping: assay and mantis JSON samples map to the expected `Vulnerability` fields; destructive assay flags never appear in the built argument list.
+- Pipeline mapping: vigil and mantis JSON samples map to the expected `Vulnerability` fields; destructive vigil flags never appear in the built argument list.
 
 Benchmark (recorded before any change and after phase 0, results committed under `docs/benchmarks/`):
 

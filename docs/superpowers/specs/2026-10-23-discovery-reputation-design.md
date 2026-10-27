@@ -36,7 +36,7 @@ This project fills those gaps using free data, while keeping Limes' rule about c
 
 ### Anti-goals (a failure even if it works)
 
-- **Scanning or attacking a lookalike site.** No port scan, nuclei, assay, crawl, screenshot or path probe ever runs on a lookalike. This is guaranteed by construction: lookalikes are a separate model, never `Asset` rows, so no pipeline stage can select them (see Data model).
+- **Scanning or attacking a lookalike site.** No port scan, nuclei, vigil, crawl, screenshot or path probe ever runs on a lookalike. This is guaranteed by construction: lookalikes are a separate model, never `Asset` rows, so no pipeline stage can select them (see Data model).
 - **Treating a lookalike as owned.** "This is ours" (a defensive registration) does not promote the row. It opens the existing manual add-asset flow, which the user confirms and which is audited.
 - **Flooding DNS or RDAP.** Hard daily budgets (`ratelimit.take_daily`, fails closed), per-provider spacing (`ratelimit.reserve`), a per-tick share (`ratelimit.per_tick`), and a capped candidate set per root.
 - **Redistributing feed data.** Raw feed files stay on the artifact volume and are never served by the UI, the API, exports or the MCP server. Only matches against the project's own assets are shown.

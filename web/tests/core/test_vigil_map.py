@@ -3,9 +3,9 @@ import pathlib
 
 from django.test import SimpleTestCase
 
-from limes.integrations import assay, severity
+from limes.integrations import vigil, severity
 
-FIX = pathlib.Path(__file__).parent / 'fixtures' / 'assay_report_sample.json'
+FIX = pathlib.Path(__file__).parent / 'fixtures' / 'vigil_report_sample.json'
 
 
 class SeverityTest(SimpleTestCase):
@@ -13,33 +13,33 @@ class SeverityTest(SimpleTestCase):
         self.assertEqual((severity.to_int('critical'), severity.to_int('info'), severity.to_int('weird')), (4, 0, -1))
 
 
-class AssayArgvTest(SimpleTestCase):
+class VigilArgvTest(SimpleTestCase):
     def test_argv_has_json_profile_and_no_destructive_flags(self):
-        argv = assay.build_argv('/t.txt', 'normal', '/id.yaml', '/out', extra_no_flags=[])
+        argv = vigil.build_argv('/t.txt', 'normal', '/id.yaml', '/out', extra_no_flags=[])
         self.assertIn('--json', argv)
         self.assertIn('--profile', argv)
         self.assertIn('normal', argv)
-        self.assertFalse(assay.DESTRUCTIVE_FLAGS & set(argv))
+        self.assertFalse(vigil.DESTRUCTIVE_FLAGS & set(argv))
 
     def test_passive_profile(self):
-        argv = assay.build_argv('/t.txt', 'passive', '/id.yaml', '/out', extra_no_flags=['--no-postmessage'])
+        argv = vigil.build_argv('/t.txt', 'passive', '/id.yaml', '/out', extra_no_flags=['--no-postmessage'])
         self.assertIn('passive', argv)
         self.assertIn('--no-postmessage', argv)
 
 
-class AssayParseTest(SimpleTestCase):
+class VigilParseTest(SimpleTestCase):
     def test_maps_findings(self):
         report = json.loads(FIX.read_text())
-        vulns = assay.parse_report(report)
+        vulns = vigil.parse_report(report)
         self.assertEqual(len(vulns), 1)
         v = vulns[0]
         self.assertEqual(v['severity'], 3)
         self.assertEqual(v['http_url'], 'https://t.test/a?id=1')
-        self.assertEqual(v['source'], 'assay')
+        self.assertEqual(v['source'], 'vigil')
         self.assertEqual(v['cwe_ids'], ['CWE-89'])
         self.assertAlmostEqual(v['cvss_score'], 8.2)
         self.assertEqual(v['name'], 'SQLi')
 
     def test_empty_findings(self):
-        self.assertEqual(assay.parse_report({'scan_result': {'findings': []}}), [])
-        self.assertEqual(assay.parse_report({}), [])
+        self.assertEqual(vigil.parse_report({'scan_result': {'findings': []}}), [])
+        self.assertEqual(vigil.parse_report({}), [])

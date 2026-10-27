@@ -101,7 +101,7 @@ class LimesTask(Task):
 			if self.engine: # task not in engine.tasks, skip it.
 				# Map helper sub-tasks to the engine task that owns them, so they
 				# are not skipped when only the parent is listed in engine.tasks.
-				# (The old DAST sub-tasks now run inside vulnerability_scan/assay.)
+				# (The old DAST sub-tasks now run inside vulnerability_scan/vigil.)
 				dependent_tasks = {}
 				if (self.track and self.task_name not in ALWAYS_RUN and self.task_name not in self.engine.tasks
 						and dependent_tasks.get(self.task_name) not in self.engine.tasks):

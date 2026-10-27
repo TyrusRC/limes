@@ -62,7 +62,7 @@ An operator wants to point Claude Code, Claude Desktop or any MCP client at thei
 
 ## Design (my calls)
 
-- **Packages:** the official `mcp` Python SDK (FastMCP, Streamable HTTP, stateless mode), pinned to an exact version. Pinned, unlike mantis and assay, which track `@main` by the user's rule for their own tools.
+- **Packages:** the official `mcp` Python SDK (FastMCP, Streamable HTTP, stateless mode), pinned to an exact version. Pinned, unlike mantis and vigil, which track `@main` by the user's rule for their own tools.
   - **Version:** `mcp==1.30.0` (released 2026-09-07; requires Python 3.10+, which the image has). 2.x exists (2.3.0 on 2026-10-02) but is a new major line that swaps in `httpx2`, so v1 is the safer pin. The builder re-checks the release date and the API at build time.
   - **Dependency check, done:** a resolver dry run inside the current web image (pydantic 2.14, anyio 4.15, httpx 0.28, langchain 0.2) finds no conflicts. It would add PyJWT, httpx-sse, python-multipart, sse-starlette, starlette and uvicorn. So the MCP service can use the same image.
 - **Where it runs:** a separate compose service `mcp` (same image, uvicorn, ASGI), because gunicorn here is WSGI and the SDK serves ASGI. It calls `django.setup()` and uses the ORM; blocking ORM calls run in a thread pool, and `close_old_connections()` is called inside the threaded function both before and after the ORM work, because calling it from the event-loop thread doesn't touch the pool threads' connections and they would leak. It listens only on the compose network. It sits behind the compose profile `mcp` (like `ollama`): `make up MCP=1`.

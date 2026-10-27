@@ -8,7 +8,7 @@ class ProfileTest(SimpleTestCase):
         self.assertEqual(set(profiles.PROFILES), {'quick', 'normal', 'thorough', 'passive'})
 
     def test_passive_disables_active(self):
-        self.assertEqual(profiles.PROFILES['passive'].assay_profile, 'passive')
+        self.assertEqual(profiles.PROFILES['passive'].vigil_profile, 'passive')
         self.assertFalse(profiles.PROFILES['passive'].nmap_enabled)
 
     def test_resolve_unknown_is_normal(self):

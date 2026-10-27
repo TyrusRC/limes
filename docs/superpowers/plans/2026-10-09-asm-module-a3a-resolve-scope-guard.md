@@ -871,7 +871,7 @@ class StageScopeTest(TestCase):
         with mock.patch.object(stages, 'get_http_urls', return_value=urls), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')) as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))
-        self.assertEqual(self.read('assay_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
+        self.assertEqual(self.read('vigil_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
         run.assert_called_once()
 
     def test_screenshot_contact_level(self):

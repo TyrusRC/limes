@@ -58,11 +58,11 @@ class RenderTest(SimpleTestCase):
         ident = self.ident(headers=[('Authorization', 'Bearer T0K3N', True), ('X-Env', 'test', False)])
         self.assertEqual(identity.redaction_secrets(ident), ['Bearer T0K3N'])
 
-    def test_assay_config_written_with_identity(self):
+    def test_vigil_config_written_with_identity(self):
         ident = self.ident(ua='Limes/1.0', headers=[('X-Env', 'test', False)])
         import tempfile
         path = tempfile.mktemp(suffix='.yaml')
-        tmp = identity.write_assay_config(ident, profile='normal', path=path)
+        tmp = identity.write_vigil_config(ident, profile='normal', path=path)
         body = open(path).read()
         self.assertIn('Limes/1.0', body)
         self.assertIn('X-Env: test', body)

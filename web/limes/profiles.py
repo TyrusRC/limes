@@ -6,13 +6,13 @@ from typing import Dict, List
 
 @dataclass(frozen=True)
 class Profile:
-    """Scan profile defining depth, limits, timeouts and assay configuration."""
+    """Scan profile defining depth, limits, timeouts and vigil configuration."""
     name: str
     crawl_depth: int
     crawl_max_pages: int
     naabu_ports: List[str]
     nmap_enabled: bool
-    assay_profile: str
+    vigil_profile: str
     timeouts: Dict[str, int]
     nuclei_severities: List[str]
 
@@ -35,7 +35,7 @@ PROFILES = {
         crawl_max_pages=50,
         naabu_ports=['top-100'],
         nmap_enabled=False,
-        assay_profile='quick',
+        vigil_profile='quick',
         timeouts=DEFAULT_TIMEOUTS.copy(),
         nuclei_severities=['high', 'critical'],
     ),
@@ -45,7 +45,7 @@ PROFILES = {
         crawl_max_pages=200,
         naabu_ports=['top-1000'],
         nmap_enabled=True,
-        assay_profile='normal',
+        vigil_profile='normal',
         timeouts=DEFAULT_TIMEOUTS.copy(),
         nuclei_severities=DEFAULT_NUCLEI_SEVERITIES.copy(),
     ),
@@ -55,7 +55,7 @@ PROFILES = {
         crawl_max_pages=500,
         naabu_ports=['1-65535'],
         nmap_enabled=True,
-        assay_profile='thorough',
+        vigil_profile='thorough',
         timeouts={**DEFAULT_TIMEOUTS, 'port_scan': 600, 'nmap_scan': 1200},
         nuclei_severities=DEFAULT_NUCLEI_SEVERITIES.copy(),
     ),
@@ -65,7 +65,7 @@ PROFILES = {
         crawl_max_pages=50,
         naabu_ports=[],
         nmap_enabled=False,
-        assay_profile='passive',
+        vigil_profile='passive',
         timeouts=DEFAULT_TIMEOUTS.copy(),
         nuclei_severities=['medium', 'high', 'critical'],
     ),

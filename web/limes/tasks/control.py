@@ -187,7 +187,7 @@ def initiate_scan(
 
 
 		# Build Celery tasks, crafted according to the dependency graph below:
-		# subdomain_discovery --> port_scan --> fetch_url --> vulnerability_scan (assay DAST)
+		# subdomain_discovery --> port_scan --> fetch_url --> vulnerability_scan (vigil DAST)
 		#                                                     screenshot
 		#                                                     code_audit
 		workflow = build_workflow(ctx, scan_mode)

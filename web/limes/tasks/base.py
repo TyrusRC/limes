@@ -23,7 +23,7 @@ from pycvesearch import CVESearch
 
 from limes.celery import app
 from limes import commands, identity, profiles
-from limes.integrations import assay, mantis
+from limes.integrations import vigil, mantis
 from limes.pipeline import amass, crawl
 from limes.celery_custom_task import LimesTask
 from limes.command_log import DbCommandRecorder

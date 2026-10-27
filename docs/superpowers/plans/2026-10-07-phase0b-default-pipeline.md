@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the pick-any-tools scan model with one fixed, efficient pipeline — amass v5 + subfinder → dnsx → naabu + nmap → httpx → katana + gau → assay (DAST) → mantis (SAST on crawled code) — remove ~14 overlapping tools, and give every target a scan identity (custom User-Agent + headers) carried safely through the tools.
+**Goal:** Replace the pick-any-tools scan model with one fixed, efficient pipeline — amass v5 + subfinder → dnsx → naabu + nmap → httpx → katana + gau → vigil (DAST) → mantis (SAST on crawled code) — remove ~14 overlapping tools, and give every target a scan identity (custom User-Agent + headers) carried safely through the tools.
 
-**Architecture:** Scan engines stop choosing tools and become profiles (`quick`, `normal`, `thorough`, `passive`) that only tune depth/limits/timeouts. Each stage is a task that shells out through phase 0A's argument-list runner (no `shell=True`). assay and mantis are external programs invoked as subprocesses with `--json` / the `mantis.audit()` API; their findings map onto the existing `Vulnerability` model. assay runs nuclei internally, so the standalone nuclei/dalfox/crlfuzz/wafw00f tasks are deleted. A per-project scan identity (reusing `Domain.request_headers`) with encrypted secret headers is written into every tool that sends HTTP traffic, via 0600 temp files for secrets.
+**Architecture:** Scan engines stop choosing tools and become profiles (`quick`, `normal`, `thorough`, `passive`) that only tune depth/limits/timeouts. Each stage is a task that shells out through phase 0A's argument-list runner (no `shell=True`). vigil and mantis are external programs invoked as subprocesses with `--json` / the `mantis.audit()` API; their findings map onto the existing `Vulnerability` model. vigil runs nuclei internally, so the standalone nuclei/dalfox/crlfuzz/wafw00f tasks are deleted. A per-project scan identity (reusing `Domain.request_headers`) with encrypted secret headers is written into every tool that sends HTTP traffic, via 0600 temp files for secrets.
 
-**Tech Stack:** Python 3.10, Django 3.2, Celery 5.4, the phase 0A runner (`limes.commands`), assay (Go, `/home/kali/project/trc/assay`), mantis (`mantis-sast`, `/home/kali/project/trc/mantis`), amass v5, subfinder, dnsx, naabu, nmap, httpx, katana, gau, opengrep.
+**Tech Stack:** Python 3.10, Django 3.2, Celery 5.4, the phase 0A runner (`limes.commands`), vigil (Go, `/home/kali/project/trc/vigil`), mantis (`mantis-sast`, `/home/kali/project/trc/mantis`), amass v5, subfinder, dnsx, naabu, nmap, httpx, katana, gau, opengrep.
 
 **Spec:** `docs/superpowers/specs/2026-10-07-phase0-performance-pipeline-design.md` (this plan implements R13 and the completion of S1, plus the scan-identity section; R1-R12/S2/S3 are plan 0A). Roadmap: `docs/superpowers/specs/2026-10-07-asm-platform-roadmap-design.md`.
 
@@ -16,8 +16,8 @@
 
 - `web/limes/tasks.py`, `common_func.py`, `definitions.py` use TABS. New modules use 4 spaces.
 - Pinned tool versions (build args in `web/Dockerfile`): Go `go1.27.1`; amass `v5.1.1` (`CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1`); subfinder `v2.16.0`; dnsx `v1.3.1`; naabu `v2.6.1`; httpx `v1.12.0`; katana `v1.8.0`; nuclei `v3.11.1`; gau `v2.2.4`; opengrep `v1.30.1` (asset `opengrep_manylinux_x86` / `_aarch64`, chmod +x to `/usr/local/bin/opengrep`); mantis via `pipx install mantis-sast` or `pip install mantis-sast`.
-- assay is built from source at `/home/kali/project/trc/assay` and the `assay` binary copied into the image; it is invoked as a subprocess, never `assay serve`.
-- Destructive/heavy assay flags are NEVER in a built argv on scheduled scans: `--h2-reset`, `--h2-continuation`, `--h2-madeyoureset`, `--redos`, `--mass-assign`, `--proto-pollution-server`, `--rate-limit`.
+- vigil is built from source at `/home/kali/project/trc/vigil` and the `vigil` binary copied into the image; it is invoked as a subprocess, never `vigil serve`.
+- Destructive/heavy vigil flags are NEVER in a built argv on scheduled scans: `--h2-reset`, `--h2-continuation`, `--h2-madeyoureset`, `--redos`, `--mass-assign`, `--proto-pollution-server`, `--rate-limit`.
 - Every external tool runs through `limes.commands.run`/`stream` (argument lists; no `shell=True`). No new `shell=True` call sites.
 - Scope stays as today: subdomains of the target root only; no ASN/CIDR/WHOIS expansion (that is sub-project 2). amass runs in domain-enumeration mode for the single target domain.
 - Scan identity secret header values never appear in the DB `Command` row, `commands.txt`, logs, or tool argv (redacted or passed via 0600 temp file).
@@ -27,7 +27,7 @@
 ## Review Focus
 
 1. **A target whose scan identity has no User-Agent** (only extra headers): httpx must still get a deterministic UA and `-random-agent` must stay off, or probes become non-reproducible — Task 9 tests identity with headers but no UA.
-2. **assay exits non-zero because a finding crossed a fail-on threshold (exit 2) vs a real crash (exit 1)** — the DAST task must treat exit 2 as success-with-findings and only exit 1 as failure — Task 6 tests both exit codes.
+2. **vigil exits non-zero because a finding crossed a fail-on threshold (exit 2) vs a real crash (exit 1)** — the DAST task must treat exit 2 as success-with-findings and only exit 1 as failure — Task 6 tests both exit codes.
 3. **amass v5 produces no text file (writes to its asset DB)**: reading results via the wrong command yields zero subdomains silently — Task 2 tests the parse step against a captured `amass` output sample, and the task fails loudly on an empty/missing DB.
 4. **A crawled JS bundle contains a secret that mantis reports**: the finding's `http_url` must point at the asset it came from, not the temp audit dir, or remediation can't locate it — Task 7 tests the path mapping.
 5. **A profile the migration can't map** (unknown/garbage engine YAML): must fall back to `normal` and log, never crash `initiate_scan` — Task 8 tests an unmappable engine.
@@ -39,19 +39,19 @@
 | File | Responsibility |
 |---|---|
 | `web/limes/identity.py` (create) | `ScanIdentity` dataclass; load from project/target; encrypt/decrypt secret header values; render for each tool; temp-file lifecycle |
-| `web/limes/profiles.py` (create) | `PROFILES` (quick/normal/thorough/passive) → depth, limits, timeouts, assay profile name; `resolve_profile(engine)`; `map_engine_to_profile(yaml)` |
+| `web/limes/profiles.py` (create) | `PROFILES` (quick/normal/thorough/passive) → depth, limits, timeouts, vigil profile name; `resolve_profile(engine)`; `map_engine_to_profile(yaml)` |
 | `web/limes/pipeline/__init__.py` (create) | stage registry + ordered DAG builder used by `initiate_scan` |
 | `web/limes/pipeline/discovery.py` (create) | amass v5 + subfinder, merge, save via `save_subdomain` |
 | `web/limes/pipeline/amass.py` (create) | build amass enum argv; read names back from its asset DB; parse |
 | `web/limes/pipeline/resolve.py` (create) | dnsx resolve + wildcard filter |
 | `web/limes/pipeline/crawl.py` (create) | katana + gau; collect JS/sourcemaps/.git artifacts dir |
-| `web/limes/integrations/assay.py` (create) | build argv, run, map assay JSON findings → `save_vulnerability` kwargs |
+| `web/limes/integrations/vigil.py` (create) | build argv, run, map vigil JSON findings → `save_vulnerability` kwargs |
 | `web/limes/integrations/mantis.py` (create) | run `mantis.audit()` on crawl artifacts; map findings → `save_vulnerability` kwargs |
 | `web/limes/integrations/severity.py` (create) | shared severity-string → int map |
 | `web/limes/tasks.py` (modify) | rewrite stage tasks; delete removed-tool tasks; new `initiate_scan` workflow |
 | `web/limes/definitions.py` (modify) | profile keys; remove dead tool constants |
 | `web/scanEngine/...` (modify) | engine form/UI becomes profile selector; data migration |
-| `web/Dockerfile` (modify) | pin+trim Go tools, add opengrep, assay, mantis; drop removed tools and Firefox/gecko |
+| `web/Dockerfile` (modify) | pin+trim Go tools, add opengrep, vigil, mantis; drop removed tools and Firefox/gecko |
 | `web/requirements.txt` (modify) | add `mantis-sast`, `cryptography`; remove `wafw00f` |
 | test files under `web/tests/core/` | per task |
 
@@ -64,7 +64,7 @@
 - Modify: `web/requirements.txt` (add `cryptography==43.0.1`), `web/limes/settings.py` (read `LIMES_SECRET_KEY_ENCRYPTION`)
 
 **Interfaces:**
-- Produces: `ScanIdentity(user_agent: str, headers: list[Header])` where `Header(name, value, secret: bool)`; `encrypt(value) -> str` / `decrypt(token) -> str` (Fernet, key from `settings.HEADER_ENCRYPTION_KEY`); `ScanIdentity.for_domain(domain) -> ScanIdentity` (reads `Domain.request_headers`); `render_httpx(identity) -> (argv_list, tempfiles)`; `render_header_args(identity, flag='-H') -> (argv_list, tempfiles)`; `write_assay_config(identity, profile, path) -> tempfiles`; `redaction_secrets(identity) -> list[str]`; `cleanup(tempfiles)`. Every renderer returns secret values only inside 0600 temp files; argv contains non-secret headers inline and `@file` refs (httpx/katana support header files) for secrets.
+- Produces: `ScanIdentity(user_agent: str, headers: list[Header])` where `Header(name, value, secret: bool)`; `encrypt(value) -> str` / `decrypt(token) -> str` (Fernet, key from `settings.HEADER_ENCRYPTION_KEY`); `ScanIdentity.for_domain(domain) -> ScanIdentity` (reads `Domain.request_headers`); `render_httpx(identity) -> (argv_list, tempfiles)`; `render_header_args(identity, flag='-H') -> (argv_list, tempfiles)`; `write_vigil_config(identity, profile, path) -> tempfiles`; `redaction_secrets(identity) -> list[str]`; `cleanup(tempfiles)`. Every renderer returns secret values only inside 0600 temp files; argv contains non-secret headers inline and `@file` refs (httpx/katana support header files) for secrets.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -123,11 +123,11 @@ class RenderTest(SimpleTestCase):
         ident = self.ident(headers=[('Authorization', 'Bearer T0K3N', True), ('X-Env', 'test', False)])
         self.assertEqual(identity.redaction_secrets(ident), ['Bearer T0K3N'])
 
-    def test_assay_config_written_with_identity(self):
+    def test_vigil_config_written_with_identity(self):
         ident = self.ident(ua='Limes/1.0', headers=[('X-Env', 'test', False)])
         import tempfile
         path = tempfile.mktemp(suffix='.yaml')
-        tmp = identity.write_assay_config(ident, profile='normal', path=path)
+        tmp = identity.write_vigil_config(ident, profile='normal', path=path)
         body = open(path).read()
         self.assertIn('Limes/1.0', body)
         self.assertIn('X-Env: test', body)
@@ -137,7 +137,7 @@ class RenderTest(SimpleTestCase):
 
 - [ ] **Step 2: Run to see it fail** — `make test` → ImportError.
 
-- [ ] **Step 3: Implement** `web/limes/identity.py` with `Header`/`ScanIdentity` dataclasses, Fernet encrypt/decrypt using `settings.HEADER_ENCRYPTION_KEY`, a module-level `DEFAULT_UA = 'limes/scan'` used whenever `user_agent` is empty, renderers that write secret headers to `tempfile.NamedTemporaryFile(delete=False)` chmod 0600 and reference them with httpx/katana `-H` file syntax (write non-secret headers inline), `write_assay_config` emitting YAML with `user_agent`, `headers`, `profile`, and `cleanup` unlinking temp files. `settings.py`: `HEADER_ENCRYPTION_KEY = env('LIMES_SECRET_KEY_ENCRYPTION', default=None)` and, when None, derive a stable key from `SECRET_KEY` so dev works (note in code: production must set it).
+- [ ] **Step 3: Implement** `web/limes/identity.py` with `Header`/`ScanIdentity` dataclasses, Fernet encrypt/decrypt using `settings.HEADER_ENCRYPTION_KEY`, a module-level `DEFAULT_UA = 'limes/scan'` used whenever `user_agent` is empty, renderers that write secret headers to `tempfile.NamedTemporaryFile(delete=False)` chmod 0600 and reference them with httpx/katana `-H` file syntax (write non-secret headers inline), `write_vigil_config` emitting YAML with `user_agent`, `headers`, `profile`, and `cleanup` unlinking temp files. `settings.py`: `HEADER_ENCRYPTION_KEY = env('LIMES_SECRET_KEY_ENCRYPTION', default=None)` and, when None, derive a stable key from `SECRET_KEY` so dev works (note in code: production must set it).
 NOTE in code: header-file syntax differs per tool; httpx/katana accept `-H` repeated and a file — confirm the exact file flag against the installed tool version during Step 4 and adjust the renderer, keeping the tests green.
 
 - [ ] **Step 4: Run tests** — `make test`, identity tests PASS.
@@ -259,28 +259,28 @@ git commit -m "feat: amass v5 enum/subs integration (asset-DB aware)"
 
 ---
 
-### Task 3: Severity map + assay finding mapping
+### Task 3: Severity map + vigil finding mapping
 
 **Files:**
-- Create: `web/limes/integrations/__init__.py`, `web/limes/integrations/severity.py`, `web/limes/integrations/assay.py`, `web/tests/core/test_assay_map.py`, `web/tests/core/fixtures/assay_report_sample.json`
+- Create: `web/limes/integrations/__init__.py`, `web/limes/integrations/severity.py`, `web/limes/integrations/vigil.py`, `web/tests/core/test_vigil_map.py`, `web/tests/core/fixtures/vigil_report_sample.json`
 
 **Interfaces:**
-- Produces: `severity.to_int(s: str) -> int` ({critical:4, high:3, medium:2, low:1, info:0, unknown/other:-1}); `assay.build_argv(targets_file, profile, identity_config_path, output_dir, extra_no_flags) -> list[str]`; `assay.DESTRUCTIVE_FLAGS: frozenset`; `assay.parse_report(report_json: dict) -> list[dict]` where each dict is `save_vulnerability` kwargs (`name, severity, type, http_url, description, remediation, cvss_score, cve_ids, cwe_ids, references, request, response, source='assay', matcher_name`); `assay.AssayError`.
+- Produces: `severity.to_int(s: str) -> int` ({critical:4, high:3, medium:2, low:1, info:0, unknown/other:-1}); `vigil.build_argv(targets_file, profile, identity_config_path, output_dir, extra_no_flags) -> list[str]`; `vigil.DESTRUCTIVE_FLAGS: frozenset`; `vigil.parse_report(report_json: dict) -> list[dict]` where each dict is `save_vulnerability` kwargs (`name, severity, type, http_url, description, remediation, cvss_score, cve_ids, cwe_ids, references, request, response, source='vigil', matcher_name`); `vigil.VigilError`.
 
-- [ ] **Step 1: Create the sample** `web/tests/core/fixtures/assay_report_sample.json` — a minimal real-shape report: `{"version":"...","tool":"assay","scan_result":{"findings":[{"id":"...","type":"sql-injection","severity":"high","confidence":"confirmed","title":"SQLi","url":"https://t.test/a?id=1","parameter":"id","cwe":["CWE-89"],"top10":["A03:2025"],"cvss":8.2,"evidence":"...","request":"GET ...","response":"HTTP/1.1 500","remediation":"Parameterize","verified":true}],"technologies":["nginx"]},"summary":{}}`
+- [ ] **Step 1: Create the sample** `web/tests/core/fixtures/vigil_report_sample.json` — a minimal real-shape report: `{"version":"...","tool":"vigil","scan_result":{"findings":[{"id":"...","type":"sql-injection","severity":"high","confidence":"confirmed","title":"SQLi","url":"https://t.test/a?id=1","parameter":"id","cwe":["CWE-89"],"top10":["A03:2025"],"cvss":8.2,"evidence":"...","request":"GET ...","response":"HTTP/1.1 500","remediation":"Parameterize","verified":true}],"technologies":["nginx"]},"summary":{}}`
 
 - [ ] **Step 2: Write failing tests**
 
-`web/tests/core/test_assay_map.py`:
+`web/tests/core/test_vigil_map.py`:
 ```python
 import json
 import pathlib
 
 from django.test import SimpleTestCase
 
-from limes.integrations import assay, severity
+from limes.integrations import vigil, severity
 
-FIX = pathlib.Path(__file__).parent / 'fixtures' / 'assay_report_sample.json'
+FIX = pathlib.Path(__file__).parent / 'fixtures' / 'vigil_report_sample.json'
 
 
 class SeverityTest(SimpleTestCase):
@@ -288,41 +288,41 @@ class SeverityTest(SimpleTestCase):
         self.assertEqual((severity.to_int('critical'), severity.to_int('info'), severity.to_int('weird')), (4, 0, -1))
 
 
-class AssayArgvTest(SimpleTestCase):
+class VigilArgvTest(SimpleTestCase):
     def test_argv_has_json_profile_and_no_destructive_flags(self):
-        argv = assay.build_argv('/t.txt', 'normal', '/id.yaml', '/out', extra_no_flags=[])
+        argv = vigil.build_argv('/t.txt', 'normal', '/id.yaml', '/out', extra_no_flags=[])
         self.assertIn('--json', argv)
         self.assertIn('--profile', argv)
         self.assertIn('normal', argv)
-        self.assertFalse(assay.DESTRUCTIVE_FLAGS & set(argv))
+        self.assertFalse(vigil.DESTRUCTIVE_FLAGS & set(argv))
 
     def test_passive_profile(self):
-        argv = assay.build_argv('/t.txt', 'passive', '/id.yaml', '/out', extra_no_flags=['--no-postmessage'])
+        argv = vigil.build_argv('/t.txt', 'passive', '/id.yaml', '/out', extra_no_flags=['--no-postmessage'])
         self.assertIn('passive', argv)
         self.assertIn('--no-postmessage', argv)
 
 
-class AssayParseTest(SimpleTestCase):
+class VigilParseTest(SimpleTestCase):
     def test_maps_findings(self):
         report = json.loads(FIX.read_text())
-        vulns = assay.parse_report(report)
+        vulns = vigil.parse_report(report)
         self.assertEqual(len(vulns), 1)
         v = vulns[0]
         self.assertEqual(v['severity'], 3)
         self.assertEqual(v['http_url'], 'https://t.test/a?id=1')
-        self.assertEqual(v['source'], 'assay')
+        self.assertEqual(v['source'], 'vigil')
         self.assertEqual(v['cwe_ids'], ['CWE-89'])
         self.assertAlmostEqual(v['cvss_score'], 8.2)
         self.assertEqual(v['name'], 'SQLi')
 
     def test_empty_findings(self):
-        self.assertEqual(assay.parse_report({'scan_result': {'findings': []}}), [])
-        self.assertEqual(assay.parse_report({}), [])
+        self.assertEqual(vigil.parse_report({'scan_result': {'findings': []}}), [])
+        self.assertEqual(vigil.parse_report({}), [])
 ```
 
 - [ ] **Step 3: Run to see it fail** — ImportError.
 
-- [ ] **Step 4: Implement** `severity.py` (the map) and `assay.py`:
+- [ ] **Step 4: Implement** `severity.py` (the map) and `vigil.py`:
 ```python
 from limes.integrations.severity import to_int
 
@@ -330,12 +330,12 @@ DESTRUCTIVE_FLAGS = frozenset({'--h2-reset', '--h2-continuation', '--h2-madeyour
                                '--redos', '--mass-assign', '--proto-pollution-server', '--rate-limit'})
 
 
-class AssayError(Exception):
+class VigilError(Exception):
     pass
 
 
 def build_argv(targets_file, profile, identity_config_path, output_dir, extra_no_flags):
-    argv = ['assay', 'scan', '-l', targets_file, '--profile', profile,
+    argv = ['vigil', 'scan', '-l', targets_file, '--profile', profile,
             '--config', identity_config_path, '--output-dir', output_dir, '--json']
     argv += list(extra_no_flags)
     return argv
@@ -346,7 +346,7 @@ def parse_report(report_json):
     vulns = []
     for f in result.get('findings', []):
         vulns.append({
-            'name': f.get('title') or f.get('type', 'assay finding'),
+            'name': f.get('title') or f.get('type', 'vigil finding'),
             'type': f.get('type', ''),
             'severity': to_int(f.get('severity', 'unknown')),
             'http_url': f.get('url', ''),
@@ -360,18 +360,18 @@ def parse_report(report_json):
             'request': f.get('request', ''),
             'response': f.get('response', ''),
             'matcher_name': f.get('parameter', ''),
-            'source': 'assay',
+            'source': 'vigil',
         })
     return vulns
 ```
-(assay puts both CVE and CWE in its `cwe` array per the finding schema; split by prefix.)
+(vigil puts both CVE and CWE in its `cwe` array per the finding schema; split by prefix.)
 
 - [ ] **Step 5: Run tests** — PASS.
 
 - [ ] **Step 6: Commit**
 ```bash
-git add web/limes/integrations web/tests/core/test_assay_map.py web/tests/core/fixtures/assay_report_sample.json
-git commit -m "feat: map assay JSON findings to the vulnerability model"
+git add web/limes/integrations web/tests/core/test_vigil_map.py web/tests/core/fixtures/vigil_report_sample.json
+git commit -m "feat: map vigil JSON findings to the vulnerability model"
 ```
 
 ---
@@ -438,7 +438,7 @@ git commit -m "feat: map mantis SAST findings to the vulnerability model"
 - Modify: `web/limes/definitions.py` (profile key constants)
 
 **Interfaces:**
-- Produces: `PROFILES: dict[str, Profile]` for `quick|normal|thorough|passive`; `Profile` has `name, crawl_depth, crawl_max_pages, naabu_ports, nmap_enabled, assay_profile, timeouts: dict, nuclei_severities`; `resolve_profile(name) -> Profile` (unknown → normal); `map_engine_to_profile(yaml_configuration: str) -> str` (maps legacy engine YAML to a profile name; unmappable → 'normal').
+- Produces: `PROFILES: dict[str, Profile]` for `quick|normal|thorough|passive`; `Profile` has `name, crawl_depth, crawl_max_pages, naabu_ports, nmap_enabled, vigil_profile, timeouts: dict, nuclei_severities`; `resolve_profile(name) -> Profile` (unknown → normal); `map_engine_to_profile(yaml_configuration: str) -> str` (maps legacy engine YAML to a profile name; unmappable → 'normal').
 
 - [ ] **Step 1: Write failing tests** `web/tests/core/test_profiles.py`:
 ```python
@@ -452,7 +452,7 @@ class ProfileTest(SimpleTestCase):
         self.assertEqual(set(profiles.PROFILES), {'quick', 'normal', 'thorough', 'passive'})
 
     def test_passive_disables_active(self):
-        self.assertEqual(profiles.PROFILES['passive'].assay_profile, 'passive')
+        self.assertEqual(profiles.PROFILES['passive'].vigil_profile, 'passive')
         self.assertFalse(profiles.PROFILES['passive'].nmap_enabled)
 
     def test_resolve_unknown_is_normal(self):
@@ -474,7 +474,7 @@ class ProfileTest(SimpleTestCase):
 
 - [ ] **Step 2: Run to see it fail** — ImportError.
 
-- [ ] **Step 3: Implement** `profiles.py` with a frozen `Profile` dataclass and the four presets (quick: depth 1, no nmap, assay quick; normal: depth 2, nmap on, assay normal; thorough: depth 3, nmap on, assay thorough; passive: depth 1, no nmap, assay passive). `map_engine_to_profile` wraps `yaml.safe_load` in try/except (garbage → 'normal'); maps by which legacy stages are present (has vuln_scan + dir_fuzz → thorough; has port_scan+fetch_url → normal; discovery-only → passive; else normal).
+- [ ] **Step 3: Implement** `profiles.py` with a frozen `Profile` dataclass and the four presets (quick: depth 1, no nmap, vigil quick; normal: depth 2, nmap on, vigil normal; thorough: depth 3, nmap on, vigil thorough; passive: depth 1, no nmap, vigil passive). `map_engine_to_profile` wraps `yaml.safe_load` in try/except (garbage → 'normal'); maps by which legacy stages are present (has vuln_scan + dir_fuzz → thorough; has port_scan+fetch_url → normal; discovery-only → passive; else normal).
 
 - [ ] **Step 4: Run tests** — PASS.
 
@@ -486,7 +486,7 @@ git commit -m "feat: scan profiles replace per-tool engine selection"
 
 ---
 
-### Task 6: DAST stage (assay) task
+### Task 6: DAST stage (vigil) task
 
 **Files:**
 - Modify: `web/limes/tasks.py` (replace `vulnerability_scan`; delete `nuclei_scan`, `nuclei_individual_severity_module`, `dalfox_xss_scan`, `crlfuzz_scan`, `s3scanner`, `waf_detection` and their parsers `parse_dalfox_result`, `parse_crlfuzz_result`, `parse_s3scanner_result`; **also delete the entire OSINT subtree** `osint`, `osint_discovery`, `dorking`, `theHarvester`, `h8mail` — the new workflow (Task 8) does not use OSINT, and `osint`/`osint_discovery` are blocking poll-loop coordinators (`while not job.ready(): sleep(5)`) that cause the 0A residual orchestrate-pool deadlock. They must be DELETED, not merely disabled, so no blocking-coordinator code remains.)
@@ -496,11 +496,11 @@ git commit -m "feat: scan profiles replace per-tool engine selection"
 
 **Coherence:** deleting `osint` leaves `initiate_scan`'s workflow (`group(subdomain_discovery, osint)`) referencing a gone task. In THIS task also change that group to just `subdomain_discovery.si(ctx=ctx)` (drop the `osint.si(...)`) so `tasks.py` stays coherent; Task 8 does the full workflow restructure. Run `make test` + a `python3 -c "import limes.tasks"` to confirm the module still imports.
 
-**0A residual closed here:** phase 0A rerouted the 4 blocking coordinators (`osint`, `osint_discovery`, `vulnerability_scan`, `nuclei_scan`) to `orchestrate` as a mitigation, but a ≥4-concurrent-scan deadlock remained because blocking parents and blocking children shared that pool. This task removes all four (`vulnerability_scan` → assay with no poll loop; `nuclei_scan` deleted; `osint`/`osint_discovery` deleted), eliminating the root cause. The tightened `test_no_joins.py` (empty blocking set) is the regression guard. The combined 0A+0B branch is only deadlock-safe-at-any-concurrency after this task lands.
+**0A residual closed here:** phase 0A rerouted the 4 blocking coordinators (`osint`, `osint_discovery`, `vulnerability_scan`, `nuclei_scan`) to `orchestrate` as a mitigation, but a ≥4-concurrent-scan deadlock remained because blocking parents and blocking children shared that pool. This task removes all four (`vulnerability_scan` → vigil with no poll loop; `nuclei_scan` deleted; `osint`/`osint_discovery` deleted), eliminating the root cause. The tightened `test_no_joins.py` (empty blocking set) is the regression guard. The combined 0A+0B branch is only deadlock-safe-at-any-concurrency after this task lands.
 
 **Interfaces:**
-- Consumes: `integrations.assay`, `identity.ScanIdentity`, `profiles`, `limes.commands.run`, `save_vulnerability`.
-- Produces: `vulnerability_scan` task runs assay over the scan's crawled URLs and saves findings; returns a count. Exit code 2 (fail-on) is success-with-findings; exit 1 is `AssayError`.
+- Consumes: `integrations.vigil`, `identity.ScanIdentity`, `profiles`, `limes.commands.run`, `save_vulnerability`.
+- Produces: `vulnerability_scan` task runs vigil over the scan's crawled URLs and saves findings; returns a count. Exit code 2 (fail-on) is success-with-findings; exit 1 is `VigilError`.
 
 - [ ] **Step 1: Write failing tests** `web/tests/core/test_vuln_stage.py` — test the pure helper, not the Celery machinery:
 ```python
@@ -508,27 +508,27 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from limes.integrations import assay
+from limes.integrations import vigil
 
 
 class ExitCodeTest(SimpleTestCase):
     def test_exit_2_is_findings_not_error(self):
-        self.assertTrue(assay.is_success(2))
-        self.assertTrue(assay.is_success(0))
-        self.assertFalse(assay.is_success(1))
+        self.assertTrue(vigil.is_success(2))
+        self.assertTrue(vigil.is_success(0))
+        self.assertFalse(vigil.is_success(1))
 ```
-Add `is_success(code) -> bool` (`code in (0, 2)`) to `assay.py` and its unit above.
+Add `is_success(code) -> bool` (`code in (0, 2)`) to `vigil.py` and its unit above.
 
 - [ ] **Step 2: Run to see it fail** — AttributeError.
 
-- [ ] **Step 3: Implement** `is_success` in `assay.py`; rewrite `vulnerability_scan` in `tasks.py` to: gather crawled http URLs (`get_http_urls`), write a targets file, build the scan identity (`ScanIdentity.for_domain`) + assay config, build argv via `assay.build_argv` with the profile's `assay_profile`, run with `commands.run(..., secrets=identity.redaction_secrets(...), timeout=profile.timeouts['dast'])`, raise `AssayError` only when `not is_success(rc)`, read `assay-report.json` from the output dir, map with `assay.parse_report`, and `save_vulnerability` each (attach subdomain/endpoint by matching `http_url`). Delete the removed tasks and their parsers. Remove the deleted names from `TASK_PLAN`.
+- [ ] **Step 3: Implement** `is_success` in `vigil.py`; rewrite `vulnerability_scan` in `tasks.py` to: gather crawled http URLs (`get_http_urls`), write a targets file, build the scan identity (`ScanIdentity.for_domain`) + vigil config, build argv via `vigil.build_argv` with the profile's `vigil_profile`, run with `commands.run(..., secrets=identity.redaction_secrets(...), timeout=profile.timeouts['dast'])`, raise `VigilError` only when `not is_success(rc)`, read `vigil-report.json` from the output dir, map with `vigil.parse_report`, and `save_vulnerability` each (attach subdomain/endpoint by matching `http_url`). Delete the removed tasks and their parsers. Remove the deleted names from `TASK_PLAN`.
 
 - [ ] **Step 4: Run tests** — `make test`, all PASS; `python3 -c "import limes.tasks"` clean.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add web/limes/tasks.py web/limes/celery_routing.py web/tests/core/test_vuln_stage.py
-git commit -m "feat: replace nuclei/dalfox/crlfuzz/wafw00f/s3 tasks with assay DAST stage"
+git commit -m "feat: replace nuclei/dalfox/crlfuzz/wafw00f/s3 tasks with vigil DAST stage"
 ```
 
 ---
@@ -580,13 +580,13 @@ git commit -m "feat: profile-driven scan workflow; migrate engines to profiles"
 
 **Interfaces:**
 - Consumes: `identity.render_httpx`, `identity.render_header_args`.
-- Produces: `http_crawl` applies the scan identity (explicit UA, no `-random-agent`); image contains only the pipeline tools + assay + mantis + opengrep.
+- Produces: `http_crawl` applies the scan identity (explicit UA, no `-random-agent`); image contains only the pipeline tools + vigil + mantis + opengrep.
 
 - [ ] **Step 1: Write failing test** `web/tests/core/test_http_identity.py`: a helper `httpx_identity_args(domain)` returns argv containing `-H User-Agent: ...` and never `-random-agent`, including when the domain's identity has headers but empty UA (Review Focus #1).
 
-- [ ] **Step 2–3:** implement the helper and wire it into `http_crawl` (replace the `-random-agent` line and manual `-H` building); wire katana in `crawl.py`. Dockerfile: replace the `go install` block with the pinned list (subfinder, dnsx, naabu, httpx, katana, nuclei, gau, amass v5) at the Global-Constraints versions; drop gospider, hakrawler, waybackurls, unfurl, gf, chaos, ffuf, tlsx, dalfox, crlfuzz, s3scanner, oneforall/sublist3r/ctfr/theHarvester/CMSeeK/goofuzz clones, Firefox, geckodriver, EyeWitness, selenium; add opengrep binary, `pip install mantis-sast`, and build+copy the assay binary from a builder stage (`FROM golang:1.27 AS assay-build` cloning `/home/kali/project/trc/assay` — vendor the source into the build context or `go install github.com/TyrusRC/assay/cmd/assay@<pinned>`). Remove `wafw00f` from requirements and dead constants from definitions.
+- [ ] **Step 2–3:** implement the helper and wire it into `http_crawl` (replace the `-random-agent` line and manual `-H` building); wire katana in `crawl.py`. Dockerfile: replace the `go install` block with the pinned list (subfinder, dnsx, naabu, httpx, katana, nuclei, gau, amass v5) at the Global-Constraints versions; drop gospider, hakrawler, waybackurls, unfurl, gf, chaos, ffuf, tlsx, dalfox, crlfuzz, s3scanner, oneforall/sublist3r/ctfr/theHarvester/CMSeeK/goofuzz clones, Firefox, geckodriver, EyeWitness, selenium; add opengrep binary, `pip install mantis-sast`, and build+copy the vigil binary from a builder stage (`FROM golang:1.27 AS vigil-build` cloning `/home/kali/project/trc/vigil` — vendor the source into the build context or `go install github.com/TyrusRC/vigil/cmd/vigil@<pinned>`). Remove `wafw00f` from requirements and dead constants from definitions.
 
-- [ ] **Step 4:** `make test` PASS; `docker compose -p limes-test -f docker-compose.test.yml build test` succeeds; `docker run --rm limes-next:local sh -c 'amass version; subfinder -version; assay --version; mantis --version; opengrep --version'` prints versions.
+- [ ] **Step 4:** `make test` PASS; `docker compose -p limes-test -f docker-compose.test.yml build test` succeeds; `docker run --rm limes-next:local sh -c 'amass version; subfinder -version; vigil --version; mantis --version; opengrep --version'` prints versions.
 
 - [ ] **Step 5: Commit**
 ```bash
@@ -600,7 +600,7 @@ git commit -m "build: pin+trim tools to the default pipeline; wire scan identity
 **Files:**
 - Create: `docs/benchmarks/2026-10-phase0b-pipeline.md`
 
-- [ ] **Step 1:** bring up the stack (`make up`), add the local `labtarget` (from 0A's `docker-compose.bench.yml`) plus a deliberately-vulnerable local target if available (e.g. a local juice-shop container on the limes network — lab only), run one `normal` scan against it via the UI/API, and confirm: subdomains discovered, endpoints crawled, assay ran (findings saved with `source='assay'`), mantis ran on collected JS, no destructive assay flags in any `Command` row, scan reaches SUCCESS, no stuck scan.
+- [ ] **Step 1:** bring up the stack (`make up`), add the local `labtarget` (from 0A's `docker-compose.bench.yml`) plus a deliberately-vulnerable local target if available (e.g. a local juice-shop container on the limes network — lab only), run one `normal` scan against it via the UI/API, and confirm: subdomains discovered, endpoints crawled, vigil ran (findings saved with `source='vigil'`), mantis ran on collected JS, no destructive vigil flags in any `Command` row, scan reaches SUCCESS, no stuck scan.
 - [ ] **Step 2:** verify secret-header redaction end to end: set a secret header on the target, run a scan, grep the `Command` table / `commands.txt` for the secret value → absent.
 - [ ] **Step 3:** record results and the final tool list / image size in the benchmark doc; commit.
 

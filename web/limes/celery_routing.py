@@ -13,7 +13,7 @@ TASK_PLAN = {
     # crawl / probe 2 h
     'fetch_url': (SCAN, 2 * HOUR), 'http_crawl': (SCAN, 2 * HOUR), 'screenshot': (SCAN, 2 * HOUR),
     'run_command': (SCAN, 2 * HOUR),
-    # DAST 6 h (assay; no longer blocks on children, so it runs in the scan pool)
+    # DAST 6 h (vigil; no longer blocks on children, so it runs in the scan pool)
     'vulnerability_scan': (SCAN, 6 * HOUR),
     # SAST over crawl artifacts, in-process, 2 h
     'code_audit': (SCAN, 2 * HOUR),

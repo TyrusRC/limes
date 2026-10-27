@@ -16,7 +16,7 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | **Continuous tracking** | Owned roots are rediscovered on a cadence (every 24 hours, 7 days or 30 days, or off). Hosts and IPs outside a scanned root are checked by a light monitor: daily when they have an open port, a live web answer or a mail record, monthly otherwise. |
 | **Risk score** | A 0–950 score with an A–F grade (`limes-score-v3`): any critical finding caps the grade at C, any high at B. Waived issues are scored out of the headline and the raw score is shown beside it. |
 | **Risk checks** | TLS certificates and protocols, HTTP security headers and cookies, SPF/DMARC, DNSSEC/CAA and exposed risky services, run against owned assets. |
-| **Findings** | assay (DAST, runs nuclei) and mantis (SAST on the JavaScript, source maps and exposed `.git` the crawl collects). |
+| **Findings** | vigil (DAST, runs nuclei) and mantis (SAST on the JavaScript, source maps and exposed `.git` the crawl collects). |
 | **Change alerts** | New and returning issues, dropped scores, new assets and expired waivers go to in-app notifications, Slack, Discord, Telegram or Lark, and a signed webhook. High-signal changes alert immediately (at most 10 per project per hour); the rest arrive in one daily digest. |
 | **Waivers and notes** | Accept a risk until a date (default 90 days, at most 365) or mark a false positive, with a reason and an audit trail; discuss issues in notes; see the score if chosen issues were fixed. |
 | **IP reputation** | Owned IPs, ranges and ASNs are checked against Spamhaus DROP and ASN-DROP and the abuse.ch Feodo list (opt-in: blocklist.de, CINS; optional Spamhaus DQS). Provisional until the feeds prove themselves: shown, alerted, never scored. |
@@ -26,7 +26,7 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | **Portal** | An Overview, an Issues page, an Assets page and a Lookalikes page, in light and dark themes. |
 
 The scan pipeline is fixed on purpose: amass + subfinder → dnsx → naabu → nmap → httpx → katana +
-gau → assay → mantis. There is no per-tool plug-and-play; see [Scope and safety](#scope-and-safety).
+gau → vigil → mantis. There is no per-tool plug-and-play; see [Scope and safety](#scope-and-safety).
 
 ## Install (Linux, Docker)
 
@@ -111,12 +111,12 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
   answer is a private, loopback, link-local or cloud-metadata address, and then connects only to the
   address it checked, so a name that changes its answer mid-check cannot redirect traffic.
   Certificates are always verified against the hostname. The checks do not use `HTTP(S)_PROXY`.
-- **Fixed toolset.** assay runs by absolute path with a minimal environment and a `PATH` that holds
+- **Fixed toolset.** vigil runs by absolute path with a minimal environment and a `PATH` that holds
   only approved tools (nuclei). Before every scan it lists what it can see and refuses to run if
-  anything else is visible, because assay would use any of its supported external tools it finds
+  anything else is visible, because vigil would use any of its supported external tools it finds
   (including exploitation tools such as sqlmap). To approve another tool, change
-  `ASSAY_TOOL_ALLOWLIST` and the Dockerfile step together; read the notes in
-  `web/limes/integrations/assay.py` first.
+  `VIGIL_TOOL_ALLOWLIST` and the Dockerfile step together; read the notes in
+  `web/limes/integrations/vigil.py` first.
 - **Lookalikes: DNS, RDAP and CT only; HTTP only with `LIMES_LOOKALIKE_HTTP`, which tells the
   lookalike's operator someone is watching.** A lookalike is never an asset: nothing scans, crawls or
   monitors it, and "This is ours" only opens the add-asset form for you to confirm. Lookalike names

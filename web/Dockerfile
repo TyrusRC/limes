@@ -37,12 +37,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     xargs -L1 go install -ldflags="-s -w" && \
     CGO_ENABLED=0 go install -ldflags="-s -w" github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1 && \
     CGO_ENABLED=0 go install -ldflags="-s -w" software.sslmate.com/src/certspotter/cmd/certspotter@v0.25.0
-# assay is our own tool: always the latest main. Adding main's ref busts the layer cache when main
+# vigil is our own tool: always the latest main. Adding main's ref busts the layer cache when main
 # moves; GOPROXY=direct resolves @main from GitHub so the module proxy cannot serve a stale commit.
-ADD https://api.github.com/repos/TyrusRC/assay/git/refs/heads/main /tmp/assay-main.json
+ADD https://api.github.com/repos/TyrusRC/vigil/git/refs/heads/main /tmp/vigil-main.json
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    GOPROXY=direct go install -ldflags="-s -w" github.com/TyrusRC/assay/cmd/assay@main
+    GOPROXY=direct go install -ldflags="-s -w" github.com/TyrusRC/vigil/cmd/vigil@main
 
 
 # ---- Python wheels: compilers and headers stay in this stage
@@ -82,10 +82,10 @@ WORKDIR /usr/src/app
 
 COPY --from=gotools /go/bin/ /go/bin/
 
-# assay only gets this dir on PATH (see limes/integrations/assay.py): symlink ONLY approved tools here,
-# in step with ASSAY_TOOL_ALLOWLIST. Never add exploit-class tools; Limes runs katana/gau itself.
-RUN mkdir -p /opt/limes/assay-bin \
-    && ln -s /go/bin/nuclei /opt/limes/assay-bin/nuclei
+# vigil only gets this dir on PATH (see limes/integrations/vigil.py): symlink ONLY approved tools here,
+# in step with VIGIL_TOOL_ALLOWLIST. Never add exploit-class tools; Limes runs katana/gau itself.
+RUN mkdir -p /opt/limes/vigil-bin \
+    && ln -s /go/bin/nuclei /opt/limes/vigil-bin/nuclei
 
 # opengrep (needed by mantis)
 RUN ARCH=$(dpkg --print-architecture) \

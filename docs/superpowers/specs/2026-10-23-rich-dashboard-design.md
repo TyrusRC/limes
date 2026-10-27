@@ -18,7 +18,7 @@ The Overview shows one number, a trend, counts and a table of risky assets. A pe
   | Email | `email.*` checks |
   | DNS | `dns.*` checks |
   | Network | `net.exposed_*` checks |
-  | Vulnerabilities | scanner findings (nuclei, assay, mantis) |
+  | Vulnerabilities | scanner findings (nuclei, vigil, mantis) |
   - Each category gets a 0–950 score and an A–F grade from the same model as the headline: the penalty table and grade bands in `limes/scoring.py`, restricted to that category's issues, rolled up across assets with the same worst-weighted rule `project_score` uses. Waived issues are excluded, as in the headline. The raw (waiver-ignoring) category score is available the same way.
   - A category with nothing assessed shows "Not assessed", never a perfect score.
   - The overall score and its grade do not change. The categories explain it; they are not weighted into it.

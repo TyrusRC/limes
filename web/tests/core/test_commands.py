@@ -92,7 +92,7 @@ class RunnerTest(SimpleTestCase):
     def test_redact_tree_scrubs_all_files_on_disk(self):
         d = tempfile.mkdtemp()
         os.makedirs(os.path.join(d, 'sub'))
-        paths = [os.path.join(d, 'assay-report.json'), os.path.join(d, 'sub', 'extra.txt')]
+        paths = [os.path.join(d, 'vigil-report.json'), os.path.join(d, 'sub', 'extra.txt')]
         for p in paths:
             with open(p, 'w') as f:
                 f.write('{"request": "X-Api-Token: S3cr3t"}')

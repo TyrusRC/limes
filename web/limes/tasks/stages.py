@@ -797,16 +797,16 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 
 @app.task(name='vulnerability_scan', bind=True, base=LimesTask)
 def vulnerability_scan(self, urls=[], ctx={}, description=None):
-	"""DAST stage: run assay over the scan's crawled URLs and save findings.
+	"""DAST stage: run vigil over the scan's crawled URLs and save findings.
 
-	assay runs nuclei and the active web checks internally. Exit code 2 means
+	vigil runs nuclei and the active web checks internally. Exit code 2 means
 	findings crossed a fail-on threshold (success-with-findings); only a non
 	0/2 exit code is a real failure.
 
 	Returns:
 		int: number of vulnerabilities saved.
 	"""
-	logger.info('Running DAST (assay) vulnerability scan')
+	logger.info('Running DAST (vigil) vulnerability scan')
 	prof = (profiles.resolve_profile(self.engine.profile)
 			if self.engine and getattr(self.engine, 'profile', None) else profiles.resolve_profile('normal'))
 
@@ -817,42 +817,42 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 		self.error = f'{NOTHING_ASSESSED}: no alive HTTP URLs'  # still SUCCESS, never a scoring baseline
 		return 0
 
-	targets_file = f'{self.results_dir}/assay_targets.txt'
+	targets_file = f'{self.results_dir}/vigil_targets.txt'
 	with open(targets_file, 'w') as f:
 		f.write('\n'.join(target_urls))
 
-	out_dir = f'{self.results_dir}/assay'
+	out_dir = f'{self.results_dir}/vigil'
 	os.makedirs(out_dir, exist_ok=True)
-	config_path = f'{self.results_dir}/assay_config.yaml'
+	config_path = f'{self.results_dir}/vigil_config.yaml'
 
 	ident = identity.ScanIdentity.for_domain(self.domain)
-	cfg_tmps = identity.write_assay_config(ident, prof.assay_profile, config_path)
+	cfg_tmps = identity.write_vigil_config(ident, prof.vigil_profile, config_path)
 	try:
-		assay_bin, assay_env = assay.prepare()  # raises AssayError if assay can see a non-allowlisted tool
-		argv = assay.build_argv(targets_file, prof.assay_profile, config_path, out_dir, extra_no_flags=[])
-		argv[0] = assay_bin
+		vigil_bin, vigil_env = vigil.prepare()  # raises VigilError if vigil can see a non-allowlisted tool
+		argv = vigil.build_argv(targets_file, prof.vigil_profile, config_path, out_dir, extra_no_flags=[])
+		argv[0] = vigil_bin
 		rc_output = commands.run(
 			argv,
-			env=assay_env,
+			env=vigil_env,
 			timeout=prof.timeouts.get('dast', 6 * 3600),
 			secrets=identity.redaction_secrets(ident))
-		if not assay.is_success(rc_output.return_code):
-			raise assay.AssayError(
-				f'assay exited with {rc_output.return_code}: {rc_output.output_tail}')
+		if not vigil.is_success(rc_output.return_code):
+			raise vigil.VigilError(
+				f'vigil exited with {rc_output.return_code}: {rc_output.output_tail}')
 
-		report_path = f'{out_dir}/assay-report.json'
+		report_path = f'{out_dir}/vigil-report.json'
 		if not os.path.isfile(report_path):
-			logger.warning(f'assay produced no report at {report_path}')
-			self.error = f'{NOTHING_ASSESSED}: assay produced no report'
+			logger.warning(f'vigil produced no report at {report_path}')
+			self.error = f'{NOTHING_ASSESSED}: vigil produced no report'
 			return 0
-		# assay echoes the raw request (incl. secret headers) into its report:
+		# vigil echoes the raw request (incl. secret headers) into its report:
 		# scrub it on disk and before anything reaches the DB.
 		secrets = identity.redaction_secrets(ident)
 		with open(report_path) as f:
 			report = commands.redact_obj(json.load(f), secrets)
 		with open(report_path, 'w') as f:
 			json.dump(report, f)
-		vulns = assay.parse_report(report)
+		vulns = vigil.parse_report(report)
 
 		count = 0
 		for v in vulns:
@@ -871,7 +871,7 @@ def vulnerability_scan(self, urls=[], ctx={}, description=None):
 		logger.info(f'DAST stage saved {count} vulnerabilities')
 		return count
 	finally:
-		# runs on every path (failure, timeout, parse error): assay writes raw requests to disk
+		# runs on every path (failure, timeout, parse error): vigil writes raw requests to disk
 		commands.redact_tree(out_dir, identity.redaction_secrets(ident))
 		identity.cleanup(cfg_tmps + [config_path])
 

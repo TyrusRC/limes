@@ -10,7 +10,7 @@ Platform: Django 3.2 + Celery 5.4 + PostgreSQL, branded Limes (internal package 
 Limes splits into two independently-runnable modules whose results combine on the shared `Asset` inventory:
 
 - **ASM module** (passive, low-noise, UpGuard-style, standalone): discovery → resolve → light HTTP probe → inventory + attack-surface mapping + risk score + continuous monitoring. No active exploitation.
-- **Scanner module** (active, opt-in per asset, triggered separately): port scan (naabu+nmap) · crawl (katana/gau) · DAST (assay) · SAST (mantis, opengrep engine). Writes findings back onto assets. **Deferred — built after the ASM module.**
+- **Scanner module** (active, opt-in per asset, triggered separately): port scan (naabu+nmap) · crawl (katana/gau) · DAST (vigil) · SAST (mantis, opengrep engine). Writes findings back onto assets. **Deferred — built after the ASM module.**
 
 ASM slices in dependency order: **A0** inventory+models (done, Stage 1) · **A1** this slice · **A2** inventory UI/API + manual add · **A3** discovery depth (dnsx resolve, CT logs, passive DNS, FOFA/Shodan) + attack-surface graph · **A4** risk scoring · **A5** continuous monitoring. After A1+A2 the ASM inventory is populated by live scans and team-usable.
 

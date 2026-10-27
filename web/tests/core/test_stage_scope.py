@@ -67,10 +67,10 @@ class StageScopeTest(TestCase):
     def test_vulnerability_scan_attack_level(self):
         urls = ['https://own.x.com/', 'https://priv.x.com/', 'https://dep.x.com/', 'https://cb.x.com/']
         with mock.patch.object(stages, 'get_http_urls', return_value=urls), \
-                mock.patch.object(stages.assay, 'prepare', return_value=('/usr/bin/assay', {})), \
+                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')) as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))
-        self.assertEqual(self.read('assay_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
+        self.assertEqual(self.read('vigil_targets.txt'), ['https://own.x.com/', 'https://cb.x.com/'])
         run.assert_called_once()
 
     def test_vulnerability_scan_that_assessed_nothing_says_so(self):
@@ -80,9 +80,9 @@ class StageScopeTest(TestCase):
             stages.vulnerability_scan(ctx=dict(self.ctx))
         self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
         with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.assay, 'prepare', return_value=('/usr/bin/assay', {})), \
+                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', {})), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')):
-            stages.vulnerability_scan(ctx=dict(self.ctx))  # assay wrote no report
+            stages.vulnerability_scan(ctx=dict(self.ctx))  # vigil wrote no report
         self.assertTrue((stages.vulnerability_scan.error or '').startswith(NOTHING_ASSESSED))
 
     def test_screenshot_contact_level(self):
@@ -158,19 +158,19 @@ class StageScopeTest(TestCase):
         self.assertEqual(len([m for m in cm.output if 'Scope' in m]), 1)  # one aggregated warning
 
     def test_unexpected_tool_blocks_the_scan(self):
-        from limes.integrations import assay
+        from limes.integrations import vigil
         with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.assay, 'prepare', side_effect=assay.AssayError('sqlmap')), \
+                mock.patch.object(stages.vigil, 'prepare', side_effect=vigil.VigilError('sqlmap')), \
                 mock.patch.object(stages.commands, 'run') as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))  # LimesTask records the failure
-        self.assertIn('AssayError', stages.vulnerability_scan.error)
+        self.assertIn('VigilError', stages.vulnerability_scan.error)
         run.assert_not_called()
 
     def test_scan_runs_with_resolved_binary_and_restricted_env(self):
-        env = {'PATH': '/opt/limes/assay-bin'}
+        env = {'PATH': '/opt/limes/vigil-bin'}
         with mock.patch.object(stages, 'get_http_urls', return_value=['https://own.x.com/']), \
-                mock.patch.object(stages.assay, 'prepare', return_value=('/usr/bin/assay', env)), \
+                mock.patch.object(stages.vigil, 'prepare', return_value=('/usr/bin/vigil', env)), \
                 mock.patch.object(stages.commands, 'run', return_value=SimpleNamespace(return_code=0, output='')) as run:
             stages.vulnerability_scan(ctx=dict(self.ctx))
-        self.assertEqual(run.call_args.args[0][0], '/usr/bin/assay')
+        self.assertEqual(run.call_args.args[0][0], '/usr/bin/vigil')
         self.assertEqual(run.call_args.kwargs['env'], env)

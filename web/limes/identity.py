@@ -90,8 +90,8 @@ def render_httpx(identity):
     return argv, []
 
 
-def write_assay_config(identity, profile, path):
-    """Write assay YAML. Returns tempfiles (caller also cleans up `path`).
+def write_vigil_config(identity, profile, path):
+    """Write vigil YAML. Returns tempfiles (caller also cleans up `path`).
     NOTE: secret header values land in this file (0600); delete after the run."""
     cfg = {
         'profile': profile,

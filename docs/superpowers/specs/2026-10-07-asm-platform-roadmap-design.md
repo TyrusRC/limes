@@ -29,7 +29,7 @@ An enterprise, self-hosted external attack surface management platform for one o
 | 5 | Typosquatting (dnstwist, CT lookalikes, abuse-report generation) | 2 |
 | 6 | Vendor risk (passive only) + fourth parties | 2, 4 |
 | 7 | Executive and scheduled reports, subsidiaries reporting | 4 |
-| — | assay changes (separate spec in the assay repo): per-host `--rps` limiter, `RequestIdentity` applied to every traffic path | needed by 0 for full header coverage |
+| — | vigil changes (separate spec in the vigil repo): per-host `--rps` limiter, `RequestIdentity` applied to every traffic path | needed by 0 for full header coverage |
 
 Optional paid connectors, decided per budget later: identity-breach / infostealer data (e.g. HIBP domain search), paste/forum/marketplace monitoring, deep passive DNS, reverse WHOIS. Free: ransomware.live leak-site mentions, Shodan InternetDB, RIPEstat, crt.sh.
 
@@ -39,11 +39,11 @@ Out of scope: industry-average benchmarking (needs a global dataset), vendor que
 
 ### Tooling (default pipeline, no per-tool plug-and-play)
 
-amass (v5, read from its asset DB) + subfinder → dnsx → naabu → nmap `-sV` on open ports → httpx (incl. screenshots) → katana + gau → assay (DAST; runs nuclei internally) → mantis (`mantis.audit()` SAST, `secrets`/`web` packs) on JS, source maps and exposed `.git` collected by the crawl. Coverage additions in sub-project 2: puredns/shuffledns with validated resolvers, alterx, tlsx on owned ranges, waymore, katana headless only on SPAs, OpenAPI import into assay. Scan engines become profiles (`quick`, `normal`, `thorough`, `passive`) that tune depth and limits, not which tools run.
+amass (v5, read from its asset DB) + subfinder → dnsx → naabu → nmap `-sV` on open ports → httpx (incl. screenshots) → katana + gau → vigil (DAST; runs nuclei internally) → mantis (`mantis.audit()` SAST, `secrets`/`web` packs) on JS, source maps and exposed `.git` collected by the crawl. Coverage additions in sub-project 2: puredns/shuffledns with validated resolvers, alterx, tlsx on owned ranges, waymore, katana headless only on SPAs, OpenAPI import into vigil. Scan engines become profiles (`quick`, `normal`, `thorough`, `passive`) that tune depth and limits, not which tools run.
 
 Removed: sublist3r, oneforall, ctfr, tlsx-as-discovery, gospider, hakrawler, waybackurls, EyeWitness (+ Firefox/geckodriver), standalone nuclei task, dalfox, crlfuzz, wafw00f, GooFuzz. OSINT (theHarvester, h8mail) and ffuf are deferred.
 
-assay is never invoked with `--h2-reset`, `--h2-continuation`, `--h2-madeyoureset`, `--redos`, `--mass-assign` or `--proto-pollution-server` on scheduled scans. assay `serve` is not used (unauthenticated, in-memory); assay runs as a subprocess with an argument list.
+vigil is never invoked with `--h2-reset`, `--h2-continuation`, `--h2-madeyoureset`, `--redos`, `--mass-assign` or `--proto-pollution-server` on scheduled scans. vigil `serve` is not used (unauthenticated, in-memory); vigil runs as a subprocess with an argument list.
 
 ### Scope tiers
 
@@ -67,7 +67,7 @@ Inventory-first: assets exist independently of scans; scans are per-asset, per-s
 
 ### Noise control
 
-Confidence tiers: Verified (assay proof or behavioural nuclei match) alerts and scores; Likely scores and goes to digest; Unverified (banner CVEs, low confidence) is visible only. One canonical finding per (asset, type, location, parameter) with first/last seen and status Open / Fixed (only after a verification rescan) / Waived / False positive / Regressed. Issues group the same finding across assets. Priority = severity × KEV/EPSS × exposure × crown-jewel tag. Immediate alerts only for change events (new verified critical/high, regression, takeover, cert expiring within 14 days, new owned asset exposing a sensitive service); everything else is a daily digest. Detector precision is tracked from false-positive marks; detectors over threshold are demoted to Likely. Optional local-LLM triage ranks but never closes critical/high.
+Confidence tiers: Verified (vigil proof or behavioural nuclei match) alerts and scores; Likely scores and goes to digest; Unverified (banner CVEs, low confidence) is visible only. One canonical finding per (asset, type, location, parameter) with first/last seen and status Open / Fixed (only after a verification rescan) / Waived / False positive / Regressed. Issues group the same finding across assets. Priority = severity × KEV/EPSS × exposure × crown-jewel tag. Immediate alerts only for change events (new verified critical/high, regression, takeover, cert expiring within 14 days, new owned asset exposing a sensitive service); everything else is a daily digest. Detector precision is tracked from false-positive marks; detectors over threshold are demoted to Likely. Optional local-LLM triage ranks but never closes critical/high.
 
 ### Score
 
@@ -75,7 +75,7 @@ UpGuard-compatible 950-point model with published weights in versioned configura
 
 ### Scan identity
 
-Per project with per-asset override: User-Agent plus headers (`Domain.request_headers` is reused). Applied to httpx (explicit UA, no `-random-agent`), katana, assay; not applicable to DNS/TCP-only tools. Secret header values are stored encrypted (key from environment), passed to tools via 0600 temp files deleted after use, and redacted in recorded commands.
+Per project with per-asset override: User-Agent plus headers (`Domain.request_headers` is reused). Applied to httpx (explicit UA, no `-random-agent`), katana, vigil; not applicable to DNS/TCP-only tools. Secret header values are stored encrypted (key from environment), passed to tools via 0600 temp files deleted after use, and redacted in recorded commands.
 
 ### UI
 

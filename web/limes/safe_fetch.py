@@ -6,7 +6,7 @@ hostname still travels as the Host header and the TLS SNI, and certificates are 
 
 NOTE: connection inventory. The risk checks and the light monitor reach targets in three ways only: requests
 (pinned_get), a raw ssl socket (pinned_tls_connect) and dns.resolver (DNS queries, never the target's own
-address). The scan tools (subfinder, naabu, httpx, nuclei, assay, mantis crawling) resolve on their own and
+address). The scan tools (subfinder, naabu, httpx, nuclei, vigil, mantis crawling) resolve on their own and
 cannot be pinned from here: they stay covered only by the pre-scan root scope guard (limes.scope.may_contact /
 may_attack), which checks the IPs of the latest recorded resolution and so remains open to rebinding. Upgrade
 path: pin those tools to the vetted IPs (naabu -host <ip>, httpx host-to-IP pinning) or send them through an
