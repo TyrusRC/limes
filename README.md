@@ -12,6 +12,7 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | Area | What you get |
 |---|---|
 | **Inventory** | Every owned root domain, hostname, IP, CIDR range, ASN and API, with how it was found, when it was first and last seen, and its state (active, missing, stale, retired). Candidates found by passive sources wait in a review queue until you confirm or reject them. |
+| **Tags** | Label assets with project-scoped tags (for example `payments` or `prod`) from the Assets page, in bulk through the API (`POST /api/action/asset/tags/`) or over MCP (`tag_assets`). Filter assets and issues by tag; the Overview shows a score per tag (the same model as the headline score, which it never changes). At most 20 tags per asset and 200 per project. |
 | **Discovery** | Certificate transparency, Shodan InternetDB, RIPEstat, DNS resolution and ownership scoring find new assets; auto-confirm needs a registry-verified delegation. Anything the tools miss you add by hand (domain, IP, range such as `203.0.113.0-203.0.113.255` or `203.0.113.0/24`, or `AS64500`) and it is tracked from then on. |
 | **Continuous tracking** | Owned roots are rediscovered on a cadence (every 24 hours, 7 days or 30 days, or off). Hosts and IPs outside a scanned root are checked by a light monitor: daily when they have an open port, a live web answer or a mail record, monthly otherwise. |
 | **Risk score** | A 0–950 score with an A–F grade (`limes-score-v3`): any critical finding caps the grade at C, any high at B. Waived issues are scored out of the headline and the raw score is shown beside it. |
@@ -24,7 +25,7 @@ checks. See [the roadmap](docs/superpowers/specs/2026-10-07-asm-platform-roadmap
 | **Exploitability** | Findings and InternetDB banner CVEs carry CISA KEV and EPSS markers; Top risks use them only to break ties, and the Issues page filters on "Known exploited". |
 | **Exposure and leaks** | Exposed AI services (Ollama, OpenAI-compatible APIs, Triton, Gradio, Jupyter, Ray) on owned IPs, Supabase secret keys in client JavaScript, and, with a key, Have I Been Pwned domain breaches (counts only). |
 | **Lookalikes** | Typo, homoglyph, TLD-swap and keyword variants of each owned root are checked through DNS, RDAP and certificate transparency. Registered ones land in a review queue (watch, ignore, this is ours, abuse-report text to copy); the Overview has a Brand card. Limes never sends the report. |
-| **Portal** | An Overview, an Issues page, an Assets page and a Lookalikes page, in light and dark themes. |
+| **Portal** | An Overview, an Issues page, an Assets page (with tag and API filters) and a Lookalikes page, in light and dark themes. |
 
 The scan pipeline is fixed on purpose: amass + subfinder → dnsx → naabu → nmap → httpx → katana +
 gau → vigil → mantis. There is no per-tool plug-and-play; see [Scope and safety](#scope-and-safety).
@@ -52,6 +53,7 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 
 | Variable | Default | What it does |
 |---|---|---|
+| `LIMES_BIND` / `LIMES_HTTP_PORT` / `LIMES_HTTPS_PORT` | `127.0.0.1` / `8082` / `443` | Where the plain HTTP proxy (and the optional TLS proxy) listen. `LIMES_BIND=0.0.0.0` serves other hosts; the login is then in clear text, so add TLS. |
 | `LIMES_CONTINUOUS_SCANS` | `true` | Rediscover owned roots on their cadence. `false` stops all automatic scans and monitoring. |
 | `LIMES_ATTRIBUTION_AUTO_CONFIRM` | `true` | Auto-confirm candidates that pass ownership scoring and a registry-verified delegation. `false` only flags them. |
 | `LIMES_ALERT_WEBHOOK_URL` / `LIMES_ALERT_WEBHOOK_SECRET` | empty | Signed JSON webhook for change alerts (HMAC-SHA256 in `X-Limes-Signature`); both must be set. HTTP is refused unless `LIMES_ALERT_WEBHOOK_ALLOW_HTTP=true`. |
@@ -72,7 +74,7 @@ Chat channels (Slack, Discord, Telegram, Lark) are set up in the portal under No
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Build and start / stop the stack. `make up REALTIME=1` adds the certificate watch. |
+| `make up` / `make down` | Build and start / stop the stack. `make up HTTPS=1` adds TLS (run `make certs` once); `make up REALTIME=1` adds the certificate watch. |
 | `make username` | Create the first admin user |
 | `make logs` | Tail service logs |
 | `make test` | Run the core test suite in containers |
@@ -139,6 +141,14 @@ the terms for your use. IPv6 prefixes are recorded but not walked address by add
 - The first run of each new feed and the first lookalike sweep of each root are silent baselines: they
   record what exists and send no alerts. IP reputation, exposed AI services and the leak checks are provisional: they
   appear as issues but do not change any score.
+- Tags are now per project. The migration copies each existing global tag into every project that used
+  it, and keeps names that cannot be normalised as `tag-<id>`. APIs are a new asset kind (`api`); they
+  are found from OpenAPI/Swagger documents on owned hosts and are never scan targets.
+- Removed: the PDF scan report, the local LLM service (`make up LLM=1`), the LLM toolkit and stored
+  OpenAI/Netlas/Chaos keys, wordlist upload, Swagger docs, the recon notes and the WHOIS and domain-info
+  pages. Their tables are dropped by migrations. Discord alert state is stored as JSON instead of pickle.
+- The DAST tool is installed from `TyrusRC/vigil`. Rebuild the image (`make build`) to pick up the
+  `vigil` binary.
 - The certificate watch is off by default. `make up REALTIME=1` with `LIMES_CT_WATCH=true` starts it and
   downloads about 157 GB/day (inferred, not measured); read [docs/realtime.md](docs/realtime.md) first.
 
@@ -151,7 +161,7 @@ The Overview shows the score by category, exposure, certificates, technologies, 
 coverage, top risks and what changed, plus IP reputation and data leakage cards (provisional) and a
 Brand card. Discovery and reputation are built too: feeds, KEV/EPSS markers, AI-service and leak
 checks, optional breach data, and the lookalike review queue.
-Near-real-time monitoring is built too (opt-in certificate watch, event-driven checks, DNS change
+Asset tags with per-tag scores and API discovery (provisional checks) are built. Near-real-time monitoring is built too (opt-in certificate watch, event-driven checks, DNS change
 detection, live Overview); see [docs/realtime.md](docs/realtime.md).
 
 ## Security
