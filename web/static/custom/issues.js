@@ -170,6 +170,41 @@ function issue_note_item(n) {
 	return li;
 }
 
+// One evidence row: every value is scanner output, so it only ever reaches the DOM as textContent.
+function issue_evidence_item(e) {
+	var box = issue_el('div', 'mb-3');
+	box.append(issue_el('div', 'fw-semibold text-break', e.name));
+	var facts = [e.http_url, e.matcher_name, e.cvss_score !== null && e.cvss_score !== undefined ? 'CVSS ' + e.cvss_score : '',
+		(e.cves || []).join(', ')].filter(Boolean);
+	if (facts.length) box.append(issue_el('div', 'small l-muted text-break', facts.join(' \u00b7 ')));
+	[['Description', e.description], ['Impact', e.impact], ['Remediation', e.remediation], ['Request', e.request],
+		['Response', e.response], ['Reproduce', e.curl_command], ['Extracted', (e.extracted_results || []).join('\n')],
+		['References', (e.references || []).join('\n')]].forEach(function(f) {
+		if (!f[1]) return;
+		var d = document.createElement('details');
+		d.append(issue_el('summary', null, f[0]), issue_el('pre', 'small text-break', f[1]));
+		box.append(d);
+	});
+	return box;
+}
+
+function issue_load_evidence(id, row) {
+	var wrap = document.getElementById('im_evidence_box'), list = document.getElementById('im_evidence');
+	wrap.hidden = row.source !== 'finding';
+	list.replaceChildren();
+	if (wrap.hidden) return;
+	var url = '/api/issue/evidence/?project=' + encodeURIComponent(issue_project()) + '&issue_id=' + Number(id);
+	fetch(url, {credentials: 'same-origin'}).then(function(r) {
+		if (!r.ok) throw new Error('evidence');
+		return r.json();
+	}).then(function(rows) {
+		if (ISSUE_CURRENT !== id) return;
+		list.replaceChildren.apply(list, rows.length ? rows.map(issue_evidence_item) : [issue_el('p', 'l-hint', 'No open scanner evidence.')]);
+	}).catch(function() {
+		if (ISSUE_CURRENT === id) list.replaceChildren(issue_el('p', 'l-hint', 'Evidence unavailable.'));
+	});
+}
+
 function issue_load_notes(id) {
 	var list = document.getElementById('issue_notes');
 	var url = '/api/issue/notes/?project=' + encodeURIComponent(issue_project()) + '&issue_id=' + Number(id);
@@ -278,6 +313,7 @@ function issue_modal(id) {
 	}
 	$('#issue_modal').modal('show');
 	issue_load_notes(id);
+	issue_load_evidence(id, row);
 }
 
 function issue_bind_forms() {

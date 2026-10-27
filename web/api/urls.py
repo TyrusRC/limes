@@ -43,6 +43,7 @@ urlpatterns = [
     path('action/lookalike/report/', LookalikeReport.as_view(), name='lookalike_report'),
     path('action/issue/waive/', WaiveIssue.as_view(), name='waive_issue'),
     path('action/issue/revoke/', RevokeIssueWaiver.as_view(), name='revoke_issue_waiver'),
+    path('issue/evidence/', IssueEvidence.as_view(), name='issue_evidence'),
     path('issue/notes/', IssueNotes.as_view(), name='issue_notes'),
     path('score_forecast/', ScoreForecast.as_view(), name='score_forecast'),
     path(

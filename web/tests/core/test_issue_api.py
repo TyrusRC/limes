@@ -270,3 +270,31 @@ class IssuePageTest(TestCase):
             self.assertNotIn(needle, html)
         self.assertIn('data-can-write="0"', html)
         self.assertIn('You can view issues but not change them.', html)
+
+
+class IssueEvidenceApiTest(IssueApiTest):
+    """The scanner evidence the retired Vulnerabilities pages used to show, now behind the issue."""
+
+    def vuln(self, asset, template, **kw):
+        from startScan.models import Vulnerability
+        return Vulnerability.objects.create(asset=asset, template_id=template, name=template + ' name', severity=3,
+                                            http_url='https://a.x.com/', discovered_date=timezone.now(), **kw)
+
+    def get(self, issue_id, project='p1', user=None):
+        return self.as_user(user or self.admin).get('/api/issue/evidence/', {'project': project, 'issue_id': issue_id})
+
+    def test_returns_open_rows_of_that_asset_and_key(self):
+        self.vuln(self.a, '<script>x', description='d' * 30000, request='GET /', response='HTTP/1.1 200', open_status=True)
+        self.vuln(self.a, '<script>x', description='closed', open_status=False)
+        self.vuln(self.a, 'other-template', description='nope', open_status=True)
+        self.vuln(self.b, '<script>x', description='other project', open_status=True)
+        rows = self.get(self.i2.id).json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]['request'], len(rows[0]['description'])), ('GET /', 20000))
+
+    def test_check_issue_has_no_evidence(self):
+        self.assertEqual(self.get(self.i1.id).json(), [])
+
+    def test_cross_project_and_bad_ids_are_404(self):
+        for pid, project in ((self.other.id, 'p1'), (self.i2.id, 'p2'), ('abc', 'p1'), (self.i2.id, '')):
+            self.assertEqual(self.get(pid, project).status_code, 404, (pid, project))

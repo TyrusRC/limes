@@ -749,6 +749,17 @@ class RevokeIssueWaiver(APIView):
 		return Response({'status': True, 'message': 'revoked'})
 
 
+class IssueEvidence(APIView):
+	"""The scanner evidence (description, request, response, CVEs) behind one finding issue of the named project."""
+
+	def get(self, request):
+		from limes import evidence
+		issue = _load_issue(request, request.query_params)
+		if not issue:
+			return Response({'status': False, 'message': 'issue not found'}, status=404)
+		return Response(evidence.issue_evidence(issue))
+
+
 class IssueNotes(APIView):
 	"""Reading notes is login-only; adding one needs PERM_MODIFY_TARGETS (the auditor role holds PERM_MODIFY_SCAN_RESULTS, so that one cannot gate writes)."""
 
