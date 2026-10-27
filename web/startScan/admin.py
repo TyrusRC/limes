@@ -2,7 +2,6 @@ from django.contrib import admin
 from startScan.models import *
 
 admin.site.register(ScanHistory)
-admin.site.register(SubScan)
 admin.site.register(Subdomain)
 admin.site.register(ScanActivity)
 admin.site.register(EndPoint)
@@ -14,5 +13,4 @@ admin.site.register(VulnerabilityTags)
 admin.site.register(Port)
 admin.site.register(IpAddress)
 admin.site.register(Technology)
-admin.site.register(CountryISO)
 admin.site.register(Command)

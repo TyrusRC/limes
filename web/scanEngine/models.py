@@ -47,15 +47,6 @@ class EngineType(models.Model):
             return []
         return list(yaml.safe_load(self.yaml_configuration).keys())
 
-class InterestingLookupModel(models.Model):
-    id = models.AutoField(primary_key=True)
-    keywords = models.TextField(null=True, blank=True)
-    custom_type = models.BooleanField(default=False)
-    title_lookup = models.BooleanField(default=True)
-    url_lookup = models.BooleanField(default=True)
-    condition_200_http_lookup = models.BooleanField(default=False)
-
-
 class Notification(models.Model):
     id = models.AutoField(primary_key=True)
     send_to_slack = models.BooleanField(default=False)
@@ -70,7 +61,6 @@ class Notification(models.Model):
     telegram_bot_chat_id = models.CharField(max_length=100, null=True, blank=True)
 
     send_scan_status_notif = models.BooleanField(default=True)
-    send_interesting_notif = models.BooleanField(default=True)
     send_vuln_notif = models.BooleanField(default=True)
     send_subdomain_changes_notif = models.BooleanField(default=True)
 
