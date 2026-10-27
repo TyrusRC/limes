@@ -19,6 +19,7 @@ SPEC = {
     'rep.listed_drop': 3, 'rep.listed_asndrop': 3, 'rep.listed_c2': 4, 'rep.listed_attacker': 2, 'rep.dnsbl_listed': 2,
     'net.exposed_ollama': 3, 'net.exposed_openai_api': 3, 'net.exposed_triton': 2, 'net.exposed_gradio': 2,
     'net.exposed_jupyter': 4, 'net.exposed_ray': 4, 'leak.supabase_secret_key': 4, 'leak.hibp_breach': 2,
+    'cloud.open_storage': 3, 'dns.dangling_takeover': 3, 'leak.public_code': 3,
     'api.exposed_docs': 2, 'api.no_auth_declared': 2, 'api.unauthenticated_access': 3,
 }
 PORTS = {'ftp': 21, 'telnet': 23, 'smb': 445, 'rdp': 3389, 'mssql': 1433, 'oracle': 1521,
@@ -581,7 +582,23 @@ class StageTest(TestCase):
         p = mock.patch.object(LimesTask, 'notify')
         p.start()
         self.addCleanup(p.stop)
+        # the provisional extras (bucket probes, dangling DNS) would otherwise reach the network from these tests
+        self.extras = [mock.patch('limes.cloud_storage.discover', return_value={'requests': 0}).start(),
+                       mock.patch('limes.dangling.discover', return_value={'requests': 0}).start()]
+        self.addCleanup(mock.patch.stopall)
         self.p = Project.objects.create(name='p', slug='p', insert_date=timezone.now())
+
+    def test_provisional_extras_run_and_never_cost_the_stage(self):
+        from unittest import mock
+        from limes.tasks import stages
+        self.extras[0].side_effect = RuntimeError('boom')
+        with mock.patch('limes.checks.run.run_checks', return_value={'checked': 1, 'failed': 0}):
+            out = stages.risk_checks(ctx=self._ctx('owned_root'))
+        self.assertEqual(out, {'checked': 1, 'failed': 0})
+        from limes.definitions import SUCCESS_TASK
+        self.assertEqual(stages.risk_checks.status, SUCCESS_TASK)
+        self.extras[0].assert_called_once()
+        self.extras[1].assert_called_once()
 
     def _ctx(self, tier):
         import tempfile
