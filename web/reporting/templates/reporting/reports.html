@@ -1,0 +1,81 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load humanize %}
+{% block title %}Reports{% endblock title %}
+{% block page_title %}Reports{% endblock page_title %}
+
+{% block main_content %}
+{% if not reports_enabled %}
+<div class="l-banner" role="status"><span class="l-banner-icon" aria-hidden="true"><i class="fe-info"></i></span>
+  <div class="l-banner-text"><strong>Scheduled reports are off.</strong>
+    <div>The operator can turn them on with LIMES_REPORTS_ENABLED. Existing reports stay available.</div></div></div>
+{% endif %}
+<p class="l-page-sub"><span>{{ project.name }}</span><span>Executive summary, printable and exportable</span></p>
+<p>
+  <a class="btn btn-primary" href="{% url 'executive_summary' slug=project.slug %}">Open the executive summary</a>
+  <a class="btn btn-outline-secondary" href="{% url 'export_issues' slug=project.slug %}">Issues CSV</a>
+  <a class="btn btn-outline-secondary" href="{% url 'export_assets' slug=project.slug %}">Assets CSV</a>
+</p>
+
+<ul class="nav nav-tabs" role="tablist">
+  <li class="nav-item"><a class="nav-link{% if tab == 'generated' %} active{% endif %}" href="?tab=generated"{% if tab == 'generated' %} aria-current="page"{% endif %}>Generated reports</a></li>
+  <li class="nav-item"><a class="nav-link{% if tab == 'recurring' %} active{% endif %}" href="?tab=recurring"{% if tab == 'recurring' %} aria-current="page"{% endif %}>Recurring reports</a></li>
+</ul>
+
+{% if tab == 'generated' %}
+<section class="card l-table-card" aria-label="Generated reports">
+  {% if can_manage %}
+  <form class="rpt-filter" method="post" action="{% url 'report_generate' slug=project.slug %}" style="padding:12px 16px 0">
+    {% csrf_token %}
+    <div class="l-field"><label for="g_days">Period</label>
+      <select id="g_days" name="days" class="form-select">{% for n in day_options %}<option value="{{ n }}"{% if n == 90 %} selected{% endif %}>Last {{ n }} days</option>{% endfor %}</select></div>
+    <div class="l-field"><label for="g_tag">Tag</label>
+      <select id="g_tag" name="tag" class="form-select"><option value="">All assets</option>{% for t in tag_options %}<option value="{{ t.name }}">{{ t.name }}</option>{% endfor %}</select></div>
+    <button type="submit" class="btn btn-primary">Generate now</button>
+  </form>
+  {% endif %}
+  {% if runs %}
+  <table class="table w-100">
+    <thead><tr><th>Report</th><th>Generated</th><th>Scope</th><th>Delivery</th><th>Size</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+    {% for r in runs %}<tr>
+      <td>{{ r.name }}{% if r.trigger == 'schedule' %} <span class="text-muted">(scheduled)</span>{% endif %}</td>
+      <td>{{ r.generated_at|date:"Y-m-d H:i" }}</td>
+      <td>Last {{ r.days }} days{% if r.tag %}, tag {{ r.tag }}{% endif %}</td>
+      <td>{{ r.delivery_note }}</td>
+      <td>{{ r.size|filesizeformat }}</td>
+      <td><a class="btn btn-sm btn-outline-secondary" href="{% url 'report_download' slug=project.slug run_id=r.id %}">Download</a>
+        {% if can_manage %}<form method="post" action="{% url 'report_run_delete' slug=project.slug run_id=r.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form>{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="l-page-sub" style="padding:0 16px">Reports are HTML files: open one and use the browser's Print, Save as PDF.</p>
+  {% else %}<p style="padding:16px">No reports yet. Generate one now{% if can_manage %} or add a recurring report{% endif %}.</p>{% endif %}
+</section>
+{% else %}
+<section class="card l-table-card" aria-label="Recurring reports">
+  {% if can_manage %}<p style="padding:12px 16px 0"><a class="btn btn-primary" href="{% url 'report_schedule_new' slug=project.slug %}">New recurring report</a></p>{% endif %}
+  {% if schedules %}
+  <table class="table w-100">
+    <thead><tr><th>Name</th><th>Frequency</th><th>Scope</th><th>Delivery</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+    {% for s in schedules %}<tr>
+      <td>{{ s.name }}</td>
+      <td>{{ s.get_frequency_display }}, {{ s.when }} UTC</td>
+      <td>Last {{ s.window_days }} days{% if s.tag %}, tag {{ s.tag }}{% endif %}</td>
+      <td>{{ s.get_delivery_display }}{% if s.delivery == 'email' %} ({{ s.recipients|length }}){% endif %}</td>
+      <td>{% if s.enabled %}Enabled{% else %}Disabled{% endif %}</td>
+      <td>{% if can_manage %}
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'report_schedule_edit' slug=project.slug schedule_id=s.id %}">Edit</a>
+        <form method="post" action="{% url 'report_schedule_run' slug=project.slug schedule_id=s.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" type="submit">Generate now</button></form>
+        <form method="post" action="{% url 'report_schedule_toggle' slug=project.slug schedule_id=s.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" type="submit">{% if s.enabled %}Disable{% else %}Enable{% endif %}</button></form>
+        <form method="post" action="{% url 'report_schedule_delete' slug=project.slug schedule_id=s.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form>
+      {% endif %}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p style="padding:16px">No recurring reports.</p>{% endif %}
+  {% if not email_configured %}<p class="l-page-sub" style="padding:0 16px">Email is not configured on this installation: email delivery will keep the in-platform copy only.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock main_content %}

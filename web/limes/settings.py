@@ -59,6 +59,7 @@ CT_WATCH_STALE = env.int('LIMES_CT_WATCH_STALE', default=180)  # seconds before 
 # Event-driven checks (limes.event_queue): capped queue, per-asset cooldown (s), per-project hourly burst, and the
 # share of each monitor tick's budget the queue may take
 EVENT_CHECKS = env.bool('LIMES_EVENT_CHECKS', default=True)
+REPORTS_ENABLED = env.bool('LIMES_REPORTS_ENABLED', default=True)  # scheduled executive-summary reports (reporting.tasks)
 LIVE_POLL_SECONDS = max(0, env.int('LIMES_LIVE_POLL_SECONDS', default=30))  # Overview refresh; 0 turns polling off
 EVENT_QUEUE_MAX = max(1, env.int('LIMES_EVENT_QUEUE_MAX', default=1000))
 EVENT_COOLDOWN = env.int('LIMES_EVENT_COOLDOWN', default=900)
@@ -158,6 +159,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_datatables',
     'dashboard.apps.DashboardConfig',
+    'reporting.apps.ReportingConfig',
     'targetApp.apps.TargetappConfig',
     'scanEngine.apps.ScanengineConfig',
     'startScan.apps.StartscanConfig',
@@ -277,7 +279,7 @@ CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
                   'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
-                  'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks', 'limes.ct.api')
+                  'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks', 'limes.ct.api', 'reporting.tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
     # expires: a tick queued while workers were down is dropped, not run late alongside the next
@@ -296,6 +298,7 @@ CELERY_BEAT_SCHEDULE = {
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
     'expire-waivers': {'task': 'expire_waivers', 'schedule': 86400.0},
     'purge-mcp-logs': {'task': 'purge_mcp_logs', 'schedule': 86400.0},
+    'generate-due-reports': {'task': 'generate_due_reports', 'schedule': 900.0, 'options': {'expires': 840}},
 }
 CELERY_TASK_ROUTES = celery_routing.task_routes()
 CELERY_TASK_ANNOTATIONS = celery_routing.task_annotations()

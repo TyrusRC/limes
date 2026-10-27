@@ -56,7 +56,7 @@ def remediation(project, now):
     return out
 
 
-def top_risks(project, live, now):
+def top_risks(project, live, now, limit=TOP_RISKS):
     """The costliest live (waiver-excluded) issues, each joined to its open TrackedIssue for the detection date."""
     from startScan.models import TrackedIssue
     # NOTE: one IN list of every assessed asset id; fine for tens of thousands. Upgrade path: join on the score inputs in SQL.
@@ -80,7 +80,7 @@ def top_risks(project, live, now):
             rows[-1]['epss_label'] = exploit.pct_label(rows[-1]['epss'])
     # KEV and EPSS only order equal-cost rows; they never change `points`
     rows.sort(key=lambda r: (-r['points'], not r['kev'], -(r['epss'] if r['epss'] is not None else -1), r['detected_at'] is None, r['detected_at'] or now, r['asset'], r['key']))
-    return rows[:TOP_RISKS]
+    return rows[:limit]  # limit=None: every row
 
 
 def _sample(qs):

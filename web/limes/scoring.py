@@ -285,16 +285,16 @@ def category_scores(project, now=None):
 TAG_LIMIT = 10
 
 
-def tag_scores(project, now=None):
+def tag_scores(project, now=None, name=None):
     """The project's TAG_LIMIT most used tags, each scored with the headline's model (p10 of _score) over its assessed
-    assets only: [{name, assets, assessed, score, grade, raw_score, raw_grade, open}]. score leaves out waivers, raw_score
+    assets only (or just the tag `name`, wherever it ranks): [{name, assets, assessed, score, grade, raw_score, raw_grade, open}]. score leaves out waivers, raw_score
     keeps them, open counts the tagged assets' open issues without active waivers. A tag with no assessed asset has
     score None. A fixed number of queries, whatever the number of tags or assets.
     # NOTE: rebuilds the baselines project_score builds (a few queries per owned root); cached for STATS_TTL by the Overview."""
     from startScan.models import Tag
     now = now or timezone.now()
-    top = list(Tag.objects.filter(project=project).annotate(n=Count('assets')).filter(n__gt=0)
-               .order_by('-n', 'name')[:TAG_LIMIT])
+    tags = Tag.objects.filter(project=project).annotate(n=Count('assets')).filter(n__gt=0).order_by('-n', 'name')
+    top = list(tags.filter(name=name) if name else tags[:TAG_LIMIT])  # name: that one tag, however little used
     if not top:
         return []
     members = {t.id: set() for t in top}

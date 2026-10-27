@@ -1,0 +1,38 @@
+{# Styles for the executive summary: used inline by the page and by the stored snapshot, which has no other CSS. Fallback colours make it readable without the Limes tokens. #}
+.rpt { --r-ink: var(--ink, #16261B); --r-ink2: var(--ink-2, #445449); --r-ink3: var(--ink-3, #5E6D63); --r-line: var(--border, #E1E6E2);
+  --r-bg: var(--surface, #fff); --r-bg2: var(--surface-2, #F8FAF8); --r-brand: var(--brand-ink, #23722F);
+  color: var(--r-ink); font-family: var(--font-sans, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif); font-size: 14px; line-height: 1.45; max-width: 1000px; }
+.rpt h1 { font-size: 24px; margin: 0 0 4px; } .rpt h2 { font-size: 16px; margin: 0 0 10px; }
+.rpt-meta { color: var(--r-ink3); font-size: 13px; margin: 0 0 16px; }
+.rpt-sec { background: var(--r-bg); border: 1px solid var(--r-line); border-radius: 8px; padding: 16px 18px; margin: 0 0 14px; break-inside: avoid-page; }
+.rpt-headline { font-size: 16px; margin: 0; }
+.rpt-score { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; }
+.rpt-big { font-size: 52px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.rpt-of { color: var(--r-ink3); font-size: 13px; }
+.rpt-grade { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 6px; font-weight: 700; background: #E3F3E5; color: #1B5E27; }
+.rpt-grade-c { background: #FFF1CC; color: #7A5200; } .rpt-grade-d { background: #FFE0CC; color: #8A3A00; } .rpt-grade-f { background: #FBD9D9; color: #8F1D1D; }
+.rpt-grade-lg { min-width: 44px; height: 44px; font-size: 22px; }
+.rpt-delta { font-weight: 600; } .rpt-up { color: #1B5E27; } .rpt-down { color: #8F1D1D; }
+.rpt-spark { width: 300px; height: 60px; } .rpt-spark polyline { fill: none; stroke: var(--r-brand); stroke-width: 2; }
+.rpt-tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.rpt-tile { flex: 1 1 110px; border: 1px solid var(--r-line); border-radius: 6px; padding: 8px 10px; background: var(--r-bg2); }
+.rpt-tile b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; } .rpt-tile span { color: var(--r-ink3); font-size: 12px; }
+.rpt table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rpt th, .rpt td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--r-line); vertical-align: top; overflow-wrap: anywhere; }
+.rpt th { color: var(--r-ink3); font-weight: 600; font-size: 12px; } .rpt td.n, .rpt th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.rpt-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: #FFF1CC; color: #7A5200; white-space: nowrap; }
+.rpt-sev-critical { color: #8F1D1D; font-weight: 600; } .rpt-sev-high { color: #8A3A00; font-weight: 600; } .rpt-sev-medium { color: #7A5200; }
+.rpt-note { color: var(--r-ink3); font-size: 12px; margin: 8px 0 0; }
+.rpt-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; } .rpt-cols > .rpt-sec { margin: 0; }
+.rpt-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 0 0 16px; }
+@media print {
+  @page { size: A4; margin: 14mm; }
+  html, body { background: #fff !important; }
+  .l-sidebar, .l-topbar, .page-title-box, .l-skip, .rpt-noprint, .offcanvas, .modal { display: none !important; }
+  .l-app { display: block !important; } .l-content { padding: 0 !important; }
+  .rpt { --r-ink: #16261B; --r-ink2: #445449; --r-ink3: #5E6D63; --r-line: #C9D2CB; --r-bg: #fff; --r-bg2: #fff; --r-brand: #23722F; font-size: 11px; max-width: none; }
+  .rpt-sec { border-radius: 0; padding: 10px 12px; margin-bottom: 10px; }
+  .rpt-big { font-size: 40px; } .rpt thead { display: table-header-group; } .rpt tr { break-inside: avoid; }
+  .rpt-cols { display: block; } .rpt-cols > .rpt-sec { margin-bottom: 10px; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

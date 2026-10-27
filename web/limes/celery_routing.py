@@ -33,6 +33,7 @@ TASK_PLAN = {
     'report': (ORCHESTRATE, 15 * MIN), 'reap_stuck_scans': (ORCHESTRATE, 15 * MIN),
     'dispatch_due_scans': (ORCHESTRATE, 15 * MIN), 'age_assets': (ORCHESTRATE, 15 * MIN),
     'snapshot_scores': (ORCHESTRATE, 15 * MIN), 'send_digest': (ORCHESTRATE, 15 * MIN),
+    'generate_due_reports': (ORCHESTRATE, 15 * MIN),  # renders the project's own data only (reporting.tasks)
     'expire_waivers': (ORCHESTRATE, 15 * MIN), 'purge_mcp_logs': (ORCHESTRATE, 15 * MIN),
 }
 

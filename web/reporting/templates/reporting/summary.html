@@ -1,0 +1,28 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}Executive summary{% endblock title %}
+{% block page_title %}Executive summary{% endblock page_title %}
+{% block custom_js_css_link %}
+<style>{% autoescape off %}{% include "reporting/_style.html" %}{% endautoescape %}</style>
+{% endblock custom_js_css_link %}
+
+{% block main_content %}
+<form class="rpt-filter rpt-noprint" method="get" action="{% url 'executive_summary' slug=project.slug %}" aria-label="Report filters">
+  <div class="l-field"><label for="rpt_days">Period</label>
+    <select id="rpt_days" name="days" class="form-select">
+      {% for n in day_options %}<option value="{{ n }}"{% if n == d.days %} selected{% endif %}>Last {{ n }} days</option>{% endfor %}
+    </select></div>
+  <div class="l-field"><label for="rpt_tag">Tag</label>
+    <select id="rpt_tag" name="tag" class="form-select">
+      <option value="">All assets</option>
+      {% for t in tag_options %}<option value="{{ t.name }}"{% if t.name == d.tag %} selected{% endif %}>{{ t.name }} ({{ t.assets }})</option>{% endfor %}
+    </select></div>
+  <button type="submit" class="btn btn-outline-secondary">Apply</button>
+  <button type="button" class="btn btn-primary" data-rpt-print>Print or save as PDF</button>
+  <a class="btn btn-outline-secondary" href="{% url 'export_issues' slug=project.slug %}{{ query }}">Issues CSV</a>
+  <a class="btn btn-outline-secondary" href="{% url 'export_assets' slug=project.slug %}{{ query }}">Assets CSV</a>
+  <a class="btn btn-outline-secondary" href="{% url 'reports' slug=project.slug %}">All reports</a>
+</form>
+{% include "reporting/_summary.html" %}
+<script src="{% static 'limes/reports.js' %}"></script>
+{% endblock main_content %}

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive summary - {{ d.project.name }}</title>
+<style>
+body { margin: 24px; background: #fff; }
+{% autoescape off %}{% include "reporting/_style.html" %}{% endautoescape %}
+</style>
+</head>
+<body>
+{% include "reporting/_summary.html" %}
+</body>
+</html>

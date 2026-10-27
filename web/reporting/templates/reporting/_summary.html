@@ -1,0 +1,147 @@
+{% load humanize %}
+<article class="rpt">
+  <h1>Executive summary</h1>
+  <p class="rpt-meta">{{ d.project.name }} &middot; {{ d.generated_at|date:"j M Y H:i" }} &middot; last {{ d.days }} days{% if d.tag %} &middot; tag {{ d.tag }}{% endif %} &middot; scoring model {{ d.score.version }}</p>
+  {% if d.tag %}<p class="rpt-note">Filtered by tag. The score, grade, open issues, top risks, remediation progress and tag section cover the tagged assets; categories, changes, exposure, certificates, technologies, discovery, coverage and brand cover the whole project.</p>{% endif %}
+  {% if d.tag_missing %}<section class="rpt-sec"><p class="rpt-headline">No asset carries the tag {{ d.tag }}, so there is nothing to report for it.</p></section>{% endif %}
+
+  <section class="rpt-sec" id="rpt_headline" aria-label="Headline">
+    <p class="rpt-headline">{{ d.headline }}</p>
+  </section>
+
+  <section class="rpt-sec" id="rpt_score" aria-labelledby="rpt-h-score">
+    <h2 id="rpt-h-score">Security score</h2>
+    {% if d.score.score is not None %}
+    <div class="rpt-score">
+      <div><span class="rpt-big">{{ d.score.score }}</span> <span class="rpt-of">of {{ d.score.max }}</span></div>
+      <div><span class="rpt-grade rpt-grade-lg rpt-grade-{{ d.score.grade|lower }}">{{ d.score.grade }}</span></div>
+      <div>
+        {% if d.score.delta is not None %}<div class="rpt-delta {% if d.score.delta > 0 %}rpt-up{% elif d.score.delta < 0 %}rpt-down{% endif %}">{% if d.score.delta > 0 %}+{% endif %}{{ d.score.delta }} points over {{ d.days }} days (from {{ d.score.delta_from }})</div>{% else %}<div class="rpt-note">No earlier score in this window to compare with.</div>{% endif %}
+        {% if d.score.raw_score != d.score.score and d.score.raw_score is not None %}<div class="rpt-note">Raw score {{ d.score.raw_score }} before waivers</div>{% endif %}
+        {% if d.score.coverage is not None %}<div class="rpt-note">{% widthratio d.score.coverage 1 100 %}% of owned roots scanned in 30 days</div>{% endif %}
+      </div>
+      {% if d.score.spark %}<svg class="rpt-spark" viewBox="0 0 300 60" role="img" aria-label="Score trend over {{ d.days }} days"><polyline points="{{ d.score.spark }}"/></svg>{% endif %}
+    </div>
+    {% else %}<p>Not assessed yet.</p>{% endif %}
+    <div class="rpt-tiles" style="margin-top:12px">
+      {% for name, n in d.severity.items %}<div class="rpt-tile"><b>{{ n|intcomma }}</b><span>open {{ name }}</span></div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="rpt-sec" id="rpt_categories" aria-labelledby="rpt-h-cat">
+    <h2 id="rpt-h-cat">Score by category</h2>
+    <table><thead><tr><th>Category</th><th>Grade</th><th class="n">Score</th><th class="n">Open</th><th class="n">Waived</th><th class="n">30-day change</th></tr></thead><tbody>
+    {% for c in d.categories %}<tr>
+      <td>{{ c.label }}</td>
+      {% if c.provisional %}<td colspan="2"><span class="rpt-badge">Provisional, not scored</span></td>
+      {% elif c.assessed %}<td><span class="rpt-grade rpt-grade-{{ c.grade|lower }}">{{ c.grade }}</span></td><td class="n">{{ c.score }}</td>
+      {% else %}<td colspan="2">Not assessed</td>{% endif %}
+      <td class="n">{{ c.open|intcomma }}</td><td class="n">{{ c.waived|intcomma }}</td>
+      <td class="n">{% if c.provisional or c.delta_30 is None %}&ndash;{% else %}{% if c.delta_30 > 0 %}+{% endif %}{{ c.delta_30 }}{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="rpt-note">Provisional categories list their issues but never move the headline score.</p>
+  </section>
+
+  <section class="rpt-sec" id="rpt_risks" aria-labelledby="rpt-h-risks">
+    <h2 id="rpt-h-risks">Top risks</h2>
+    {% if d.risks.rows %}
+    <table><thead><tr><th>Asset</th><th>Issue</th><th>Category</th><th>Severity</th><th>First detected</th><th class="n">Points</th></tr></thead><tbody>
+    {% for r in d.risks.rows %}<tr>
+      <td>{{ r.asset }}</td><td>{{ r.title }}{% if r.kev %} <span class="rpt-badge">Known exploited</span>{% endif %}</td><td>{{ r.category_label }}</td>
+      <td class="rpt-sev-{{ r.severity }}">{{ r.severity|capfirst }}</td>
+      <td>{% if r.detected_at %}{{ r.detected_at|date:"Y-m-d" }}{% else %}unknown{% endif %}</td>
+      <td class="n">{% if r.provisional %}<span class="rpt-badge">Provisional</span>{% else %}&minus;{{ r.points }}{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    {% if d.risks.truncated %}<p class="rpt-note">Truncated: the {{ d.risks.cap }} costliest of {{ d.risks.total|intcomma }} open issues are shown. The issues CSV export has them all.</p>{% endif %}
+    {% else %}<p>No open issues.</p>{% endif %}
+  </section>
+
+  <div class="rpt-cols">
+  <section class="rpt-sec" id="rpt_progress" aria-labelledby="rpt-h-prog">
+    <h2 id="rpt-h-prog">Remediation progress</h2>
+    <table><thead><tr><th>Window</th><th class="n">Fixed</th><th class="n">Opened</th><th class="n">Net</th></tr></thead><tbody>
+    {% for p in d.progress %}<tr><td>Last {{ p.days }} days</td><td class="n">{{ p.fixed|intcomma }}</td><td class="n">{{ p.opened|intcomma }}</td><td class="n">{% if p.net > 0 %}+{% endif %}{{ p.net }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="rpt-note">Net is fixed minus opened: positive means the backlog is shrinking.</p>
+  </section>
+
+  <section class="rpt-sec" id="rpt_changed" aria-labelledby="rpt-h-chg">
+    <h2 id="rpt-h-chg">What changed</h2>
+    <table><thead><tr><th>Window</th><th class="n">New assets</th><th class="n">Gone</th><th class="n">Issues in</th><th class="n">Issues out</th><th class="n">Score</th></tr></thead><tbody>
+    {% for c in d.changes %}<tr><td>{{ c.days }} days</td><td class="n">{{ c.new_assets|intcomma }}</td><td class="n">{{ c.removed_assets|intcomma }}</td><td class="n">{{ c.introduced|intcomma }}</td><td class="n">{{ c.resolved|intcomma }}</td>
+      <td class="n">{% if c.score_delta is None %}&ndash;{% else %}{% if c.score_delta > 0 %}+{% endif %}{{ c.score_delta }}{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    {% if d.recent_changes %}<p class="rpt-note">Latest events</p><ul>
+    {% for e in d.recent_changes %}<li>{{ e.created_at|date:"Y-m-d" }} &middot; {{ e.label }}: {{ e.title }}</li>{% endfor %}</ul>{% endif %}
+  </section>
+  </div>
+
+  <section class="rpt-sec" id="rpt_tags" aria-labelledby="rpt-h-tags">
+    <h2 id="rpt-h-tags">Tags</h2>
+    {% if d.tags %}
+    <table><thead><tr><th>Tag</th><th class="n">Assets</th><th>Grade</th><th class="n">Score</th><th class="n">Open issues</th></tr></thead><tbody>
+    {% for t in d.tags %}<tr><td>{{ t.name }}</td><td class="n">{{ t.assets|intcomma }}</td>
+      {% if t.score is None %}<td colspan="2">Not assessed</td>{% else %}<td><span class="rpt-grade rpt-grade-{{ t.grade|lower }}">{{ t.grade }}</span></td><td class="n">{{ t.score }}</td>{% endif %}
+      <td class="n">{{ t.open|intcomma }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p>No tags in use.</p>{% endif %}
+  </section>
+
+  <div class="rpt-cols">
+  <section class="rpt-sec" id="rpt_exposure" aria-labelledby="rpt-h-exp">
+    <h2 id="rpt-h-exp">Exposure</h2>
+    <p>{{ d.exposure.ports|intcomma }} open port{{ d.exposure.ports|pluralize }} across {{ d.exposure.hosts|intcomma }} owned address{{ d.exposure.hosts|pluralize:"es" }}.</p>
+    {% if d.exposure.rows %}<table><thead><tr><th class="n">Port</th><th>Service</th><th class="n">Hosts</th><th>Risk</th></tr></thead><tbody>
+    {% for r in d.exposure.rows|slice:":8" %}<tr><td class="n">{{ r.port }}</td><td>{{ r.service }}</td><td class="n">{{ r.hosts }}</td><td>{% if r.risky %}<span class="rpt-sev-{{ r.severity }}">{{ r.severity|capfirst }}</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>{% endif %}
+  </section>
+
+  <section class="rpt-sec" id="rpt_certs" aria-labelledby="rpt-h-cert">
+    <h2 id="rpt-h-cert">Certificates</h2>
+    <p>{{ d.certificates.total|intcomma }} certificate{{ d.certificates.total|pluralize }} expired or expiring within 30 days.</p>
+    {% if d.certificates.rows %}<table><thead><tr><th>Host</th><th>Expires</th><th class="n">Days left</th></tr></thead><tbody>
+    {% for r in d.certificates.rows|slice:":8" %}<tr><td>{{ r.host }}</td><td>{{ r.not_after|date:"Y-m-d" }}</td><td class="n">{% if r.expired %}expired{% else %}{{ r.days_left }}{% endif %}</td></tr>{% endfor %}
+    </tbody></table>{% endif %}
+  </section>
+
+  <section class="rpt-sec" id="rpt_tech" aria-labelledby="rpt-h-tech">
+    <h2 id="rpt-h-tech">Technologies</h2>
+    {% if d.technologies %}<table><thead><tr><th>Technology</th><th class="n">Assets</th></tr></thead><tbody>
+    {% for t in d.technologies %}<tr><td>{{ t.name }}</td><td class="n">{{ t.count|intcomma }}</td></tr>{% endfor %}</tbody></table>{% else %}<p>None detected.</p>{% endif %}
+  </section>
+
+  <section class="rpt-sec" id="rpt_discovery" aria-labelledby="rpt-h-disc">
+    <h2 id="rpt-h-disc">Discovery</h2>
+    <p>{{ d.discovery.total|intcomma }} owned asset{{ d.discovery.total|pluralize }}: {{ d.inventory.owned_root|intcomma }} root domain{{ d.inventory.owned_root|pluralize }}, {{ d.inventory.owned_host|intcomma }} host{{ d.inventory.owned_host|pluralize }}, {{ d.inventory.ip|intcomma }} IP{{ d.inventory.ip|pluralize }}.</p>
+    {% if d.discovery.rows %}<table><thead><tr><th>Found by</th><th class="n">Assets</th></tr></thead><tbody>
+    {% for r in d.discovery.rows %}<tr><td>{{ r.name }}</td><td class="n">{{ r.count|intcomma }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  </section>
+
+  <section class="rpt-sec" id="rpt_coverage" aria-labelledby="rpt-h-cov">
+    <h2 id="rpt-h-cov">Monitoring coverage</h2>
+    <div class="rpt-tiles">
+      <div class="rpt-tile"><b>{{ d.coverage.on_time|intcomma }}</b><span>checked on time</span></div>
+      <div class="rpt-tile"><b>{{ d.coverage.overdue|intcomma }}</b><span>overdue</span></div>
+      <div class="rpt-tile"><b>{{ d.coverage.never|intcomma }}</b><span>never checked</span></div>
+      <div class="rpt-tile"><b>{{ d.coverage.stopped|intcomma }}</b><span>not monitored</span></div>
+    </div>
+    <p class="rpt-note">of {{ d.coverage.total|intcomma }} monitored owned assets</p>
+  </section>
+
+  <section class="rpt-sec" id="rpt_brand" aria-labelledby="rpt-h-brand">
+    <h2 id="rpt-h-brand">Brand and lookalikes <span class="rpt-badge">Provisional, not scored</span></h2>
+    {% if not d.brand.enabled %}<p>Lookalike monitoring is off.</p>
+    {% elif not d.brand.tracked %}<p>No lookalike domains tracked yet.</p>
+    {% else %}
+    <div class="rpt-tiles">
+      <div class="rpt-tile"><b>{{ d.brand.registered|intcomma }}</b><span>registered</span></div>
+      <div class="rpt-tile"><b>{{ d.brand.new_30|intcomma }}</b><span>new in 30 days</span></div>
+      <div class="rpt-tile"><b>{{ d.brand.phishing_ready|intcomma }}</b><span>phishing-ready</span></div>
+      <div class="rpt-tile"><b>{{ d.brand.awaiting|intcomma }}</b><span>awaiting review</span></div>
+    </div>
+    <p class="rpt-note">Phishing-ready means the domain has mail or a certificate. {{ d.brand.tracked|intcomma }} candidates tracked.</p>
+    {% endif %}
+  </section>
+  </div>
+  <p class="rpt-note">Reputation and other provisional checks are listed as issues but cost no points. Generated by Limes from the project inventory; figures are as of {{ d.generated_at|date:"j M Y H:i" }}.</p>
+</article>

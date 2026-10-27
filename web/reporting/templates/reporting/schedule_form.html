@@ -1,0 +1,39 @@
+{% extends 'base/base.html' %}
+{% block title %}Recurring report{% endblock title %}
+{% block page_title %}{% if schedule %}Edit{% else %}New{% endif %} recurring report{% endblock page_title %}
+
+{% block main_content %}
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+<form method="post" class="card" style="padding:20px;max-width:640px">
+  {% csrf_token %}
+  <div class="mb-3"><label class="form-label" for="f_name">Name</label>
+    <input class="form-control" id="f_name" name="name" maxlength="100" required value="{{ f.name }}"></div>
+  <div class="mb-3"><label class="form-label" for="f_frequency">Frequency</label>
+    <select class="form-select" id="f_frequency" name="frequency">
+      {% for v, label in frequencies %}<option value="{{ v }}"{% if f.frequency == v %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  <div class="mb-3"><label class="form-label" for="f_weekday">Weekday (weekly)</label>
+    <select class="form-select" id="f_weekday" name="weekday">
+      {% for v, label in weekdays %}<option value="{{ v }}"{% if f.weekday == v %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  <div class="mb-3"><label class="form-label" for="f_dom">Day of month, 1 to 28 (monthly; quarterly in the first month)</label>
+    <input class="form-control" type="number" min="1" max="28" id="f_dom" name="day_of_month" value="{{ f.day_of_month }}"></div>
+  <div class="mb-3"><label class="form-label" for="f_hour">Hour (UTC), 0 to 23</label>
+    <input class="form-control" type="number" min="0" max="23" id="f_hour" name="hour" value="{{ f.hour }}"></div>
+  <div class="mb-3"><label class="form-label" for="f_tag">Tag</label>
+    <select class="form-select" id="f_tag" name="tag"><option value="">All assets</option>
+      {% for t in tag_options %}<option value="{{ t.name }}"{% if f.tag == t.name %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+    </select></div>
+  <div class="mb-3"><label class="form-label" for="f_delivery">Delivery</label>
+    <select class="form-select" id="f_delivery" name="delivery">
+      {% for v, label in deliveries %}<option value="{{ v }}"{% if f.delivery == v %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  <div class="mb-3"><label class="form-label" for="f_recipients">Email recipients (up to 20, separated by commas or new lines)</label>
+    <textarea class="form-control" id="f_recipients" name="recipients" rows="3">{{ f.recipients }}</textarea>
+    {% if not email_configured %}<div class="form-text">Email is not configured on this installation: the report is kept in-platform only.</div>{% endif %}</div>
+  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="f_enabled" name="enabled"{% if f.enabled %} checked{% endif %}>
+    <label class="form-check-label" for="f_enabled">Enabled</label></div>
+  <div><button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-outline-secondary" href="{% url 'reports' slug=project.slug %}?tab=recurring">Cancel</a></div>
+</form>
+{% endblock main_content %}

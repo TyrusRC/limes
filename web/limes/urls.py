@@ -19,6 +19,9 @@ urlpatterns = [
         'scanEngine/',
         include('scanEngine.urls')),
     path(
+        '',
+        include('reporting.urls')),
+    path(
         'scan/',
         include('startScan.urls')),
     path(
