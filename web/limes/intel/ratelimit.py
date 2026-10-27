@@ -60,3 +60,13 @@ def take_daily(provider, limit, today=None, cache=default_cache):
 def per_tick(limit, tick_seconds=60):
     """The share of a daily budget one beat tick may spend (at least 1)."""
     return max(1, math.ceil(limit * tick_seconds / 86400))
+
+
+PROJECT_SHARE = 0.25
+
+
+def take_shared(provider, limit, project_id, today=None, cache=default_cache):
+    """take_daily against a global budget AND the project's share of it (a quarter), so one project with many roots
+    cannot spend the day's calls for every other. Both fail closed."""
+    mine = max(1, int(limit * PROJECT_SHARE))
+    return take_daily(f'{provider}:p{project_id}', mine, today, cache) and take_daily(provider, limit, today, cache)

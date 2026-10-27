@@ -137,7 +137,7 @@ class SweepTest(Base):
         broken = mock.Mock()
         broken.add.side_effect = ConnectionError('down')
         real = ratelimit.take_daily
-        with mock.patch.object(ratelimit, 'take_daily', lambda provider, limit: real(provider, limit, cache=broken)):
+        with mock.patch.object(ratelimit, 'take_daily', lambda provider, limit, *a: real(provider, limit, cache=broken)):
             self.run_sweep()
         self.assertEqual(self.fake.urls, [])
         self.assertEqual(self.row().status, 'error')
