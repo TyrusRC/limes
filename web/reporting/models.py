@@ -9,6 +9,29 @@ WEEKDAYS = ((0, 'Monday'), (1, 'Tuesday'), (2, 'Wednesday'), (3, 'Thursday'), (4
 DELIVERIES = (('platform', 'In-platform only'), ('email', 'In-platform and email'))
 
 
+LAYOUTS = (('full', 'Full report'), ('board', 'Board summary (one page)'))
+SECTIONS = (('score', 'Score and history'), ('categories', 'Category breakdown'), ('risks', 'Top risks'),
+            ('changes', 'New and resolved changes'), ('waivers', 'Waivers'), ('remediation', 'Remediation status'),
+            ('assets', 'Tags and assets summary'))
+COMMENTARY_MAX = 2000
+
+
+class ReportTemplate(models.Model):
+    """A saved report layout for one project: which sections, plus plain-text commentary (escaped wherever shown).
+    The board layout ignores sections and uses the commentary as 'what we need decided'."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='report_templates')
+    name = models.CharField(max_length=100)
+    layout = models.CharField(max_length=10, choices=LAYOUTS, default='full')
+    sections = models.JSONField(default=list, blank=True)
+    commentary = models.TextField(blank=True, default='', max_length=COMMENTARY_MAX)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['project', 'name'], name='report_template_name_once')]
+        ordering = ['name', 'id']
+
+
 class ReportSchedule(models.Model):
     """A recurring executive-summary report. Day and hour are UTC; weekday applies to weekly, day_of_month (1-28, so
     every month has it) to monthly and quarterly. The report covers WINDOW_DAYS of history."""
@@ -19,6 +42,7 @@ class ReportSchedule(models.Model):
     day_of_month = models.PositiveSmallIntegerField(default=1)
     hour = models.PositiveSmallIntegerField(default=6)
     tag = models.CharField(max_length=100, blank=True, default='')
+    template = models.ForeignKey(ReportTemplate, null=True, blank=True, on_delete=models.SET_NULL, related_name='schedules')
     recipients = models.JSONField(default=list, blank=True)
     delivery = models.CharField(max_length=10, choices=DELIVERIES, default='platform')
     enabled = models.BooleanField(default=True)

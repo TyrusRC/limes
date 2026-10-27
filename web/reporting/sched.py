@@ -31,13 +31,13 @@ def _exists(s, key):
     return ReportRun.objects.filter(schedule=s, period_key=key).exists()
 
 
-def generate(project, name, now=None, schedule=None, trigger='manual', period_key='', tag='', days=None, user=None):
+def generate(project, name, now=None, schedule=None, trigger='manual', period_key='', tag='', days=None, user=None, template=None):
     """Build the summary, store the snapshot, record the run, deliver. Returns the ReportRun, or None when another
     worker already recorded this (schedule, period): its row wins and our file is removed."""
     now = now or timezone.now()
     if schedule is not None:
-        tag, days = schedule.tag, days or schedule.window_days
-    d = summary.build(project, days or summary.DEFAULT_DAYS, tag or None, now)
+        tag, days, template = schedule.tag, days or schedule.window_days, schedule.template
+    d = summary.build(project, days or summary.DEFAULT_DAYS, tag or None, now, template)
     file = store.write(project, render.snapshot(d))
     size = os.path.getsize(os.path.join(store.root(project.id), file))
     try:

@@ -1,0 +1,23 @@
+{% extends 'base/base.html' %}
+{% block title %}Report template{% endblock title %}
+{% block page_title %}{% if tpl %}Edit{% else %}New{% endif %} report template{% endblock page_title %}
+
+{% block main_content %}
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+<form method="post" class="card" style="padding:20px;max-width:640px">
+  {% csrf_token %}
+  <div class="mb-3"><label class="form-label" for="t_name">Name</label>
+    <input class="form-control" id="t_name" name="name" maxlength="100" required value="{{ f.name }}"></div>
+  <div class="mb-3"><label class="form-label" for="t_layout">Layout</label>
+    <select class="form-select" id="t_layout" name="layout">{% for v, label in layouts %}<option value="{{ v }}"{% if f.layout == v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <div class="form-text">The board summary is one page: grade, trend, top 5 risks, what changed and what needs deciding. It ignores the sections below.</div></div>
+  <fieldset class="mb-3"><legend class="form-label">Sections (full report)</legend>
+    {% for v, label in sections %}<div class="form-check"><input class="form-check-input" type="checkbox" id="t_s_{{ v }}" name="sections" value="{{ v }}"{% if v in f.sections %} checked{% endif %}>
+      <label class="form-check-label" for="t_s_{{ v }}">{{ label }}</label></div>{% endfor %}</fieldset>
+  <div class="mb-3"><label class="form-label" for="t_commentary">Commentary (plain text, up to {{ commentary_max }} characters)</label>
+    <textarea class="form-control" id="t_commentary" name="commentary" rows="5" maxlength="{{ commentary_max }}">{{ f.commentary }}</textarea>
+    <div class="form-text">Shown on the report as written; on the board summary it is "What we need decided".</div></div>
+  <div><button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-outline-secondary" href="{% url 'reports' slug=project.slug %}?tab=templates">Cancel</a></div>
+</form>
+{% endblock main_content %}

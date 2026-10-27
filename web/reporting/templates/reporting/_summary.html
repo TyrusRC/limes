@@ -1,6 +1,7 @@
 {% load humanize %}
+{% if d.layout == 'board' %}{% include "reporting/_board.html" %}{% else %}
 <article class="rpt">
-  <h1>Executive summary</h1>
+  <h1>{% if d.template %}{{ d.template.name }}{% else %}Executive summary{% endif %}</h1>
   <p class="rpt-meta">{{ d.project.name }} &middot; {{ d.generated_at|date:"j M Y H:i" }} &middot; last {{ d.days }} days{% if d.tag %} &middot; tag {{ d.tag }}{% endif %} &middot; scoring model {{ d.score.version }}</p>
   {% if d.tag %}<p class="rpt-note">Filtered by tag. The score, grade, open issues, top risks, remediation progress and tag section cover the tagged assets; categories, changes, exposure, certificates, technologies, discovery, coverage and brand cover the whole project.</p>{% endif %}
   {% if d.tag_missing %}<section class="rpt-sec"><p class="rpt-headline">No asset carries the tag {{ d.tag }}, so there is nothing to report for it.</p></section>{% endif %}
@@ -9,6 +10,9 @@
     <p class="rpt-headline">{{ d.headline }}</p>
   </section>
 
+  {% if d.commentary %}<section class="rpt-sec" id="rpt_commentary" aria-labelledby="rpt-h-com"><h2 id="rpt-h-com">Commentary</h2>{{ d.commentary|linebreaks }}</section>{% endif %}
+
+  {% if 'score' in d.sections %}
   <section class="rpt-sec" id="rpt_score" aria-labelledby="rpt-h-score">
     <h2 id="rpt-h-score">Security score</h2>
     {% if d.score.score is not None %}
@@ -27,7 +31,9 @@
       {% for name, n in d.severity.items %}<div class="rpt-tile"><b>{{ n|intcomma }}</b><span>open {{ name }}</span></div>{% endfor %}
     </div>
   </section>
+  {% endif %}
 
+  {% if 'categories' in d.sections %}
   <section class="rpt-sec" id="rpt_categories" aria-labelledby="rpt-h-cat">
     <h2 id="rpt-h-cat">Score by category</h2>
     <table><thead><tr><th>Category</th><th>Grade</th><th class="n">Score</th><th class="n">Open</th><th class="n">Waived</th><th class="n">30-day change</th></tr></thead><tbody>
@@ -41,7 +47,9 @@
     </tbody></table>
     <p class="rpt-note">Provisional categories list their issues but never move the headline score.</p>
   </section>
+  {% endif %}
 
+  {% if 'risks' in d.sections %}
   <section class="rpt-sec" id="rpt_risks" aria-labelledby="rpt-h-risks">
     <h2 id="rpt-h-risks">Top risks</h2>
     {% if d.risks.rows %}
@@ -55,8 +63,10 @@
     {% if d.risks.truncated %}<p class="rpt-note">Truncated: the {{ d.risks.cap }} costliest of {{ d.risks.total|intcomma }} open issues are shown. The issues CSV export has them all.</p>{% endif %}
     {% else %}<p>No open issues.</p>{% endif %}
   </section>
+  {% endif %}
 
   <div class="rpt-cols">
+  {% if 'remediation' in d.sections %}
   <section class="rpt-sec" id="rpt_progress" aria-labelledby="rpt-h-prog">
     <h2 id="rpt-h-prog">Remediation progress</h2>
     <table><thead><tr><th>Window</th><th class="n">Fixed</th><th class="n">Opened</th><th class="n">Net</th></tr></thead><tbody>
@@ -64,7 +74,14 @@
     </tbody></table>
     <p class="rpt-note">Net is fixed minus opened: positive means the backlog is shrinking.</p>
   </section>
+  {% endif %}
 
+  {% if d.remediation %}<section class="rpt-sec" id="rpt_remreq" aria-labelledby="rpt-h-rr"><h2 id="rpt-h-rr">Remediation requests</h2>
+    <p>{{ d.remediation.active|intcomma }} active ({{ d.remediation.overdue|intcomma }} overdue), {{ d.remediation.completed|intcomma }} completed. Requests cover the whole project, not a tag.</p></section>{% endif %}
+  {% if d.waivers %}<section class="rpt-sec" id="rpt_waivers" aria-labelledby="rpt-h-wv"><h2 id="rpt-h-wv">Waivers</h2>
+    <p>{{ d.waivers.active|intcomma }} active waiver{{ d.waivers.active|pluralize }}{% for kind, n in d.waivers.by_kind %}{% if forloop.first %}: {% else %}, {% endif %}{{ n }} {{ kind }}{% endfor %}.
+    {{ d.waivers.expiring|intcomma }} end{{ d.waivers.expiring|pluralize:"s," }} within {{ d.waivers.soon_days }} days; {{ d.waivers.pending|intcomma }} await{{ d.waivers.pending|pluralize:"s," }} approval. Waived issues do not move the score.</p></section>{% endif %}
+  {% if 'changes' in d.sections %}
   <section class="rpt-sec" id="rpt_changed" aria-labelledby="rpt-h-chg">
     <h2 id="rpt-h-chg">What changed</h2>
     <table><thead><tr><th>Window</th><th class="n">New assets</th><th class="n">Gone</th><th class="n">Issues in</th><th class="n">Issues out</th><th class="n">Score</th></tr></thead><tbody>
@@ -74,8 +91,10 @@
     {% if d.recent_changes %}<p class="rpt-note">Latest events</p><ul>
     {% for e in d.recent_changes %}<li>{{ e.created_at|date:"Y-m-d" }} &middot; {{ e.label }}: {{ e.title }}</li>{% endfor %}</ul>{% endif %}
   </section>
+  {% endif %}
   </div>
 
+  {% if 'assets' in d.sections %}
   <section class="rpt-sec" id="rpt_tags" aria-labelledby="rpt-h-tags">
     <h2 id="rpt-h-tags">Tags</h2>
     {% if d.tags %}
@@ -143,5 +162,7 @@
     {% endif %}
   </section>
   </div>
+  {% endif %}
   <p class="rpt-note">Reputation and other provisional checks are listed as issues but cost no points. Generated by Limes from the project inventory; figures are as of {{ d.generated_at|date:"j M Y H:i" }}.</p>
 </article>
+{% endif %}

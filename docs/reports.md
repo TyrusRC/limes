@@ -17,6 +17,17 @@ scored": they list issues but never move the headline score.
 Use **Print or save as PDF** in the browser. The print stylesheet targets A4 and hides the navigation. No PDF library
 is installed on purpose.
 
+## Templates and the board summary
+
+The **Templates** tab saves, per project, a section choice (score and history, category breakdown, top risks, new and
+resolved changes, waivers, remediation status, tags and assets summary) and plain-text commentary (up to 2,000
+characters, shown escaped with its line breaks). Open one with `/<project>/reports/summary?template=<id>`, pick it
+when generating, or attach it to a recurring report (a template of another project is rejected). The figures are the
+same as the live pages: waivers use the scoring's own active-waiver rule, and the tag filter applies as before.
+
+The **Board summary** layout is one page: grade and trend, the top 5 risks, what changed, and "What we need decided"
+(the commentary). Print or save as PDF as usual.
+
 ## Exports
 
 `/<project>/reports/export/issues.csv` and `.../assets.csv` (both accept `?tag=`) are plain CSV. Assets carry their tags.

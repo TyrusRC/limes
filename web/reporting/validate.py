@@ -46,3 +46,11 @@ def recipients(raw):
     if len(out) > MAX_RECIPIENTS:
         raise ReportError(f'At most {MAX_RECIPIENTS} recipients.')
     return out
+
+
+def commentary(raw, limit):
+    """Plain text with line breaks kept; other control characters become spaces. Longer than the cap is an error, not a cut."""
+    text = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]', ' ', (raw or '').replace('\r\n', '\n').replace('\r', '\n')).strip()
+    if len(text) > limit:
+        raise ReportError(f'Commentary is limited to {limit} characters.')
+    return text

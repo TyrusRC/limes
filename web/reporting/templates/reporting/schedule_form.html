@@ -24,6 +24,10 @@
     <select class="form-select" id="f_tag" name="tag"><option value="">All assets</option>
       {% for t in tag_options %}<option value="{{ t.name }}"{% if f.tag == t.name %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
     </select></div>
+  <div class="mb-3"><label class="form-label" for="f_template">Template</label>
+    <select class="form-select" id="f_template" name="template"><option value="">Executive summary</option>
+      {% for t in templates %}<option value="{{ t.id }}"{% if f.template|stringformat:"s" == t.id|stringformat:"s" %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+    </select></div>
   <div class="mb-3"><label class="form-label" for="f_delivery">Delivery</label>
     <select class="form-select" id="f_delivery" name="delivery">
       {% for v, label in deliveries %}<option value="{{ v }}"{% if f.delivery == v %} selected{% endif %}>{{ label }}</option>{% endfor %}

@@ -17,6 +17,11 @@
       <option value="">All assets</option>
       {% for t in tag_options %}<option value="{{ t.name }}"{% if t.name == d.tag %} selected{% endif %}>{{ t.name }} ({{ t.assets }})</option>{% endfor %}
     </select></div>
+  <div class="l-field"><label for="rpt_tpl">Template</label>
+    <select id="rpt_tpl" name="template" class="form-select">
+      <option value="">Executive summary</option>
+      {% for t in templates %}<option value="{{ t.id }}"{% if d.template and t.id == d.template.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+    </select></div>
   <button type="submit" class="btn btn-outline-secondary">Apply</button>
   <button type="button" class="btn btn-primary" data-rpt-print>Print or save as PDF</button>
   <a class="btn btn-outline-secondary" href="{% url 'export_issues' slug=project.slug %}{{ query }}">Issues CSV</a>

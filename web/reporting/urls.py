@@ -15,4 +15,7 @@ urlpatterns = [
     path('<slug:slug>/reports/schedules/<int:schedule_id>/toggle', views.schedule_toggle, name='report_schedule_toggle'),
     path('<slug:slug>/reports/schedules/<int:schedule_id>/delete', views.schedule_delete, name='report_schedule_delete'),
     path('<slug:slug>/reports/schedules/<int:schedule_id>/run', views.schedule_run, name='report_schedule_run'),
+    path('<slug:slug>/reports/templates/new', views.template_form, name='report_template_new'),
+    path('<slug:slug>/reports/templates/<int:template_id>/edit', views.template_form, name='report_template_edit'),
+    path('<slug:slug>/reports/templates/<int:template_id>/delete', views.template_delete, name='report_template_delete'),
 ]

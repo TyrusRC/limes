@@ -8,6 +8,8 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from dashboard import activity, stats
+from reporting import sections as extras
+from reporting.models import SECTIONS
 from limes import scoring, tags as tag_rules
 from limes.checks.catalogue import PROVISIONAL
 from startScan.models import Asset, ScoreSnapshot, Tag, TrackedIssue
@@ -89,7 +91,14 @@ def headline(d):
     return ' '.join(out)
 
 
-def build(project, days=DEFAULT_DAYS, tag=None, now=None):
+LEGACY = ('score', 'categories', 'risks', 'changes', 'remediation', 'assets')  # what the plain summary shows
+
+
+def build(project, days=DEFAULT_DAYS, tag=None, now=None, template=None):
+    """The summary data. A template (of this project) picks the sections and adds commentary; without one the page is
+    the plain summary. Either way the figures are the Overview's own."""
+    if template is not None and template.project_id != project.id:
+        raise ValueError('template belongs to another project')
     now = now or timezone.now()
     days = days if days in DAYS else DEFAULT_DAYS
     s = stats.project_stats(project)  # cached for STATS_TTL, shared with the Overview
@@ -121,5 +130,13 @@ def build(project, days=DEFAULT_DAYS, tag=None, now=None):
         'inventory': s['inventory'], 'exposure': s['exposure'], 'certificates': s['certificates'],
         'technologies': s['technologies'], 'discovery': s['discovery'], 'coverage': s['coverage'], 'brand': s['brand'],
     }
+    d['layout'] = template.layout if template else 'full'
+    d['sections'] = tuple(k for k in (template.sections if template else LEGACY) if k in dict(SECTIONS))
+    d['commentary'] = template.commentary if template else ''
+    d['template'] = template
+    if template and 'waivers' in d['sections']:
+        d['waivers'] = extras.waivers(project, now, ids)
+    if template and 'remediation' in d['sections']:
+        d['remediation'] = extras.remediation(project, now)
     d['headline'] = headline(d)
     return d
