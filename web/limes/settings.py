@@ -179,6 +179,7 @@ INSTALLED_APPS = [
     'scanEngine.apps.ScanengineConfig',
     'startScan.apps.StartscanConfig',
     'remediation.apps.RemediationConfig',
+    'memberships.apps.MembershipsConfig',
     'django_ace',
     'django_celery_beat',
     'mathfilters',
