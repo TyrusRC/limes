@@ -105,6 +105,12 @@ _PROVISIONAL = [
      'Enforce authentication on every route, not only in the documentation or the gateway.'),
     ('leak.hibp_breach', 'data_leakage', 2, 'Addresses on the domain appear in a public data breach.',
      'Force password resets for the affected accounts and enable multi-factor authentication.'),
+    ('cloud.open_storage', 'data_leakage', 3, 'A cloud storage bucket named after the domain lets anyone list its objects.',
+     'Turn off public listing and public access on the bucket (block public access), and move anything meant to be public behind a CDN.'),
+    ('dns.dangling_takeover', 'dns', 3, 'A hostname points at a cloud service resource that no longer exists, so someone else could claim it.',
+     'Delete the DNS record, or recreate the resource on the provider so the name is yours again.'),
+    ('leak.public_code', 'data_leakage', 3, 'Public code mentions the domain next to what looks like a credential.',
+     'Revoke and rotate the credential, then remove it from the repository and its history.'),
 ]
 for _i, _g, _s, _t, _f in _PROVISIONAL:
     CHECKS[_i] = Check(_i, _g, _s, _t, _f, True)

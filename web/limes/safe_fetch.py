@@ -12,6 +12,7 @@ may_attack), which checks the IPs of the latest recorded resolution and so remai
 path: pin those tools to the vetted IPs (naabu -host <ip>, httpx host-to-IP pinning) or send them through an
 egress proxy that vets every connection.
 """
+import re
 import socket
 import ssl
 import time
@@ -277,3 +278,41 @@ def pinned_tls_connect(ip, create_connection=socket.create_connection, context_f
             with ctx.wrap_socket(sock, server_hostname=host) as tls:
                 return tls.getpeercert()
     return connect
+
+
+LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
+
+
+def host_allowed(host, exact=(), suffixes=()):
+    """True for a host in `exact`, or one label directly under a `suffixes` entry (a.b.s3.amazonaws.com is not
+    <label>.s3.amazonaws.com): a candidate name can never smuggle in another host."""
+    host = (host or '').rstrip('.').lower()
+    if host in exact:
+        return True
+    return any(host.endswith('.' + s) and LABEL_RE.fullmatch(host[:-len(s) - 1]) for s in suffixes)
+
+
+def allowlisted_get(exact=(), suffixes=(), resolve=collect._resolve, session_factory=requests.Session, deadline=None):
+    """A requests.get stand-in for third-party provider hosts (not scan targets): https on 443 only, and only a host
+    that host_allowed() accepts. Each call resolves and vets the host, then pins that one request to the vetted IP
+    (pinned_get), so redirects are never followed and a name that resolves to a private address is not contacted.
+    A refused or unresolvable host raises ConnectionError, which callers read as 'nothing there'."""
+    def get(url, **kw):
+        bad = requests.exceptions.InvalidURL('refusing a URL that is not on an allowed host')
+        if not url or '\\' in url:
+            raise bad
+        try:
+            parts = urlsplit(url)
+            port = parts.port
+        except ValueError:
+            raise bad
+        host = scope.target_host(url)
+        if (parts.scheme.lower() != 'https' or '@' in parts.netloc or port not in (None, 443) or not host
+                or not host_allowed(host, exact, suffixes)):
+            raise bad
+        ip, reason = resolve_vetted(host, resolve=resolve)
+        if reason:
+            raise requests.exceptions.ConnectionError('host refused')
+        # one deadline per request unless the caller shares one: a long sweep must not run out a single host's budget
+        return pinned_get(host, ip, session_factory=session_factory, deadline=deadline or Deadline())(url, **kw)
+    return get

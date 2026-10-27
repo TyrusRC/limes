@@ -16,7 +16,8 @@ IDS = {'rep.listed_drop': 'reputation', 'rep.listed_asndrop': 'reputation', 'rep
        'rep.listed_attacker': 'reputation', 'rep.dnsbl_listed': 'reputation', 'net.exposed_ollama': 'network',
        'net.exposed_openai_api': 'network', 'net.exposed_triton': 'network', 'net.exposed_gradio': 'network',
        'net.exposed_jupyter': 'network', 'net.exposed_ray': 'network', 'leak.supabase_secret_key': 'data_leakage',
-       'leak.hibp_breach': 'data_leakage',
+       'leak.hibp_breach': 'data_leakage', 'cloud.open_storage': 'data_leakage', 'dns.dangling_takeover': 'dns',
+       'leak.public_code': 'data_leakage',
        'api.exposed_docs': 'web', 'api.no_auth_declared': 'web', 'api.unauthenticated_access': 'web'}
 ORIGINAL = ('web', 'tls', 'email', 'dns', 'network', 'vulnerabilities')
 
@@ -30,6 +31,9 @@ class ProvisionalTest(CategoryBase):
         self.check(self.a, 'net.exposed_jupyter', 'fail')
         self.check(Asset.objects.get(value='b.x.com'), 'leak.supabase_secret_key', 'fail')
         self.check(cidr, 'rep.listed_drop', 'fail')
+        self.check(self.root, 'cloud.open_storage', 'fail')
+        self.check(self.root, 'leak.public_code', 'fail')
+        self.check(Asset.objects.get(value='b.x.com'), 'dns.dangling_takeover', 'fail')
         return ip, cidr
 
     def test_points_and_ids(self):
@@ -110,9 +114,12 @@ class ProvisionalTest(CategoryBase):
         sync_issues(p, now=self.now)
         keys = set(TrackedIssue.objects.filter(project=p, status='open', key__in=PROVISIONAL).values_list('asset__value', 'key'))
         self.assertEqual(keys, {('45.10.1.5', 'rep.listed_c2'), ('a.x.com', 'net.exposed_jupyter'),
-                                ('b.x.com', 'leak.supabase_secret_key'), ('45.10.0.0/22', 'rep.listed_drop')})
+                                ('b.x.com', 'leak.supabase_secret_key'), ('45.10.0.0/22', 'rep.listed_drop'),
+                                ('x.com', 'cloud.open_storage'), ('x.com', 'leak.public_code'),
+                                ('b.x.com', 'dns.dangling_takeover')})
         counts = scoring.category_issue_counts(p, self.now)
-        self.assertEqual((counts['reputation']['open'], counts['data_leakage']['open']), (2, 1))
+        self.assertEqual((counts['reputation']['open'], counts['data_leakage']['open']), (2, 3))
+        self.assertEqual(counts['dns']['open'], 1)
         self.assertEqual(counts['network']['open'], 1)
         row = self.check_row(cidr, 'rep.listed_drop')
         row.status = 'pass'

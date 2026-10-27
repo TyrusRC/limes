@@ -85,6 +85,8 @@ ABUSECH_AUTH_KEY = env('LIMES_ABUSECH_AUTH_KEY', default='')
 SPAMHAUS_DQS_KEY = env('LIMES_SPAMHAUS_DQS_KEY', default='')
 # Have I Been Pwned key (optional domain-breach counts for owned roots); sent only in a header, never logged. Empty: off.
 HIBP_API_KEY = env('LIMES_HIBP_API_KEY', default='')
+CLOUD_CHECKS = env.bool('LIMES_CLOUD_CHECKS', default=True)  # cloud.open_storage: listing probes of buckets named after owned roots
+CODE_SEARCH_TOKEN = env('LIMES_CODE_SEARCH_TOKEN', default='').strip()  # GitHub code search for leak.public_code; empty = off
 # Lookalike domains of owned roots (limes/lookalike): DNS, RDAP and crt.sh only. LOOKALIKE_HTTP adds one GET per
 # registered lookalike per week, which tells its operator someone is looking; off by default.
 LOOKALIKE_ENABLED = env.bool('LIMES_LOOKALIKE_ENABLED', default=True)
