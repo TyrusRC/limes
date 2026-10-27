@@ -16,15 +16,6 @@ def is_safe_path(basedir, path, follow_symlinks=True):
 	return basedir == os.path.commonpath((basedir, matchpath))
 
 
-# Source: https://stackoverflow.com/a/10408992
-def remove_lead_and_trail_slash(s):
-	if s.startswith('/'):
-		s = s[1:]
-	if s.endswith('/'):
-		s = s[:-1]
-	return s
-
-
 def get_time_taken(latest, earlier):
 	duration = latest - earlier
 	days, seconds = duration.days, duration.seconds

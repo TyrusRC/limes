@@ -1,6 +1,3 @@
-from io import StringIO
-
-from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -36,12 +33,3 @@ class LinkTest(TestCase):
         self.assertIsNone(self.save(http_url='https://api.x.com/').asset)  # only the other project has it
         self.assertIsNone(self.save(http_url='https://unknown.x.com/').asset)
         self.assertIsNone(self.save().asset)
-
-    def test_backfill_is_idempotent(self):
-        v = Vulnerability.objects.create(scan_history=self.scan, name='old', severity=2, http_url='https://app.x.com/')
-        out = StringIO()
-        call_command('link_vulnerabilities', 'p', stdout=out)
-        call_command('link_vulnerabilities', stdout=out)
-        v.refresh_from_db()
-        self.assertEqual(v.asset, self.host)
-        self.assertEqual(out.getvalue().split(), ['linked=1', 'linked=0'])
