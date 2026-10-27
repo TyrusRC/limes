@@ -463,9 +463,85 @@ def fmt_traceback(exc):
 # CLI BUILDERS #
 #--------------#
 
-NMAP_ARG = re.compile(r'^[A-Za-z0-9_.,*/:=@+-]+$')  # scripts, script args, flags: one argv element, no shell syntax
-NMAP_PORTS = re.compile(r'^[0-9][0-9,-]*$')
-NMAP_HOST = re.compile(r'^[A-Za-z0-9_.:\[\]-]+$')
+NMAP_PORTS = re.compile(r'[0-9][0-9,-]*')
+NMAP_HOST = re.compile(r'[A-Za-z0-9_.:\[\]-]+')
+NMAP_FILE = re.compile(r'[A-Za-z0-9_./-]+')
+NMAP_SCRIPT_NAME = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}')
+NMAP_ARG_KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
+NMAP_ARG_VALUE = re.compile(r'[A-Za-z0-9_.:@+-]{0,100}')
+NMAP_ARG_KEY_DENIED = re.compile(r'newtargets|file|path|dir|script|userdb|passdb', re.I)  # keys that make a script read or add things
+NMAP_TIMEOUT = re.compile(r'([0-9]{1,6})(ms|s|m|h)?')
+NMAP_TIMING = re.compile(r'-T[0-5]')
+# Deny by default: only these scripts (NSE names; categories "safe" and "version") may be asked for, and only these
+# plain switches. Nothing that reads/writes a file, adds targets, sends spoofed traffic or runs an intrusive script.
+NMAP_SCRIPTS = frozenset({
+	'vulners', 'vulscan', 'banner', 'http-title', 'http-headers', 'http-server-header', 'http-methods',
+	'ssl-cert', 'ssl-enum-ciphers', 'ssh-hostkey', 'safe', 'version'})
+NMAP_SWITCHES = frozenset({'-Pn', '-n', '-sS', '-sT', '-sV', '--open'})
+NMAP_FLAGS = frozenset({'open', 'reason'})  # the `--<flag>` words the engine may add on top of the base command
+NMAP_NUMERIC = {  # option -> (min, max)
+	'--max-retries': (0, 10), '--min-rate': (1, 100000), '--max-rate': (1, 100000)}
+
+
+def _bounded_int(text, low, high):
+	return int(text) if re.fullmatch(r'[0-9]{1,7}', text) and low <= int(text) <= high else None
+
+
+def _nmap_timeout_ok(text):
+	m = NMAP_TIMEOUT.fullmatch(text)
+	if not m or not m.group(2):
+		return False
+	seconds = int(m.group(1)) * {'ms': 0.001, 's': 1, 'm': 60, 'h': 3600}[m.group(2)]
+	return 0 < seconds <= 86400
+
+
+def parse_nmap_base_command(cmd):
+	"""The engine-editable base command ("nmap -Pn -T4 --max-retries 2") as a canonical argv, or None.
+
+	An allowlist, not a deny-list: every token must be a known switch or a known option with a bounded value.
+	Bare tokens (targets), file options (-iL, -o*, --resume, --datadir ...), scripts, proxies, decoys, interfaces and
+	anything unknown are refused. Ports, scripts, rate, output and the target have their own checked arguments.
+	"""
+	try:
+		tokens = shlex.split(cmd) if cmd else ['nmap']
+	except ValueError:
+		return None
+	if not tokens or tokens[0] != 'nmap':
+		return None
+	argv, rest, i = ['nmap'], tokens[1:], 0
+	while i < len(rest):
+		tok = rest[i]
+		i += 1
+		if tok in NMAP_SWITCHES or NMAP_TIMING.fullmatch(tok):
+			argv.append(tok)
+			continue
+		name, eq, value = tok.partition('=')
+		if name not in NMAP_NUMERIC and name != '--host-timeout':
+			return None
+		if not eq:
+			if i >= len(rest):
+				return None
+			value, i = rest[i], i + 1
+		if name == '--host-timeout':
+			if not _nmap_timeout_ok(value):
+				return None
+		elif _bounded_int(value, *NMAP_NUMERIC[name]) is None:
+			return None
+		argv += [name, value]
+	return argv
+
+
+def _nmap_scripts_ok(script):
+	names = str(script).split(',')
+	return all(NMAP_SCRIPT_NAME.fullmatch(n) and n in NMAP_SCRIPTS for n in names)
+
+
+def _nmap_script_args_ok(script_args):
+	for pair in str(script_args).split(','):
+		key, eq, value = pair.partition('=')
+		if not eq or not NMAP_ARG_KEY.fullmatch(key) or NMAP_ARG_KEY_DENIED.search(key) or not NMAP_ARG_VALUE.fullmatch(value):
+			return False
+	return True
 
 
 def get_nmap_argv(
@@ -485,41 +561,42 @@ def get_nmap_argv(
 	args, ports, rate, flags, host and input file are checked one by one: the result is executed without a shell, so
 	each piece must be a single safe argument (and no host or file may look like an option).
 	"""
-	try:
-		argv = shlex.split(cmd) if cmd else ['nmap']
-	except ValueError:
-		return None
-	if not argv or argv[0] != 'nmap' or not is_valid_nmap_command(shlex.join(argv)):
+	argv = parse_nmap_base_command(cmd)
+	if argv is None:
 		logger.error(f'Invalid nmap command or potentially dangerous: {cmd}')
 		return None
-	if service_detection:
+	if service_detection and '-sV' not in argv:
 		argv.append('-sV')
 	if ports:
-		if not NMAP_PORTS.match(str(ports)):
+		if not NMAP_PORTS.fullmatch(str(ports)):
 			return None
 		argv += ['-p', str(ports)]
-	for option, value in (('--script', script), ('--script-args', script_args)):
-		if value:
-			if not NMAP_ARG.match(str(value)):
-				return None
-			argv += [option, str(value)]
-	if max_rate:
-		if not re.fullmatch(r'[0-9]+', str(max_rate)):
+	if script:
+		if not _nmap_scripts_ok(script):
 			return None
-		argv += ['--max-rate', str(max_rate)]
+		argv += ['--script', str(script)]
+	if script_args:
+		if not _nmap_script_args_ok(script_args):
+			return None
+		argv += ['--script-args', str(script_args)]
+	if max_rate not in (None, ''):
+		rate = _bounded_int(str(max_rate), *NMAP_NUMERIC['--max-rate'])
+		if rate is None:
+			return None
+		argv += ['--max-rate', str(rate)]
 	if output_file:
 		argv += ['-oX', str(output_file)]
 	for flag in flags or ():
 		if flag:
-			if not NMAP_ARG.match(str(flag)):
+			if flag not in NMAP_FLAGS:
 				return None
 			argv.append(f'--{flag}')
 	if input_file:
-		if str(input_file).startswith('-') or any(c.isspace() for c in str(input_file)):
+		if str(input_file).startswith('-') or not NMAP_FILE.fullmatch(str(input_file)):
 			return None
 		argv += ['-iL', str(input_file)]
 	elif host:
-		if str(host).startswith('-') or not NMAP_HOST.match(str(host)):
+		if str(host).startswith('-') or not NMAP_HOST.fullmatch(str(host)):
 			return None
 		argv.append(str(host))
 	return argv
@@ -745,40 +822,5 @@ def create_inappnotification(
 
 
 def is_valid_nmap_command(cmd):
-	"""
-		Check the engine's custom base nmap command ("nmap -Pn -T4"), not the full
-		command line: Limes' own pieces (output path, host) are added after this check
-		as separate arguments (see get_nmap_argv).
-		Args:
-			cmd: str: nmap command
-		Returns:
-			bool: True if valid, False otherwise
-
-		Allowing user input in nmap command is by design
-		as user can provide custom nmap command to run
-		but we need to make sure that the command is safe
-		and doesn't contain any malicious commands
-		We do this by checking if the command starts with nmap
-		and doesn't contain any dangerous characters, in the most basic form
-	"""
-	# if this is not a valid command nmap command at all, dont even run it
-	if not cmd.strip().startswith('nmap'):
-		return False
-	
-	# check for dangerous chars
-	dangerous_chars = {';', '&', '|', '>', '<', '`', '$', '(', ')', '#', '\\'}
-	if any(char in cmd for char in dangerous_chars):
-		return False
-		
-	# but we also need to check for flags and options, for example - and -- are allowed
-	parts = cmd.split()
-	for part in parts[1:]: # ignoring nmap the first part of command
-		if part.startswith('-') or part.startswith('--'):
-			continue
-		
-		# check for valid characters, . - etc are allowed in valid nmap command
-		if all(c.isalnum() or c in '.,/-_' for c in part):
-			continue
-		return False
-		
-	return True
+	"""True when the engine's custom base nmap command passes the allowlist in parse_nmap_base_command."""
+	return parse_nmap_base_command(cmd) is not None
