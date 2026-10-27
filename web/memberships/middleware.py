@@ -37,7 +37,7 @@ def candidate_slugs(request, view_kwargs, view_name):
     if 'slug' in view_kwargs:
         found.append(view_kwargs['slug'])
     _values(request.GET, found)
-    if request.path.startswith('/api/'):
+    if request.path_info.startswith('/api/'):
         ctype = (request.content_type or '').lower()
         if request.method not in policy.SAFE_METHODS:
             if ctype in ('application/x-www-form-urlencoded', 'multipart/form-data'):
@@ -86,13 +86,13 @@ class ProjectAccessMiddleware:
 
     @staticmethod
     def _not_found(request):
-        if request.path.startswith('/api/'):
+        if request.path_info.startswith('/api/'):
             return JsonResponse({'status': False, 'message': 'project not found'}, status=404)
         raise Http404('project not found')
 
     @staticmethod
     def _forbidden(request):
-        if request.path.startswith('/api/'):
+        if request.path_info.startswith('/api/'):
             return JsonResponse({'status': False, 'message': 'your role in this project does not allow this'}, status=403)
         raise PermissionDenied
 
