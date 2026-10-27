@@ -397,6 +397,7 @@ class IssueList(APIView):
 			issues = issues.filter(asset__tags__name=name) if name else issues.none()
 		now = timezone.now()
 		kev_only = q.get('kev') == 'true'
+		issues = issues.filter(ignored_at__isnull=False) if q.get('ignored') == 'true' else issues.filter(ignored_at__isnull=True)
 		if q.get('waived') in ('true', 'false'):
 			issues = issues.filter(IssueWaiver.waived_exists(now)) if q['waived'] == 'true' else issues.exclude(IssueWaiver.waived_exists(now))
 		out = []
@@ -434,6 +435,7 @@ class IssueList(APIView):
 						'asset_kind': i.asset.kind, 'first_seen': i.first_seen, 'last_seen': i.last_seen,
 						'waiver': _waiver_json(w) if w else None, 'note_count': i.note_count,
 						'expired_waiver': _waiver_json(expired) if expired else None,
+						'ignored_reason': i.ignored_reason if i.ignored_at else None,
 						'cves': exploit.cve_rows(found, marks),
 						'kev': hit['kev'], 'epss': hit['epss']})
 		if q.get('group') == '1':  # the Issues page: one row per risk with its assets

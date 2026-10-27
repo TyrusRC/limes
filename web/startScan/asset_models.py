@@ -195,6 +195,10 @@ class TrackedIssue(models.Model):
     reopened = models.IntegerField(default=0)
     reopened_at = models.DateTimeField(null=True, blank=True)  # when it last came back; first_seen is the first detection
     jira_key = models.CharField(max_length=40, blank=True, default='')  # Jira issue made for it ('pending' while being made): one issue per tracked issue
+    # Ignored (findings only): hidden from the Issues list and its counts. It does NOT touch the score; only a waiver does.
+    ignored_at = models.DateTimeField(null=True, blank=True)
+    ignored_reason = models.CharField(max_length=300, blank=True, default='')
+    ignored_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
 
     class Meta:
         unique_together = ('asset', 'key')

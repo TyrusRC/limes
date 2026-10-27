@@ -5,6 +5,7 @@ from rest_framework import routers
 from .views import *
 from .alert_rules import Integration, JiraTest, RuleDetail, RuleList, RuleTest
 from .feed import DismissFeedItems
+from .issue_ignore import IgnoreIssue, UnignoreIssue
 from .score_history import ScoreHistory
 from .lookalikes import DecideLookalike, LookalikeList, LookalikeReport
 
@@ -29,6 +30,8 @@ urlpatterns = [
     path('tags/', TagList.as_view(), name='tags'),
     path('tag_scores/', TagScores.as_view(), name='tag_scores'),
     path('asset_score/', AssetScore.as_view(), name='asset_score'),
+    path('action/issue/ignore/', IgnoreIssue.as_view(), name='ignore_issue'),
+    path('action/issue/unignore/', UnignoreIssue.as_view(), name='unignore_issue'),
     path('issues/', IssueList.as_view(), name='issues'),
     path('alert_rules/', RuleList.as_view(), name='alert_rules'),
     path('alert_rules/<int:pk>/', RuleDetail.as_view(), name='alert_rule'),

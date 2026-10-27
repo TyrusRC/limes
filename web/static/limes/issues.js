@@ -5,7 +5,7 @@
   if (!root) return;
   var el = LimesUx.el, project = root.dataset.project, PAGE = 50;
   var SEV = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'};
-  var KEYS = ['severity', 'category', 'source', 'waived', 'kev', 'tag'];
+  var KEYS = ['severity', 'category', 'source', 'waived', 'ignored', 'kev', 'tag'];
   var filters = {}, groups = [], shown = PAGE, seq = 0, score = null;
 
   function detailUrl(id) { return root.dataset.detail.replace('/0/', '/' + Number(id) + '/'); }
