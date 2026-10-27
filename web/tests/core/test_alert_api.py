@@ -104,7 +104,7 @@ class IntegrationApiTest(Base):
                 self.assertNotIn(s, body)
             self.assertNotIn('T0K3N', body)
             j = resp.json()
-            self.assertEqual(j['webhook_secret'], {'set': True, 'last4': '••••et99'})
+            self.assertEqual(j['webhook_secret'], {'set': True, 'last4': None})
             self.assertEqual(j['jira_token'], {'set': True, 'last4': '••••8888'})
             self.assertEqual(j['jira_project_key'], 'SEC')
         row = AlertIntegration.objects.get()

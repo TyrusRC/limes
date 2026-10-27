@@ -41,6 +41,9 @@ EMAIL_HOST_USER = env('LIMES_EMAIL_USER', default='')
 EMAIL_HOST_PASSWORD = env('LIMES_EMAIL_PASSWORD', default='')
 EMAIL_USE_TLS = env.bool('LIMES_EMAIL_USE_TLS', default=True)
 EMAIL_TIMEOUT = 10
+# Alert-rule sends allowed per project and channel per hour; the overflow is counted and reported once per window
+ALERT_RULE_PER_HOUR = {ch: env.int('LIMES_ALERT_RULE_%s_PER_HOUR' % ch.upper(), default=n)
+                       for ch, n in (('in_app', 60), ('email', 30), ('slack', 60), ('webhook', 120), ('jira', 20))}
 DEFAULT_FROM_EMAIL = env('LIMES_EMAIL_FROM', default='limes@localhost')
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)

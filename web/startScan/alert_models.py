@@ -26,6 +26,8 @@ class AlertRule(models.Model):
     last_sent = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=300, blank=True, default='')
     last_error_at = models.DateTimeField(null=True, blank=True)
+    suppressed = models.IntegerField(default=0)  # events held back by the hourly channel cap, all time
+    last_suppressed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('project', 'name')

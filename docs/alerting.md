@@ -39,6 +39,15 @@ not followed. Calls time out after 10 seconds; transient failures (network, 429,
 (30 s, 60 s, 120 s). The outcome is kept on the rule (`last_sent`, `last_error`) and shown on the page. A failure never
 reaches the scan pipeline.
 
+## Limits
+
+Each project may send `LIMES_ALERT_RULE_<CHANNEL>_PER_HOUR` rule alerts per channel per hour (defaults: in-app 60, email 30,
+Slack 60, webhook 120, Jira 20). Events over the cap are not sent; the rule's `suppressed` count grows and, once the window
+has ended, the channel gets one "N more alert events were held back" message (Jira gets none). If the cache is down the
+cap fails closed: rule sends pause. Emails go one per recipient. "Test" and "Test create issue" are limited to 10 an hour
+per user. A secret that no longer decrypts is reported as "secret unreadable - re-enter" and never replaced by another
+destination; masks show the last four characters only for secrets of 20 or more characters.
+
 ## REST
 
 `GET/POST /api/alert_rules/`, `GET/PATCH/DELETE /api/alert_rules/<id>/`, `POST /api/alert_rules/<id>/test/`,

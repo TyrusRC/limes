@@ -4,8 +4,10 @@ last four characters."""
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
+from django.views.decorators.debug import sensitive_variables
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from api.permissions import HasPermission
@@ -17,6 +19,18 @@ from startScan.alert_models import CHANNELS
 from startScan.models import AlertIntegration, AlertRule
 
 MAX_SECRET = 2000
+JIRA_URL_MAX = 300  # AlertIntegration.jira_base_url
+
+
+class TestSendThrottle(UserRateThrottle):
+    """Test sends reach real mailboxes and trackers: ten an hour per user."""
+    scope = 'alert_test'
+    THROTTLE_RATES = {'alert_test': '10/hour'}
+
+
+class JiraTestThrottle(TestSendThrottle):
+    scope = 'alert_jira_test'
+    THROTTLE_RATES = {'alert_jira_test': '10/hour'}
 
 
 def _fail(message, status=400):
@@ -33,7 +47,7 @@ def rule_json(r):
     return {'id': r.id, 'name': r.name, 'enabled': r.enabled, 'kinds': r.kinds, 'min_severity': r.min_severity, 'tags': r.tags,
             'score_drop_points': r.score_drop_points, 'score_window_days': r.score_window_days, 'channels': r.channels,
             'email_to': r.email_to, 'created_at': r.created_at, 'last_sent': r.last_sent, 'last_error': r.last_error,
-            'last_error_at': r.last_error_at}
+            'last_error_at': r.last_error_at, 'suppressed': r.suppressed, 'last_suppressed_at': r.last_suppressed_at}
 
 
 def integration_json(i):
@@ -114,6 +128,7 @@ class RuleDetail(_Base):
 
 class RuleTest(_Base):
     """Send a test message through the rule's channels now (one attempt, no retry); the outcome is also kept on the rule."""
+    throttle_classes = [TestSendThrottle]
 
     def post(self, request, pk):
         project = _project(request)
@@ -151,6 +166,7 @@ def _text(data, field, cap):
     return v.strip()
 
 
+@sensitive_variables()
 def clean_integration(data):
     """{column: value} for the fields present in `data`: a secret is encrypted, '' clears. Raises RuleError."""
     out = {}
@@ -166,7 +182,7 @@ def clean_integration(data):
         if v and field == 'webhook_secret' and len(v) < 8:
             raise rules.RuleError('webhook_secret must be at least 8 characters')
         out[col] = identity.encrypt(v) if v else ''
-    base = _text(data, 'jira_base_url', outbound.MAX_URL)
+    base = _text(data, 'jira_base_url', JIRA_URL_MAX)
     if base is not None:
         if base and outbound.validate_url(base):
             raise rules.RuleError('jira_base_url: ' + outbound.validate_url(base))
@@ -203,10 +219,13 @@ class Integration(_Base):
             return _fail('project not found', 404)
         return Response(integration_json(channels.integration(project)))
 
+    @sensitive_variables()
     def put(self, request):
         project = _project(request)
         if not project:
             return _fail('project not found', 404)
+        if not isinstance(request.data, dict):
+            return _fail('expected a JSON object')
         try:
             fields = clean_integration(request.data)
         except rules.RuleError as e:
@@ -217,6 +236,7 @@ class Integration(_Base):
 
 class JiraTest(_Base):
     """Create a real issue to prove the settings work, and report its key."""
+    throttle_classes = [JiraTestThrottle]
 
     def post(self, request):
         project = _project(request)
@@ -225,8 +245,12 @@ class JiraTest(_Base):
         try:
             key = channels.create_jira_issue(channels.integration(project), 'Limes test issue',
                                              ['Created by the Limes "Test create issue" button. You can close it.'])
+        except channels.SecretUnreadable:
+            return _fail(channels.UNREADABLE)
         except channels.NotConfigured as e:
             return _fail(str(e))
         except outbound.OutboundError as e:
             return _fail(str(e))
+        except Exception as e:  # never the exception text: it can carry a URL or a credential
+            return _fail('unexpected error (%s)' % type(e).__name__)
         return Response({'status': True, 'key': key})

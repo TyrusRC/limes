@@ -57,6 +57,18 @@ def take_daily(provider, limit, today=None, cache=default_cache):
         return False
 
 
+def take_hourly(name, limit, now=None, cache=default_cache):
+    """Count one send against this hour's (UTC) budget; False once it is spent. Fails closed when the cache is down."""
+    hour = int((now or datetime.now(timezone.utc)).timestamp() // 3600)
+    key = f'limes:hourly:{name}:{hour}'
+    try:
+        cache.add(key, 0, 2 * 3600)
+        return cache.incr(key) <= limit
+    except Exception as e:
+        _cache_down(e, 'budgeted sends are paused (failing closed)')
+        return False
+
+
 def per_tick(limit, tick_seconds=60):
     """The share of a daily budget one beat tick may spend (at least 1)."""
     return max(1, math.ceil(limit * tick_seconds / 86400))

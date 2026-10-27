@@ -61,6 +61,7 @@ Settings are environment variables in `.env`. The ones you are most likely to to
 | `LIMES_ATTRIBUTION_AUTO_CONFIRM` | `true` | Auto-confirm candidates that pass ownership scoring and a registry-verified delegation. `false` only flags them. |
 | `LIMES_ALERT_WEBHOOK_URL` / `LIMES_ALERT_WEBHOOK_SECRET` | empty | Signed JSON webhook for change alerts (HMAC-SHA256 in `X-Limes-Signature`); both must be set. HTTP is refused unless `LIMES_ALERT_WEBHOOK_ALLOW_HTTP=true`. |
 | `LIMES_EMAIL_HOST` / `LIMES_EMAIL_PORT` / `LIMES_EMAIL_USER` / `LIMES_EMAIL_PASSWORD` / `LIMES_EMAIL_USE_TLS` / `LIMES_EMAIL_FROM` | empty / `587` / empty / empty / `true` / `limes@localhost` | SMTP server for the email channel of alert rules. Without a host the channel reports "not configured" instead of failing. |
+| `LIMES_ALERT_RULE_<CHANNEL>_PER_HOUR` | in_app `60`, email `30`, slack `60`, webhook `120`, jira `20` | Alert-rule sends per project and channel per hour (`CHANNEL` is `IN_APP`, `EMAIL`, `SLACK`, `WEBHOOK` or `JIRA`). The overflow is counted on the rule and reported once as "N more events"; a down cache pauses rule sends. |
 | `LIMES_RANGE_ENUMERATION` | `false` | Expand owned ranges and ASNs into per-IP assets with reverse DNS and InternetDB lookups. See [Passive providers](#passive-providers). |
 | `LIMES_RANGE_ADDRESS_CAP` | `4096` | Owned addresses allowed per project across ranges and ASNs (1 to 65536). |
 | `LIMES_INTERNETDB_DAILY_BUDGET` / `LIMES_PTR_DAILY_BUDGET` | `5000` / `10000` | Daily lookup budgets for range enumeration, shared by all ranges. |

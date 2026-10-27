@@ -6,7 +6,8 @@ import re
 import smtplib
 
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import send_mass_mail
+from django.views.decorators.debug import sensitive_variables
 
 from limes import identity
 from limes.alerts import deliver, outbound
@@ -27,6 +28,14 @@ class NotConfigured(Exception):
     pass
 
 
+class SecretUnreadable(Exception):
+    """A stored secret no longer decrypts (the key changed): never fall back to something else, ask for it again."""
+
+
+UNREADABLE = 'secret unreadable — re-enter'
+MIN_MASKED = 20  # a shorter secret shows only that it is set
+
+
 def clean(text, cap=LINE_MAX):
     """One printable line, at most `cap` characters."""
     text = ''.join(' ' if (c.isspace() or ord(c) < 32 or ord(c) == 127) else c for c in str(text or ''))
@@ -38,6 +47,7 @@ def slack_escape(text):
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
+@sensitive_variables()
 def secret(enc):
     """Plaintext of an *_enc column; '' when unset or when the key changed since it was saved."""
     try:
@@ -46,12 +56,21 @@ def secret(enc):
         return ''
 
 
+def need(enc):
+    """Like secret(), but a stored value that does not decrypt is an error, not 'unset'."""
+    plain = secret(enc)
+    if enc and not plain:
+        raise SecretUnreadable()
+    return plain
+
+
+@sensitive_variables()
 def mask(enc):
-    """What the API may say about a stored secret: whether it is set and its last four characters."""
+    """What the API may say about a stored secret: whether it is set and, for a long one, its last four characters."""
     plain = secret(enc)
     if not enc:
         return {'set': False, 'last4': None}
-    return {'set': True, 'last4': ('••••' + plain[-4:]) if len(plain) >= 8 else None}
+    return {'set': True, 'last4': ('••••' + plain[-4:]) if len(plain) >= MIN_MASKED else None}
 
 
 def integration(project):
@@ -63,6 +82,12 @@ def message(event):
     return {'kind': event.kind, 'title': event.title, 'severity': event.severity, 'event_id': event.id,
             'asset': event.asset.value if event.asset_id else None, 'payload': deliver.payload(event),
             'project': event.project.name, 'key': (event.detail or {}).get('key'), 'asset_id': event.asset_id}
+
+
+def summary_message(project, channel, n):
+    title = '%d more alert events were held back in the last hour: the %s hourly cap was reached. See the dashboard for all changes.' % (n, channel)
+    return {'kind': 'summary', 'title': title, 'severity': None, 'event_id': None, 'asset': None, 'key': None, 'asset_id': None,
+            'project': project.name, 'payload': {'event': 'summary', 'project': project.slug, 'title': title, 'suppressed': n}}
 
 
 def test_message(rule):
@@ -91,15 +116,16 @@ def send_email(project, rules, msg, **kw):
     body = '\n'.join([clean(msg['title'], 300), '', 'Project: ' + clean(msg['project'], 100),
                       'Asset: ' + clean(msg['asset'] or '-', 255), 'Event: ' + clean(msg['kind'], 40),
                       'Rule: ' + ', '.join(clean(r.name, 100) for r in rules)])
-    try:
-        send_mail('[Limes] ' + clean(msg['title'], 150), body, settings.DEFAULT_FROM_EMAIL, to, fail_silently=False)
+    try:  # one message each: recipients of different rules never see each other
+        send_mass_mail([('[Limes] ' + clean(msg['title'], 150), body, settings.DEFAULT_FROM_EMAIL, [a]) for a in to])
     except (smtplib.SMTPException, OSError) as exc:
         raise outbound.OutboundError('the mail server refused or did not answer (%s)' % type(exc).__name__, transient=True)
 
 
+@sensitive_variables()
 def send_webhook(project, rules, msg, **kw):
     integ = integration(project)
-    url, key = (secret(integ.webhook_url_enc), secret(integ.webhook_secret_enc)) if integ else ('', '')
+    url, key = (need(integ.webhook_url_enc), need(integ.webhook_secret_enc)) if integ else ('', '')
     if not url or not key:
         raise NotConfigured('the webhook URL and signing secret are not set')
     body = json.dumps(msg['payload'], sort_keys=True).encode()
@@ -107,26 +133,28 @@ def send_webhook(project, rules, msg, **kw):
                                                       'X-Limes-Signature': deliver.sign(body, key)}, **kw)
 
 
+@sensitive_variables()
 def send_slack(project, rules, msg, **kw):
+    """The project's hook; only when the project has none saved, the install-wide chat hook. Both go through
+    outbound.request, so both are vetted and a failure is a failure."""
     integ = integration(project)
-    url = secret(integ.slack_url_enc) if integ else ''
-    text = slack_escape(clean(msg['title'], 250))
-    if not url:  # no per-project hook: the install-wide chat setting, as the default alerts use
-        from limes.common_func import send_slack_message
+    url = need(integ.slack_url_enc) if integ else ''
+    if not url:
         from scanEngine.models import Notification
         n = Notification.objects.first()
         if not (n and n.send_to_slack and n.slack_hook_url):
             raise NotConfigured('no Slack webhook is set')
-        send_slack_message(text)
-        return
+        url = n.slack_hook_url
+    text = slack_escape(clean(msg['title'], 250))
     outbound.request('post', url, data=json.dumps({'text': text}).encode(), headers={'Content-Type': 'application/json'}, **kw)
 
 
 def jira_ready(integ):
-    return bool(integ and integ.jira_base_url and integ.jira_email and secret(integ.jira_token_enc)
+    return bool(integ and integ.jira_base_url and integ.jira_email and need(integ.jira_token_enc)
                 and PROJECT_KEY_RE.fullmatch(integ.jira_project_key or ''))
 
 
+@sensitive_variables()
 def create_jira_issue(integ, summary, lines, **kw):
     """Create one issue and return its key. Summary and description are plain text: the description is ADF text nodes."""
     if not jira_ready(integ):
@@ -142,9 +170,10 @@ def create_jira_issue(integ, summary, lines, **kw):
                             headers={'Content-Type': 'application/json', 'Accept': 'application/json',
                                      'Authorization': 'Basic ' + auth}, **kw)
     try:
-        key = str(resp.json().get('key', ''))
-    except ValueError:
-        key = ''
+        body = resp.json()
+    except Exception:
+        body = None
+    key = str(body.get('key', '')) if isinstance(body, dict) else ''
     if not JIRA_KEY_RE.fullmatch(key):
         raise outbound.OutboundError('Jira answered without an issue key')
     return key

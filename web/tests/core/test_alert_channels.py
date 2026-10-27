@@ -122,16 +122,15 @@ class EmailTest(Base):
         self.assertEqual(mail.outbox, [])
 
     @override_settings(EMAIL_HOST='smtp.example.com')
-    def test_sends_one_mail_to_the_union_of_recipients_with_a_flat_subject(self):
+    def test_sends_one_mail_per_recipient_with_a_flat_subject(self):
         r1 = self.rule(name='a', kinds=['asset_new'], channels=['email'], email_to=['a@b.com'])
         r2 = self.rule(name='b', kinds=['asset_new'], channels=['email'], email_to=['c@d.com', 'a@b.com'])
         ev = events.record(self.p, 'asset_new', 'New host\r\nBcc: evil@evil.com', asset=self.a)
         self.assertIsNone(rule_tasks.run_channel(self.p, 'email', [r1, r2], channels.message(ev)))
-        self.assertEqual(len(mail.outbox), 1)
-        m = mail.outbox[0]
-        self.assertEqual(sorted(m.to), ['a@b.com', 'c@d.com'])
-        self.assertNotIn('\n', m.subject)
-        self.assertEqual(m.bcc, [])
+        self.assertEqual(sorted(tuple(m.to) for m in mail.outbox), [('a@b.com',), ('c@d.com',)])
+        for m in mail.outbox:
+            self.assertNotIn('\n', m.subject)
+            self.assertEqual(m.bcc, [])
 
 
 class SlackAndInAppTest(Base):

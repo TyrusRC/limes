@@ -28,6 +28,8 @@ def run_channel(project, channel, rules, msg, **kw):
     """Send now; returns None on success or the reason text on a final failure. Raises OutboundError when transient."""
     try:
         channels.SENDERS[channel](project, rules, msg, **kw)
+    except channels.SecretUnreadable:
+        return channels.UNREADABLE
     except channels.NotConfigured as exc:
         return f'not configured: {exc}'
     except outbound.OutboundError as exc:
@@ -38,13 +40,16 @@ def run_channel(project, channel, rules, msg, **kw):
 
 
 @app.task(name='send_rule_alert', bind=True, max_retries=MAX_RETRIES)
-def send_rule_alert(self, event_id, channel, rule_ids):
-    event = ChangeEvent.objects.filter(pk=event_id).select_related('project', 'asset').first()
+def send_rule_alert(self, event_id, channel, rule_ids, summary=0):
+    """event_id None with `summary` = how many events the channel's hourly cap held back (one message per window)."""
     rules = list(AlertRule.objects.filter(pk__in=rule_ids, enabled=True).select_related('project'))
-    if event is None or not rules or channel not in channels.SENDERS:
+    event = ChangeEvent.objects.filter(pk=event_id).select_related('project', 'asset').first() if event_id else None
+    if not rules or channel not in channels.SENDERS or (event is None and not summary):
         return None
+    project = rules[0].project
+    msg = channels.message(event) if event else channels.summary_message(project, channel, summary)
     try:
-        err = run_channel(event.project, channel, rules, channels.message(event))
+        err = run_channel(project, channel, rules, msg)
     except SoftTimeLimitExceeded:
         raise
     except outbound.OutboundError as exc:

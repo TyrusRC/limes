@@ -4,11 +4,15 @@ import logging
 from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db.models import F
 from django.utils import timezone
 
 from limes import tags as tag_rules
+from limes.intel import ratelimit
 from limes.alerts import events
 from limes.alerts.deliver import ALERT_WINDOW
 from startScan.models import AlertRule, ChangeEvent, ScoreSnapshot
@@ -129,6 +133,39 @@ def plan(rules, event, asset_tags):
     return out
 
 
+def _hour(now):
+    return int(now.timestamp() // 3600)
+
+
+def _admit(project, channel, hit, now):
+    """One send against the project's hourly budget for the channel; when spent, count it on the rules and the window."""
+    if ratelimit.take_hourly(f'rule:{project.id}:{channel}', settings.ALERT_RULE_PER_HOUR[channel], now):
+        return True
+    try:
+        key = f'limes:rulesup:{project.id}:{channel}:{_hour(now)}'
+        cache.add(key, 0, 4 * 3600)
+        cache.incr(key)
+    except Exception:
+        pass  # the cache is down: the count in the summary is lost, the rules' own counter below still moves
+    AlertRule.objects.filter(pk__in=[r.id for r in hit]).update(suppressed=F('suppressed') + 1, last_suppressed_at=now)
+    return False
+
+
+def _summaries(project, rules, now, enqueue):
+    """Once per finished window and channel: tell the channel how many events its cap held back."""
+    for channel in sorted({c for r in rules for c in r.channels if c != 'jira'}):  # NOTE: no Jira summary issue
+        for back in (1, 2, 3):
+            key = f'limes:rulesup:{project.id}:{channel}:{_hour(now) - back}'
+            try:
+                n = cache.get(key)
+                if n and cache.add(key + ':sent', 1, 86400):
+                    enqueue(None, channel, [r.id for r in rules if channel in r.channels], int(n))
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception as exc:
+                logger.warning('Suppressed-events summary failed for project %s: %s', project.pk, type(exc).__name__)
+
+
 def dispatch(project, now=None, enqueue=None):
     """Queue each recent, unclaimed event of the project to the channels of its matching rules; returns how many
     sends were queued. Never raises: the caller is the scan pipeline."""
@@ -140,6 +177,7 @@ def dispatch(project, now=None, enqueue=None):
             from limes.alerts.rule_tasks import send_rule_alert
             enqueue = send_rule_alert.delay
         now = now or timezone.now()
+        _summaries(project, rules, now, enqueue)
         pending = ChangeEvent.objects.filter(project=project, rules_dispatched_at__isnull=True,
                                              created_at__gte=now - ALERT_WINDOW).select_related('asset', 'project') \
             .order_by('created_at', 'id')[:DISPATCH_CAP]
@@ -151,6 +189,8 @@ def dispatch(project, now=None, enqueue=None):
             for channel, hit in plan(rules, ev, tags).items():
                 if channel == 'in_app' and ev.immediate and ev.notified_at is not None:
                     continue  # the default delivery already put this one in the app
+                if not _admit(project, channel, hit, now):
+                    continue
                 try:
                     enqueue(ev.id, channel, [r.id for r in hit])
                     queued += 1
