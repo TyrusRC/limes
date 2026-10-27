@@ -71,8 +71,8 @@ NODE_EXTRA_CA_CERTS=<path to limes_chain.pem>
 
 ## Security model
 
-- **Per-call authority.** Every call re-checks the token (not revoked, not expired), that the user is active, and the user's role permission for that tool. Deactivating a user or revoking a token takes effect on the next call. Limes has no per-project access control, so any active user reads any project, as in the UI.
-- **Writes need three keys:** the server setting `LIMES_MCP_WRITES_ENABLED`, a token with `read_write` scope, and the user's own permission for that action. When the setting is off the write tools are not registered and are also refused per call.
+- **Per-call authority.** Every call re-checks the token (not revoked, not expired), that the user is active, and the user's role permission for that tool. Deactivating a user or revoking a token takes effect on the next call. Projects follow the user's membership, as in the UI (see [sso.md](sso.md)): a project the user is not a member of is `not_found`, and a read-only member's token is refused every write tool even when it is `read_write`.
+- **Writes need three keys:** the server setting `LIMES_MCP_WRITES_ENABLED`, a token with `read_write` scope, and the user's own permission for that action (including a role above read-only in that project). When the setting is off the write tools are not registered and are also refused per call.
 - **Rate limits.** Per token, 60 `tools/call` per minute and 10 write calls per minute (`LIMES_MCP_RATE_PER_MIN`, `LIMES_MCP_WRITE_RATE_PER_MIN`). Over the limit a call returns `rate_limited` with `retry_after_seconds`.
 - **Audit log.** Every call is recorded (user, token id, tool, project, arguments cut to 1 KB with secrets scrubbed, outcome, duration). Rows older than 90 days are purged. The reasons and notes a write tool saves end in "(via MCP)", so the issue history shows where that text came from.
 - **Never exposed:** credentials and API keys, configuration secrets, token hashes, session data. Request/response bodies and scan logs pass through a best-effort redactor; treat them as potentially sensitive. There is no tool that runs commands, fetches URLs or reads files.
