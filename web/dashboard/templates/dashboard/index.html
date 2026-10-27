@@ -24,6 +24,16 @@ Overview
   <span>Scoring model {{ risk.version }}</span>
 </p>
 
+{% if portfolio_card %}
+<section class="card ov-cats" id="dash_portfolio" aria-labelledby="h-portfolio">
+  <div class="ov-card-head"><h2 id="h-portfolio">Portfolio: {{ portfolio_card.name }}</h2><span class="ov-meta">Findings and weakest assets below are limited to it; the score card and the other sections stay organization-wide</span></div>
+  <p class="ov-pad">
+    {% if portfolio_card.assessed %}<span class="ov-grade ov-grade-{{ portfolio_card.grade|lower }}">{{ portfolio_card.grade }}</span> <span class="ov-cat-score">{{ portfolio_card.score }}</span>{% else %}<span class="ov-cat-na">Not assessed</span>{% endif %}
+    · {{ portfolio_card.assets|intcomma }} asset{{ portfolio_card.assets|pluralize }} · {{ portfolio_card.open|intcomma }} open
+  </p>
+</section>
+{% endif %}
+
 <div class="ov-grid">
   <section class="card ov-score" id="dash_risk" aria-labelledby="h-score">
     <div class="ov-card-head"><h2 id="h-score">Security score</h2><span class="ov-meta">of {{ risk.max_score }}</span></div>
@@ -178,6 +188,23 @@ Overview
     <p class="ov-note ov-empty-note ov-pad">No tags yet. Tag assets from the <a href="{{ assets_url }}">Assets page</a> to group and score them.</p>
     {% endif %}
   </section>
+
+  {% if subsidiary_cards %}
+  <section class="card ov-cats" id="dash_subsidiaries" aria-labelledby="h-subs">
+    <div class="ov-card-head"><h2 id="h-subs">Organization and subsidiaries</h2><span class="ov-meta">Each scored like the headline over its own assets; the headline score is not changed by them</span></div>
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th scope="col">Name</th><th scope="col">Grade</th><th scope="col">Score</th><th scope="col">Open issues</th><th scope="col">Assets</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">{{ project.name }} (organization)</th><td>{% if risk.score is not None %}{{ risk.grade }}{% else %}N/A{% endif %}</td><td>{% if risk.score is not None %}{{ risk.score }}{% else %}-{% endif %}</td><td>{{ open_issues|intcomma }}</td><td>{{ risk.asset_count|intcomma }}</td></tr>
+          {% for s in subsidiary_cards %}
+          <tr><th scope="row"><a href="{{ issues_url }}?subsidiary={{ s.name|urlencode:'' }}&amp;waived=false">{{ s.name }}</a></th><td>{% if s.assessed %}{{ s.grade }}{% else %}N/A{% endif %}</td><td>{% if s.assessed %}{{ s.score }}{% else %}-{% endif %}</td><td>{{ s.open|intcomma }}</td><td>{{ s.assets|intcomma }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
 
   <section class="card ov-brand" id="dash_brand" aria-labelledby="h-brand">
     <div class="ov-card-head"><h2 id="h-brand">Brand</h2><a class="ov-meta" href="{{ lookalikes_url }}">Lookalikes</a></div>

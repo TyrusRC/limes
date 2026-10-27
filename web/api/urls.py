@@ -7,6 +7,7 @@ from .alert_rules import Integration, JiraTest, RuleDetail, RuleList, RuleTest
 from .feed import DismissFeedItems
 from .issue_ignore import IgnoreIssue, UnignoreIssue
 from .score_history import ScoreHistory
+from .subsidiaries import AssignSubsidiary, PortfolioList, SelectPortfolio, SubsidiaryList
 from .lookalikes import DecideLookalike, LookalikeList, LookalikeReport
 
 app_name = 'api'
@@ -28,6 +29,10 @@ urlpatterns = [
     path('action/asset/cadence/', SetAssetCadence.as_view(), name='set_asset_cadence'),
     path('action/asset/tags/', AssetTags.as_view(), name='asset_tags'),
     path('tags/', TagList.as_view(), name='tags'),
+    path('subsidiaries/', SubsidiaryList.as_view(), name='subsidiaries'),
+    path('action/asset/subsidiary/', AssignSubsidiary.as_view(), name='asset_subsidiary'),
+    path('portfolios/', PortfolioList.as_view(), name='portfolios'),
+    path('action/portfolio/select/', SelectPortfolio.as_view(), name='select_portfolio'),
     path('tag_scores/', TagScores.as_view(), name='tag_scores'),
     path('asset_score/', AssetScore.as_view(), name='asset_score'),
     path('action/issue/ignore/', IgnoreIssue.as_view(), name='ignore_issue'),

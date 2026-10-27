@@ -14,7 +14,7 @@ from rolepermissions.checkers import has_permission
 from rolepermissions.decorators import has_permission_decorator
 
 from dashboard.models import Project
-from limes import tags as tag_rules
+from limes import portfolios, tags as tag_rules
 from limes.definitions import FOUR_OH_FOUR_URL, PERM_MODIFY_SCAN_CONFIGURATIONS
 from reporting import delivery, exports, sched, store, summary, validate
 from reporting.models import COMMENTARY_MAX, DELIVERIES, FREQUENCIES, LAYOUTS, SECTIONS, WEEKDAYS, ReportRun, ReportSchedule, ReportTemplate
@@ -63,7 +63,9 @@ def executive_summary(request, slug):
 
 def _members(request, project):
     tag = request.GET.get('tag') or None
-    return None if tag is None else summary.members(project, tag)[1]
+    ids = None if tag is None else summary.members(project, tag)[1]
+    scope = portfolios.scope(request, project)  # the header's current portfolio narrows an export too
+    return ids if scope is None else scope if ids is None else set(ids) & scope
 
 
 def export_issues(request, slug):

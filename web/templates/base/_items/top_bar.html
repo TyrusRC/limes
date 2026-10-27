@@ -24,6 +24,21 @@
     </div>
   </div>
 
+  {% if portfolio_options %}
+  <div class="dropdown">
+    <button type="button" class="btn btn-ghost" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Current portfolio: {% if current_portfolio %}{{ current_portfolio.name }}{% else %}whole project{% endif %}">
+      <i class="fe-layers me-1" aria-hidden="true"></i><span>{% if current_portfolio %}{{ current_portfolio.name }}{% else %}All assets{% endif %}</span>
+    </button>
+    <div class="dropdown-menu" id="portfolio_menu" data-project="{{ current_project.slug }}">
+      <h6 class="dropdown-header">Current portfolio</h6>
+      <button type="button" class="dropdown-item{% if not current_portfolio %} active{% endif %}" data-portfolio="">All assets</button>
+      {% for p in portfolio_options %}
+      <button type="button" class="dropdown-item{% if p.id == current_portfolio.id %} active{% endif %}" data-portfolio="{{ p.id }}">{{ p.name }}</button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <form class="l-search" method="get" action="{% url 'search' current_project.slug %}" role="search">
     <label class="visually-hidden" for="top-search">Universal search</label>
     <i class="fe-search" aria-hidden="true"></i>

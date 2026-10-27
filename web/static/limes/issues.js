@@ -5,7 +5,7 @@
   if (!root) return;
   var el = LimesUx.el, project = root.dataset.project, PAGE = 50;
   var SEV = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'};
-  var KEYS = ['severity', 'category', 'source', 'waived', 'ignored', 'kev', 'tag'];
+  var KEYS = ['severity', 'category', 'source', 'waived', 'ignored', 'kev', 'tag', 'subsidiary', 'subsidiaries'];
   var filters = {}, groups = [], shown = PAGE, seq = 0, score = null;
 
   function detailUrl(id) { return root.dataset.detail.replace('/0/', '/' + Number(id) + '/'); }
@@ -27,6 +27,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('#iss .lx-chip[data-k]'), function (c) {
       c.setAttribute('aria-pressed', filters[c.dataset.k] === c.dataset.v ? 'true' : 'false');
     });
+    $('sub_toggle').setAttribute('aria-pressed', filters.subsidiaries === 'false' ? 'false' : 'true');
   }
 
   function sevCell(g) {
@@ -209,6 +210,23 @@
       }).catch(function () { score = null; box.replaceChildren(); });
   }
 
+  function loadSubs() {  // the toggle and one chip per entity; names reach the DOM through textContent only
+    fetch('/api/subsidiaries/?project=' + encodeURIComponent(project), {credentials: 'same-origin'})
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) {
+        var box = $('sub_chips');
+        rows.forEach(function (t) {
+          var b = el('button', 'lx-chip', t.name);
+          b.type = 'button';
+          b.dataset.k = 'subsidiary';
+          b.dataset.v = t.name;
+          b.setAttribute('aria-pressed', filters.subsidiary === t.name ? 'true' : 'false');
+          box.append(b);
+        });
+        box.hidden = !rows.length;
+      }).catch(function () {});
+  }
+
   function loadTags() {
     fetch('/api/tags/?project=' + encodeURIComponent(project), {credentials: 'same-origin'})
       .then(function (r) { return r.ok ? r.json() : []; })
@@ -235,6 +253,10 @@
     filters[chip.dataset.k] = filters[chip.dataset.k] === chip.dataset.v ? '' : chip.dataset.v;
     load();
   });
+  $('sub_toggle').addEventListener('click', function () {
+    filters.subsidiaries = filters.subsidiaries === 'false' ? '' : 'false';
+    load();
+  });
   var typing = null;
   $('iss_q').addEventListener('input', function () {
     clearTimeout(typing);
@@ -256,5 +278,6 @@
   });
   loadScore();
   loadTags();
+  loadSubs();
   load();
 })();

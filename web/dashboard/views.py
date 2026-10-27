@@ -19,7 +19,8 @@ from rolepermissions.decorators import has_permission_decorator
 from django.template.defaultfilters import slugify
 
 
-from dashboard import live
+from dashboard import live, stats
+from limes import portfolios, scoring
 from dashboard.stats import project_stats
 from startScan.models import *
 from dashboard.models import *
@@ -39,6 +40,13 @@ def index(request, slug):
     context.update({'dashboard_data_active': 'active', 'project': project,
                     'realtime': live.realtime(project, timezone.now()), 'live_poll_seconds': settings.LIVE_POLL_SECONDS,
                     'live_since': live.newest_id(context.get('recent_changes', []), project)})
+    chosen = portfolios.selected(request, project)
+    if chosen:  # the current portfolio's own card, findings and weakest assets; the headline stays the organization's
+        ids = portfolios.asset_ids(project, chosen)
+        mine = {a: c for a, c in stats._live_issues(project).items() if a.id in ids}
+        card = scoring.group_scores(project, {chosen.id: ids})[chosen.id]
+        context.update({'portfolio_card': {'name': chosen.name, 'assets': len(ids), **card},
+                        'findings': stats._findings(mine), 'risky_assets': stats._risky_assets(mine)})
     return render(request, 'dashboard/index.html', context)
 
 

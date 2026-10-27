@@ -318,6 +318,16 @@ def tag_scores(project, now=None, name=None):
     members = {t.id: set() for t in top}
     for tag_id, asset_id in Asset.tags.through.objects.filter(tag_id__in=list(members)).values_list('tag_id', 'asset_id'):
         members[tag_id].add(asset_id)
+    rows = group_scores(project, members, now)
+    return [{'name': t.name, 'assets': t.n, **rows[t.id]} for t in top]
+
+
+def group_scores(project, members, now=None):
+    """{key: {assessed, score, grade, raw_score, raw_grade, open}} for each {key: set of asset ids} group, scored with
+    the headline's model (p10 of _score) over the group's assessed assets only. The one place tags, subsidiaries and
+    portfolios are scored; a group never feeds back into project_score. A fixed number of queries, whatever the
+    number of groups."""
+    now = now or timezone.now()
     base = baselines(project)
     assets = assessed_assets(project, base, now)
     penalties = {a: c for a, c in _penalties(project, base=base, now=now).items() if a in assets}
@@ -325,14 +335,13 @@ def tag_scores(project, now=None, name=None):
     live_issue = ~IssueWaiver.waived_exists(now)
     open_by_asset = dict(TrackedIssue.objects.filter(project=project, status='open', asset_id__in=set().union(*members.values()))
                          .filter(live_issue).values_list('asset_id').annotate(n=Count('id')))
-    out = []
-    for t in top:
-        ids = members[t.id] & assets.keys()
+    out = {}
+    for key, ids in members.items():
+        ids = ids & assets.keys()
         score = p10([_score(_live(a, penalties.get(a, {}), waived)) for a in ids])
         raw = p10([_score(penalties.get(a, {})) for a in ids])
-        out.append({'name': t.name, 'assets': t.n, 'assessed': len(ids), 'score': score, 'grade': grade(score),
-                    'raw_score': raw, 'raw_grade': grade(raw),
-                    'open': sum(open_by_asset.get(a, 0) for a in members[t.id])})
+        out[key] = {'assessed': len(ids), 'score': score, 'grade': grade(score), 'raw_score': raw, 'raw_grade': grade(raw),
+                    'open': sum(open_by_asset.get(a, 0) for a in members[key])}
     return out
 
 

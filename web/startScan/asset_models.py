@@ -18,7 +18,7 @@ SCAN_MODES = [(m, m) for m in ('asm', 'scanner', 'full')]
 SCAN_STAGES = [(s, s) for s in ('discovery', 'resolve', 'ports', 'probe', 'crawl', 'dast', 'code')]
 
 
-__all__ = ['Tag', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
+__all__ = ['Tag', 'Subsidiary', 'Portfolio', 'Asset', 'AssetFact', 'ScanRun', 'ScanJob', 'ScoreSnapshot', 'RiskCheck',
            'TrackedIssue', 'ChangeEvent', 'IssueSyncState', 'IssueWaiver', 'IssueNote', 'CertSighting']
 
 
@@ -32,6 +32,29 @@ class Tag(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Subsidiary(models.Model):
+    """A named entity inside one project. Assets are grouped under it through Asset.subsidiary (a root's hosts follow
+    their root). Scored on its assets only: limes.scoring.group_scores. Rules: limes.subsidiaries."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='subsidiaries')
+    name = models.CharField(max_length=60)
+
+    class Meta:
+        unique_together = ('project', 'name')
+
+
+class Portfolio(models.Model):
+    """A saved, named view of a project's assets: those carrying any of `tags`, within `subsidiary` when set (both
+    must hold), plus the hand-picked `assets`. A filter, not an access rule. Rules: limes.portfolios."""
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='portfolios')
+    name = models.CharField(max_length=60)
+    tags = models.JSONField(default=list, blank=True)  # tag names
+    subsidiary = models.ForeignKey(Subsidiary, null=True, blank=True, on_delete=models.CASCADE)  # gone with it: never widens
+    assets = models.ManyToManyField('Asset', blank=True, related_name='portfolios')
+
+    class Meta:
+        unique_together = ('project', 'name')
 
 
 class Asset(models.Model):
@@ -70,6 +93,7 @@ class Asset(models.Model):
     ip_addresses = models.ManyToManyField(IpAddress, blank=True, related_name='assets')
 
     tags = models.ManyToManyField(Tag, blank=True, related_name='assets')
+    subsidiary = models.ForeignKey(Subsidiary, null=True, blank=True, on_delete=models.SET_NULL, related_name='assets')
     cadence_tier = models.CharField(max_length=20, choices=CADENCE_TIERS, default='standard')
     request_headers = models.JSONField(null=True, blank=True)
 

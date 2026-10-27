@@ -140,10 +140,15 @@ def _recent_changes(project):
              'asset': e.asset.value if e.asset else None} for e in evs]
 
 
+def _open_issues(project, now):
+    from startScan.models import IssueWaiver, TrackedIssue
+    return TrackedIssue.objects.filter(project=project, status='open').exclude(IssueWaiver.waived_exists(now)).count()
+
+
 def asm_stats(project):
     now = timezone.now()
     from dashboard import activity, posture
-    from limes import scoring
+    from limes import scoring, subsidiaries
     live = _live_issues(project)
     risk = _risk(project)
     return {
@@ -157,6 +162,8 @@ def asm_stats(project):
         'monitoring': _monitoring(project, now),
         'categories': posture.category_cards(project, now),
         'tag_cards': scoring.tag_scores(project, now),
+        'subsidiary_cards': subsidiaries.scores(project, now),
+        'open_issues': _open_issues(project, now),
         'exposure': posture.exposure(project, now),
         'certificates': posture.certificates(project, now),
         'technologies': posture.technologies(project),

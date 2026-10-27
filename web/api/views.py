@@ -395,6 +395,8 @@ class IssueList(APIView):
 		if q.get('tag'):  # the tag is on the issue's asset; the project filter above already scopes it
 			name = tags.lookup(q['tag'])
 			issues = issues.filter(asset__tags__name=name) if name else issues.none()
+		from limes import subsidiaries
+		issues = subsidiaries.restrict(request, q.get('project') or '', issues, 'asset_id')
 		now = timezone.now()
 		kev_only = q.get('kev') == 'true'
 		issues = issues.filter(ignored_at__isnull=False) if q.get('ignored') == 'true' else issues.filter(ignored_at__isnull=True)
@@ -761,6 +763,8 @@ class AssetDatatableViewSet(viewsets.ReadOnlyModelViewSet):
 		if tag:
 			from limes import tags
 			qs = qs.filter(tags__name=tags.lookup(tag)) if tags.lookup(tag) else qs.none()
+		from limes import subsidiaries
+		qs = subsidiaries.restrict(self.request, project, qs, 'id')
 		tech = params.get('technology')
 		if tech:  # a subquery, so the annotated counts do not fan out over the join
 			qs = qs.filter(id__in=Asset.objects.filter(project__slug=project, technologies__name=tech).values('id'))
