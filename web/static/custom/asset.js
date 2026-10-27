@@ -13,9 +13,8 @@ function asset_reload() {
 	$('#asset_results').DataTable().ajax.reload(null, false);
 }
 
-function asset_toast(text) {
-	// Snackbar inserts text as HTML
-	Snackbar.show({text: asset_esc(text), pos: 'top-right', duration: 3000});
+function asset_toast(text, isError) {
+	LimesUx.toast(String(text), isError);  // one toast look for every page; text, never HTML
 }
 
 function asset_fetch(id) {
@@ -110,13 +109,13 @@ function asset_actions(row) {
 function asset_run_action(path, id, extra) {
 	var body = Object.assign({asset_id: Number(id), project: asset_project()}, extra || {});
 	return asset_post('/api/action/asset/' + path + '/', body).then(function(data) {
-		asset_toast(data.message);
+		asset_toast(data.message, !data.status);
 		if (data.status) {
 			$('#modal_dialog').modal('hide');
 			asset_reload();
 		}
 	}).catch(function() {
-		asset_toast('Request failed.');
+		asset_toast('Request failed.', true);
 	});
 }
 
@@ -162,10 +161,10 @@ function asset_cadence_html(a) {
 function set_asset_cadence(id) {
 	var body = {asset_id: Number(id), project: asset_project(), cadence_tier: document.getElementById('asset_cadence').value};
 	asset_post('/api/action/asset/cadence/', body).then(function(data) {
-		asset_toast(data.message);
+		asset_toast(data.message, !data.status);
 		if (data.status) asset_reload();
 	}).catch(function() {
-		asset_toast('Request failed.');
+		asset_toast('Request failed.', true);
 	});
 }
 
@@ -445,7 +444,7 @@ function get_asset_modal(id) {
 		asset_modal_wide(true);
 		$('#modal_dialog').modal('show');
 	}).catch(function() {
-		asset_toast('Unable to load asset.');
+		asset_toast('Unable to load asset.', true);
 	});
 }
 
@@ -506,6 +505,6 @@ function add_assets() {
 			(warnings ? '<ul class="mb-0">' + warnings + '</ul>' : '') + '</div>';
 		asset_reload();
 	}).catch(function() {
-		asset_toast('Request failed.');
+		asset_toast('Request failed.', true);
 	});
 }

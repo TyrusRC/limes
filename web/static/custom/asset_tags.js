@@ -61,7 +61,7 @@ function tag_submit(ids, add, remove, resultId) {
 		$('#modal_dialog').modal('hide');
 		asset_reload();
 		tag_load_options();
-	}).catch(function() { asset_toast('Request failed.'); });
+	}).catch(function() { asset_toast('Request failed.', true); });
 }
 
 // One asset: its tags with a remove button each, and a box to add more.
@@ -87,7 +87,7 @@ function edit_asset_tags(id) {
 			tag_submit([Number(id)], [], [cur[Number(this.dataset.i)]], 'tag_result');
 		});
 		$('#modal_dialog').modal('show');
-	}).catch(function() { asset_toast('Unable to load asset.'); });
+	}).catch(function() { asset_toast('Unable to load asset.', true); });
 }
 
 function tag_selected_ids() {
@@ -105,7 +105,7 @@ function tag_bulk_refresh() {
 function tag_bulk_modal(mode) {
 	var ids = tag_selected_ids();
 	if (!ids.length) return;
-	if (ids.length > TAG_BULK_MAX) { asset_toast('Select at most ' + TAG_BULK_MAX + ' assets at a time.'); return; }
+	if (ids.length > TAG_BULK_MAX) { asset_toast('Select at most ' + TAG_BULK_MAX + ' assets at a time.', true); return; }
 	var adding = mode === 'add';
 	asset_modal_wide(false);
 	$('#modal_title').text((adding ? 'Tag ' : 'Untag ') + ids.length + (ids.length === 1 ? ' asset' : ' assets'));

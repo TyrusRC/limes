@@ -6,6 +6,11 @@ Issues
 
 {% block page_title %}Issues{% endblock page_title %}
 
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Issues</li>
+{% endblock breadcrumb_title %}
+
 {% block main_content %}
 <div id="iss" data-project="{{ current_project.slug }}" data-detail="{% url 'issue_detail' current_project.slug 0 %}">
 <p class="l-page-sub" id="issue_score" aria-live="polite"></p>

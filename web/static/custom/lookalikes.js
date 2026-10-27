@@ -23,10 +23,9 @@ function lk_can_write() {
 	return lk_table().dataset.canWrite === '1';
 }
 
-// Snackbar inserts its text as HTML, so escape it first.
-function lk_toast(text) {
-	var safe = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-	Snackbar.show({text: safe, pos: 'top-right', duration: 3000});
+// One toast look for every page (limes/ux.js); the text is set as text, never parsed as HTML.
+function lk_toast(text, isError) {
+	LimesUx.toast(String(text), isError);
 }
 
 function lk_post(url, body) {
@@ -82,7 +81,7 @@ function lk_load_summary(meta, total) {
 
 function lk_decide(id, decision) {
 	lk_post('/api/action/lookalike/decide/', {project: lk_project(), id: id, decision: decision, note: ''}).then(function(d) {
-		if (!d.status) { lk_toast(d.message); return; }
+		if (!d.status) { lk_toast(d.message, true); return; }
 		if (d.add_url) {
 			// the server built a same-site path to the Assets page; navigate only to a relative path, never to anything else
 			if (typeof d.add_url === 'string' && d.add_url.charAt(0) === '/' && d.add_url.charAt(1) !== '/') window.location.assign(d.add_url);
@@ -90,18 +89,18 @@ function lk_decide(id, decision) {
 		}
 		lk_toast(decision === 'watch' ? 'Watching.' : 'Ignored.');
 		$('#lk_table').DataTable().ajax.reload(null, false);
-	}).catch(function() { lk_toast('Request failed.'); });
+	}).catch(function() { lk_toast('Request failed.', true); });
 }
 
 function lk_report(id) {
 	lk_post('/api/action/lookalike/report/', {project: lk_project(), id: id}).then(function(d) {
-		if (!d.status) { lk_toast(d.message); return; }
+		if (!d.status) { lk_toast(d.message, true); return; }
 		var box = document.getElementById('lk_report');
 		box.value = 'To: ' + (d.to || '(no abuse contact known: look the registrar up)') + '\nSubject: ' + d.subject + '\n\n' + d.body;
 		document.getElementById('lk_report_card').hidden = false;
 		box.scrollIntoView({block: 'center'});
 		$('#lk_table').DataTable().ajax.reload(null, false);
-	}).catch(function() { lk_toast('Request failed.'); });
+	}).catch(function() { lk_toast('Request failed.', true); });
 }
 
 function lookalikes_init() {

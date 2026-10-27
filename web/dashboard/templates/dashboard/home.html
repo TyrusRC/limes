@@ -3,6 +3,11 @@
 {% block title %}Home{% endblock title %}
 {% block page_title %}Home{% endblock page_title %}
 
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Home</li>
+{% endblock breadcrumb_title %}
+
 {% block main_content %}
 <div id="home" data-project="{{ current_project.slug }}">
   <div class="lx-tabs mb-3" role="tablist" aria-label="Home feed" id="home_tabs">
