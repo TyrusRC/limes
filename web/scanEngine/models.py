@@ -47,26 +47,6 @@ class EngineType(models.Model):
             return []
         return list(yaml.safe_load(self.yaml_configuration).keys())
 
-class Wordlist(models.Model):
-    id = models.AutoField(primary_key=True)
-    name = models.CharField(max_length=200)
-    short_name = models.CharField(max_length=50, unique=True)
-    count = models.IntegerField(default=0)
-
-    def __str__(self):
-        return self.name
-
-
-class Configuration(models.Model):
-    id = models.AutoField(primary_key=True)
-    name = models.CharField(max_length=200)
-    short_name = models.CharField(max_length=50, unique=True)
-    content = models.TextField()
-
-    def __str__(self):
-        return self.name
-
-
 class InterestingLookupModel(models.Model):
     id = models.AutoField(primary_key=True)
     keywords = models.TextField(null=True, blank=True)

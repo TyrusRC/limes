@@ -2,7 +2,6 @@ import glob
 import os
 import re
 import shutil
-import subprocess
 
 from datetime import datetime
 from django import http
@@ -14,7 +13,6 @@ from rolepermissions.decorators import has_permission_decorator
 from limes.common_func import *
 from limes.tasks import (run_command, send_discord_message, send_slack_message,send_lark_message, send_telegram_message)
 from scanEngine.forms import *
-from scanEngine.forms import ConfigurationForm
 from scanEngine.models import *
 
 
@@ -91,72 +89,6 @@ def update_engine(request, slug, id):
     return render(request, 'scanEngine/update_engine.html', context)
 
 
-@has_permission_decorator(PERM_MODIFY_WORDLISTS, redirect_url=FOUR_OH_FOUR_URL)
-def wordlist_list(request, slug):
-    wordlists = Wordlist.objects.all().order_by('id')
-    context = {
-            'scan_engine_nav_active': 'active',
-            'wordlist_li': 'active',
-            'wordlists': wordlists}
-    return render(request, 'scanEngine/wordlist/index.html', context)
-
-
-@has_permission_decorator(PERM_MODIFY_WORDLISTS, redirect_url=FOUR_OH_FOUR_URL)
-def add_wordlist(request, slug):
-    context = {'scan_engine_nav_active': 'active', 'wordlist_li': 'active'}
-    form = AddWordlistForm(request.POST or None, request.FILES or None)
-    if request.method == "POST":
-        if form.is_valid() and 'upload_file' in request.FILES:
-            txt_file = request.FILES['upload_file']
-            if txt_file.content_type == 'text/plain':
-                wordlist_content = txt_file.read().decode('UTF-8', "ignore")
-                wordlist_file = open(
-                    '/usr/src/' +
-                    'wordlist/' +
-                    form.cleaned_data['short_name'] + '.txt',
-                    'w')
-                wordlist_file.write(wordlist_content)
-                Wordlist.objects.create(
-                    name=form.cleaned_data['name'],
-                    short_name=form.cleaned_data['short_name'],
-                    count=wordlist_content.count('\n'))
-                messages.add_message(
-                    request,
-                    messages.INFO,
-                    'Wordlist ' + form.cleaned_data['name'] +
-                    ' added successfully')
-                return http.HttpResponseRedirect(reverse('wordlist_list', kwargs={'slug': slug}))
-    context['form'] = form
-    return render(request, 'scanEngine/wordlist/add.html', context)
-
-
-@has_permission_decorator(PERM_MODIFY_WORDLISTS, redirect_url=FOUR_OH_FOUR_URL)
-def delete_wordlist(request, slug, id):
-    obj = get_object_or_404(Wordlist, id=id)
-    if request.method == "POST":
-        obj.delete()
-        try:
-            os.remove(
-            '/usr/src/' +
-            'wordlist/' +
-            obj.short_name +
-            '.txt')
-            responseData = {'status': True}
-        except Exception as e:
-            responseData = {'status': False}
-        messages.add_message(
-            request,
-            messages.INFO,
-            'Wordlist successfully deleted!')
-    else:
-        responseData = {'status': 'false'}
-        messages.add_message(
-            request,
-            messages.ERROR,
-            'Oops! Wordlist could not be deleted!')
-    return http.JsonResponse(responseData)
-
-
 @has_permission_decorator(PERM_MODIFY_INTERESTING_LOOKUP, redirect_url=FOUR_OH_FOUR_URL)
 def interesting_lookup(request, slug):
     lookup_keywords = None
@@ -196,25 +128,7 @@ def tool_specific_settings(request, slug):
     # check for incoming form requests
     if request.method == "POST":
 
-        if 'gfFileUpload[]' in request.FILES:
-            gf_files = request.FILES.getlist('gfFileUpload[]')
-            upload_count = 0
-            for gf_file in gf_files:
-                original_filename = gf_file.name if isinstance(gf_file.name, str) else gf_file.name.decode('utf-8')
-                # remove special chars from filename, that could possibly do directory traversal or XSS
-                original_filename = re.sub(r'[\\/*?:"<>|]',"", original_filename)
-                file_extension = original_filename.split('.')[len(gf_file.name.split('.'))-1]
-                if file_extension == 'json':
-                    base_filename = os.path.splitext(original_filename)[0]
-                    file_path = '/root/.gf/' + base_filename + '.json'
-                    file = open(file_path, "w")
-                    file.write(gf_file.read().decode("utf-8"))
-                    file.close()
-                    upload_count += 1
-            messages.add_message(request, messages.INFO, f'{upload_count} GF files successfully uploaded')
-            return http.HttpResponseRedirect(reverse('tool_settings', kwargs={'slug': slug}))
-
-        elif 'nucleiFileUpload[]' in request.FILES:
+        if 'nucleiFileUpload[]' in request.FILES:
             nuclei_files = request.FILES.getlist('nucleiFileUpload[]')
             upload_count = 0
             for nuclei_file in nuclei_files:
@@ -260,10 +174,8 @@ def tool_specific_settings(request, slug):
     context['settings_nav_active'] = 'active'
     context['tool_settings_li'] = 'active'
     context['settings_ul_show'] = 'show'
-    gf_list = (subprocess.check_output(['gf', '-list'])).decode("utf-8")
     nuclei_custom_pattern = [f for f in glob.glob("/root/nuclei-templates/*.yaml")]
     context['nuclei_templates'] = nuclei_custom_pattern
-    context['gf_patterns'] = sorted(gf_list.split('\n'))
     return render(request, 'scanEngine/settings/tool.html', context)
 
 

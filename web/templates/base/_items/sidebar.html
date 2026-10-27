@@ -30,14 +30,11 @@
       <li><a class="l-nav-link" href="{% url 'subscan_history' slug %}"{% if cur == 'subscan_history' %} aria-current="page"{% endif %}><i class="fe-layers" aria-hidden="true"></i>Subscans</a></li>
       <li><a class="l-nav-link" href="{% url 'scheduled_scan_view' slug %}"{% if cur == 'scheduled_scan_view' %} aria-current="page"{% endif %}><i class="fe-clock" aria-hidden="true"></i>Scheduled Scans</a></li>
     </ul>
-    {% if user|can:'modify_scan_configurations' or user|can:'modify_wordlists' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' %}
+    {% if user|can:'modify_scan_configurations' or user|can:'modify_interesting_lookup' or user|can:'modify_system_configurations' %}
     <div class="l-nav-section" id="nav-configure">Configure</div>
     <ul class="l-nav-list" aria-labelledby="nav-configure">
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'scan_engine_index' slug %}"{% if cur == 'scan_engine_index' or cur == 'add_engine' or cur == 'update_engine' %} aria-current="page"{% endif %}><i class="fe-cpu" aria-hidden="true"></i>Scan Engines</a></li>
-      {% endif %}
-      {% if user|can:'modify_wordlists' %}
-      <li><a class="l-nav-link" href="{% url 'wordlist_list' slug %}"{% if cur == 'wordlist_list' or cur == 'add_wordlist' %} aria-current="page"{% endif %}><i class="fe-list" aria-hidden="true"></i>Wordlists</a></li>
       {% endif %}
       {% if user|can:'modify_interesting_lookup' %}
       <li><a class="l-nav-link" href="{% url 'interesting_lookup' slug %}"{% if cur == 'interesting_lookup' %} aria-current="page"{% endif %}><i class="fe-search" aria-hidden="true"></i>Interesting Lookup</a></li>

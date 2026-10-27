@@ -21,18 +21,6 @@ urlpatterns = [
         views.update_engine,
         name='update_engine'),
     path(
-        '<slug:slug>/wordlist/',
-        views.wordlist_list,
-        name='wordlist_list'),
-    path(
-        '<slug:slug>/wordlist/add/',
-        views.add_wordlist,
-        name='add_wordlist'),
-    path(
-        '<slug:slug>/wordlist/delete/<int:id>',
-        views.delete_wordlist,
-        name='delete_wordlist'),
-    path(
         '<slug:slug>/interesting/lookup/',
         views.interesting_lookup,
         name='interesting_lookup'),

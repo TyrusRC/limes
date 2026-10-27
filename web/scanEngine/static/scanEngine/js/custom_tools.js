@@ -1,34 +1,3 @@
-function load_gf_template(pattern_name){
-  Swal.fire({
-		title: `Fetching GF template ${htmlEncode(pattern_name)}...`,
-	});
-	swal.showLoading();
-
-  $.getJSON(`/api/getFileContents?gf_pattern&name=${encodeURIComponent(pattern_name)}&format=json`, function(response) {
-    swal.close();
-    if (response.status) {
-      $('#modal_title').empty();
-      $('#modal-content').empty();
-      $("#modal-footer").empty();
-
-      $('#modal_title').html(`GF Pattern ` + htmlEncode(pattern_name));
-
-      $('#modal-content').append(`<pre>${htmlEncode(response['content'])}</pre>`);
-      $('#modal_dialog').modal('show');
-    }
-    else{
-      swal.fire("Error!", htmlEncode(response.message), "error", {
-        button: "Okay",
-      });
-    }
-
-  }).fail(function(){
-    swal.fire("Error!", 'Error loading gf pattern!', "error", {
-      button: "Okay",
-    });
-  });
-}
-
 function load_nuclei_template(pattern_name){
   Swal.fire({
 		title: `Fetching Nuclei template ${htmlEncode(pattern_name)}...`,

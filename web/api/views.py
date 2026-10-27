@@ -1369,19 +1369,6 @@ class GetFileContents(APIView):
 			response['content'] = f.read()
 			return Response(response)
 
-		if 'gf_pattern' in req.query_params:
-			basedir = '/root/.gf'
-			path = f'/root/.gf/{name}.json'
-			if is_safe_path(basedir, path) and os.path.exists(path):
-				content = open(path, "r").read()
-				response['status'] = True
-				response['content'] = content
-			else:
-				response['message'] = "Invalid path!"
-				response['status'] = False
-			return Response(response)
-
-
 		if 'nuclei_template' in req.query_params:
 			safe_dir = '/root/nuclei-templates'
 			path = f'/root/nuclei-templates/{name}'

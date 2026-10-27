@@ -35,7 +35,7 @@
   </form>
 
   <div class="l-topbar-actions">
-    {% if user|can:'modify_targets' or user|can:'modify_scan_configurations' or user|can:'modify_wordlists' %}
+    {% if user|can:'modify_targets' or user|can:'modify_scan_configurations' %}
     <div class="dropdown">
       <button type="button" class="btn btn-ghost btn-icon" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Quick add" title="Quick add">
         <i class="fe-plus" aria-hidden="true"></i>
@@ -48,9 +48,6 @@
         {% endif %}
         {% if user|can:'modify_scan_configurations' %}
         <a href="{% url 'add_engine' current_project.slug %}" class="dropdown-item"><i class="fe-cpu me-2" aria-hidden="true"></i>Scan Engine</a>
-        {% endif %}
-        {% if user|can:'modify_wordlists' %}
-        <a href="{% url 'add_wordlist' current_project.slug %}" class="dropdown-item"><i class="fe-list me-2" aria-hidden="true"></i>Wordlist</a>
         {% endif %}
       </div>
     </div>

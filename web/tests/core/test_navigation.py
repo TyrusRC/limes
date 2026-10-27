@@ -20,7 +20,6 @@ NAV = {
     'scheduled_scan_view': None, 'assets': None, 'issues': None, 'all_subdomains': None,
     'all_endpoints': None, 'all_vulns': None, 'list_organization': None,
     'scan_engine_index': 'modify_scan_configurations',
-    'wordlist_list': 'modify_wordlists',
     'interesting_lookup': 'modify_interesting_lookup',
     'proxy_settings': 'modify_scan_configurations',
     'tool_settings': 'modify_scan_configurations',
@@ -92,9 +91,8 @@ class NavigationTest(TestCase):
         self.assertIn(self.href('scan_engine_index'), side)
 
     def test_quick_add_items_gated_one_by_one(self):
-        # a user holding exactly one of the three Quick add permissions sees the menu with only that item
-        items = {'modify_targets': 'show_quick_add_target_modal()', 'modify_scan_configurations': self.href('add_engine'),
-                 'modify_wordlists': self.href('add_wordlist')}
+        # a user holding exactly one of the Quick add permissions sees the menu with only that item
+        items = {'modify_targets': 'show_quick_add_target_modal()', 'modify_scan_configurations': self.href('add_engine')}
         for keep in items:
             user = User.objects.create_user('qa-' + keep, password='p')
             assign_role(user, 'sys_admin')
