@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('startScan', '0039_alert_rule_caps'),
+        ('startScan', '0042_drop_subdomain_endpoint'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ('dashboard', '0009_feed_dismissal'),
     ]

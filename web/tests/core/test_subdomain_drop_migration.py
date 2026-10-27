@@ -17,7 +17,8 @@ class SubdomainDropMigrationTest(TransactionTestCase):
     def before(self):
         """Every app at its newest migration except startScan, which stops at the last one before the drop."""
         leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
-        return [n for n in leaves if n[0] != 'startScan'] + [('startScan', '0039_alert_rule_caps')]
+        # remediation sits on the newest startScan, so it is unapplied along with the later startScan migrations
+        return [n for n in leaves if n[0] not in ('startScan', 'remediation')] + [('startScan', '0039_alert_rule_caps')]
 
     def migrate(self, targets):
         ex = MigrationExecutor(connection)
