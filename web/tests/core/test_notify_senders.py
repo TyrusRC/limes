@@ -64,7 +64,7 @@ def reply(status=200, body=b'{"id": "777"}'):
 
 
 class DiscordEmbedStateTest(TestCase):
-    """The message id and embed kept between two alerts are JSON, never a pickle."""
+    """The message id and embed kept between two alerts are plain JSON."""
     def setUp(self):
         Notification.objects.create(send_to_discord=True, discord_hook_url=HOOK)
         self.cache = FakeCache()

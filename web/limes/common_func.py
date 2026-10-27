@@ -543,8 +543,8 @@ def send_lark_message(message):
 	except requests.exceptions.RequestException as exc:
 		logger.warning('Lark notification failed: %s', type(exc).__name__)  # class only: the URL is the secret
 
-# Embed attributes that may come back from the cache. The cache holds JSON only: a
-# pickle there would let anyone who can write the broker run code in a worker.
+# Embed attributes that may come back from the cache. The cache holds JSON only, so
+# whoever can write the broker cannot make a worker run code by planting a value.
 DISCORD_EMBED_KEYS = ('title', 'description', 'url', 'footer', 'image', 'thumbnail', 'video',
 		'provider', 'author', 'fields', 'color', 'timestamp')
 
