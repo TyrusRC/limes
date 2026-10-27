@@ -192,8 +192,8 @@ class OverviewPageTest(Base):
         self.assertIn('?source=manual&amp;scope_tier=owned', html)
 
 
-OVERVIEW_QUERIES = 84  # a rise must be justified in review; subsidiaries: the roll-up's subsidiary list, the organization's open-issue count and the header's portfolio list (+3); the Tags card reads the top tags in one query (+1); merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured; -3 when the sidebar lost its wordlist, API vault and report permission checks; -8 (measured) when the legacy sidebar and quick-add permission checks went
-WARM_QUERIES = 14  # a cached GET: session, project, prefs and page chrome, the header's portfolio list, plus the Real-time card's three (it is never cached)
+OVERVIEW_QUERIES = 86  # +2 for per-project access: the membership check and the project switcher list; a rise must be justified in review; subsidiaries: the roll-up's subsidiary list, the organization's open-issue count and the header's portfolio list (+3); the Tags card reads the top tags in one query (+1); merged: p3's Brand aggregate and feed states (+3) and p4's uncached Real-time card (+3), re-measured; -3 when the sidebar lost its wordlist, API vault and report permission checks; -8 (measured) when the legacy sidebar and quick-add permission checks went
+WARM_QUERIES = 15  # a cached GET: session, project, prefs and page chrome, the header's portfolio list, plus the Real-time card's three (it is never cached)
 
 
 class OverviewPageBase(OverviewPageTest):

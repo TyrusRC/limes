@@ -87,6 +87,7 @@
         <h6 class="dropdown-header text-truncate">Signed in as {{ user.get_username }}</h6>
         <a href="{% url 'profile' current_project.slug %}" class="dropdown-item"><i class="fe-user me-2" aria-hidden="true"></i>My Account</a>
         {% if MCP_ENABLED %}<a href="{% url 'api_tokens' current_project.slug %}" class="dropdown-item"><i class="fe-key me-2" aria-hidden="true"></i>API tokens</a>{% endif %}
+        {% if current_role == 'admin' %}<a href="{% url 'project_members' current_project.slug %}" class="dropdown-item"><i class="fe-users me-2" aria-hidden="true"></i>Members</a>{% endif %}
         {% if user|can:'modify_system_configurations' %}
         <a href="{% url 'admin_interface' current_project.slug %}" class="dropdown-item"><i class="fe-settings me-2" aria-hidden="true"></i>Admin Settings</a>
         {% endif %}

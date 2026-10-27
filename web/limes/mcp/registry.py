@@ -1,4 +1,5 @@
 """Tool registry and the one call path. Every tool is registered here and runs only through call_tool."""
+import dataclasses
 import importlib
 import inspect
 import logging
@@ -81,6 +82,7 @@ def _run(name, token_pk, args, now, state):
         raise McpError('invalid', 'unknown tool')
     if spec.write:
         access.require_write(caller, spec.perm)
+        state['caller'] = caller = dataclasses.replace(caller, write=True)
     elif spec.perm:
         access.require(caller, spec.perm)
     if 'caller' in args:

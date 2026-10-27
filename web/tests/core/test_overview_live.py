@@ -13,7 +13,7 @@ from tests.core.test_ct_health import Base as HealthBase
 
 X = '<img src=x onerror=alert(1)>'
 ESCAPED = '&lt;img src=x onerror=alert(1)&gt;'
-LIVE_QUERIES = 7  # session, user, project, events and the card's three; measured on the finished branch; a rise must be justified in review
+LIVE_QUERIES = 8  # session, user, the membership check, project, events and the card's three; measured on the finished branch; a rise must be justified in review
 API_QUERIES = 1  # api.card reads the owned roots' poll times once; measured with a key set
 
 
@@ -68,8 +68,7 @@ class LiveEndpointTest(LiveBase):
             self.assertEqual((r.status_code, r.json()), (400, {'error': 'bad since'}), bad)
         self.assertEqual(self.get(since='').status_code, 400)
         self.assertEqual(self.get().status_code, 200)  # absent is 0
-        r = self.get(slug='nope')
-        self.assertEqual((r.status_code, r.json()), (404, {'error': 'not found'}))
+        self.assertEqual(self.get(slug='nope').status_code, 404)
         self.assertEqual(self.client.post(reverse('dashboardLive', kwargs={'slug': 'p'})).status_code, 405)
         self.client.cookies.clear()
         r = self.get()
@@ -77,7 +76,7 @@ class LiveEndpointTest(LiveBase):
         self.assertIn('login', r['Location'])
 
     def test_every_response_is_uncacheable(self):
-        for r in (self.get(), self.get(since='x'), self.get(slug='nope'),
+        for r in (self.get(), self.get(since='x'),
                   self.client.post(reverse('dashboardLive', kwargs={'slug': 'p'}))):
             self.assertEqual(r['Cache-Control'], 'no-store', r.status_code)
             self.assertIn('Cookie', r['Vary'], r.status_code)

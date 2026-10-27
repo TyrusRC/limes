@@ -3,15 +3,17 @@ from django.conf import settings
 
 
 def projects(request):
-    projects = Project.objects.all()
+    from memberships import rules
+    projects = rules.projects_for(request.user)
     try:
         slug = request.resolver_match.kwargs.get('slug')
-        project = Project.objects.get(slug=slug)
+        project = projects.get(slug=slug)
     except Exception:
         project = None
     out = {
         'projects': projects,
-        'current_project': project
+        'current_project': project,
+        'current_role': getattr(request, 'limes_roles', {}).get(project.slug) if project else None,
     }
     if project is not None:  # the header's 'Current portfolio' menu: the project's portfolios and the session's pick
         from limes import portfolios

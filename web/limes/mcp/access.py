@@ -9,6 +9,8 @@ from redis.exceptions import RedisError
 from rolepermissions.checkers import has_permission
 from dashboard.models import ApiToken, Project
 from limes.mcp import ratelimit, results
+from memberships import rules
+from memberships.models import STANDARD
 
 logger = logging.getLogger(__name__)
 _last_warn = 0.0
@@ -27,6 +29,7 @@ class McpError(Exception):
 class Caller:
     token: ApiToken
     user: object
+    write: bool = False  # set by the registry for a write tool: project_for then needs a standard or admin role
 
 
 def resolve_caller(token_pk, now=None):
@@ -37,17 +40,20 @@ def resolve_caller(token_pk, now=None):
 
 
 def project_for(caller, slug):
-    """The only slug -> Project lookup tools may use. Today: the project exists and the caller is an active user
-    (Limes has no per-user project ACL). A future ACL lands here, with the same message for unknown and forbidden."""
+    """The only slug -> Project lookup tools may use. The caller's user must be a member of the project (or a global
+    admin); unknown and not-a-member give the same message. A write tool also needs a role above read_only."""
     project = Project.objects.filter(slug=slug).first()
-    if project is None or not caller.user.is_active:
+    role = rules.role_for(caller.user, project.pk) if project else None
+    if role is None:
         raise McpError('not_found', 'project not found')
+    if caller.write and not rules.at_least(role, STANDARD):
+        raise McpError('forbidden', 'your role in this project does not allow this')
     return project
 
 
 def visible_projects(caller):
-    """The projects project_for would accept, for listings. A future ACL changes this and project_for together."""
-    return Project.objects.filter(pk__in=[]) if not caller.user.is_active else Project.objects.all()
+    """The projects project_for would accept, for listings."""
+    return rules.projects_for(caller.user)
 
 
 def require(caller, perm):

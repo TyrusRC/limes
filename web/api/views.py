@@ -28,6 +28,7 @@ from api.permissions import *
 from api.serializers import *
 
 
+from memberships import rules, services  # last: the star imports above must not shadow them
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +44,9 @@ class InAppNotificationManagerViewSet(viewsets.ModelViewSet):
 		# we will see later if user based notif is needed
 		# return InAppNotification.objects.filter(user=self.request.user)
 		project_slug = self.request.query_params.get('project_slug')
-		queryset = InAppNotification.objects.all()
+		# only system notifications and those of projects the user is a member of
+		queryset = InAppNotification.objects.filter(
+			Q(project__in=rules.projects_for(self.request.user)) | Q(project__isnull=True))
 		if project_slug:
 			queryset = queryset.filter(
 				Q(project__slug=project_slug) | Q(notification_type='system')
@@ -112,6 +115,7 @@ class CreateProjectApi(APIView):
 				slug=slug,
 				insert_date =insert_date
 			)
+			services.grant_creator(project, request.user)
 			response = {
 				'status': True,
 				'project_name': project_name

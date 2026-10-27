@@ -27,6 +27,7 @@ from dashboard.models import *
 from limes.definitions import *
 
 
+from memberships import rules, services  # last: the star imports above must not shadow them
 logger = logging.getLogger(__name__)
 
 def index(request, slug):
@@ -205,7 +206,7 @@ def four_oh_four(request):
 
 def projects(request, slug):
     context = {}
-    context['projects'] = Project.objects.all()
+    context['projects'] = rules.projects_for(request.user)
     return render(request, 'dashboard/projects.html', context)
 
 
@@ -234,12 +235,15 @@ def onboarding(request):
     context = {}
     error = ''
 
-    # check is any projects exists, then redirect to project list else onboarding
-    project = Project.objects.first()
+    # a project the user may open: go there. Projects exist but none is theirs: say so, never create another.
+    project = rules.projects_for(request.user).order_by('id').first()
 
     if project:
         slug = project.slug
         return HttpResponseRedirect(reverse('dashboardIndex', kwargs={'slug': slug}))
+    if Project.objects.exists():
+        context['error'] = 'You are not a member of any project. Ask a project admin to add you.'
+        return render(request, 'dashboard/onboarding.html', context)
 
     if request.method == "POST":
         project_name = request.POST.get('project_name')
@@ -251,11 +255,11 @@ def onboarding(request):
         insert_date = timezone.now()
 
         try:
-            Project.objects.create(
+            services.grant_creator(Project.objects.create(
                 name=project_name,
                 slug=slug,
                 insert_date=insert_date
-            )
+            ), request.user)
         except Exception as e:
             error = ' Could not create project, Error: ' + str(e)
 

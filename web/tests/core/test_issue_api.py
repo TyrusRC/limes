@@ -222,7 +222,7 @@ class IssueApiTest(TestCase):
         self.assertFalse(IssueNote.objects.exists())
         got = self.as_user(self.admin).get(n, {'project': 'p1', 'issue_id': self.other.id})
         self.assertEqual(got.status_code, 404)
-        self.assertEqual(self.as_user(self.admin).get('/api/issues/', {'project': 'nope'}).json(), [])
+        self.assertEqual(self.as_user(self.admin).get('/api/issues/', {'project': 'nope'}).status_code, 404)
         self.assertNotEqual(APIClient().get('/api/issues/', {'project': 'p1'}).status_code, 200)
 
     def test_bad_ids_are_messages(self):

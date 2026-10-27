@@ -69,7 +69,7 @@ class ListApiTest(LookalikeBase):
         self.assertEqual((row['age_days'], row['registrar'], row['root'], row['idn'], row['has_mx']), (3, 'Reg', 'x.com', False, True))
         meta = self.get()['meta']
         self.assertEqual((meta['enabled'], meta['credit']), (True, 'Certificate data: crt.sh · Registration data: RDAP'))
-        self.assertEqual(self.c.get('/api/lookalikes/', {'project': 'zzz'}).json()['results'], [])
+        self.assertEqual(self.c.get('/api/lookalikes/', {'project': 'zzz'}).status_code, 404)  # unknown = not yours
 
     def test_hostile_rdap_stays_json_text_and_stray_created_cannot_break_filter(self):
         self.lk('a-x.com', rdap={'registrar': X, 'created': X})

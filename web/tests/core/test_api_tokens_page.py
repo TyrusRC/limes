@@ -97,10 +97,8 @@ class ApiTokensPageTests(TestCase):
         with override_settings(MCP_ENABLED=False):
             self.assertNotIn('/api-tokens/', self.c.get('/p1/dashboard/').content.decode())
 
-    def test_disabled_or_unknown_project_redirects(self):
+    def test_disabled_redirects_and_unknown_project_is_not_found(self):
         with override_settings(MCP_ENABLED=False):
             self.assertEqual(self.c.get(self.url).status_code, 302)
             self.assertIn('404', self.c.get(self.url)['Location'])
-        r = self.c.get('/nope/api-tokens/')
-        self.assertEqual(r.status_code, 302)
-        self.assertIn('404', r['Location'])
+        self.assertEqual(self.c.get('/nope/api-tokens/').status_code, 404)  # same answer as a project that is not yours

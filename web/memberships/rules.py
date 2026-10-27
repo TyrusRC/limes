@@ -24,11 +24,14 @@ def roles_by_slug(user, slugs):
     from dashboard.models import Project
     if not user or not user.is_authenticated or not user.is_active:
         return {}
-    projects = Project.objects.filter(slug__in=slugs)
-    if is_global_admin(user):
-        return {p.slug: ADMIN for p in projects}
-    mine = dict(ProjectMember.objects.filter(user=user, project__in=projects).values_list('project__slug', 'role'))
-    return {s: r for s, r in mine.items()}
+    if user.is_superuser:
+        return {s: ADMIN for s in Project.objects.filter(slug__in=slugs).values_list('slug', flat=True)}
+    mine = dict(ProjectMember.objects.filter(user=user, project__slug__in=slugs).values_list('project__slug', 'role'))
+    if len(mine) == len(slugs) and all(r == ADMIN for r in mine.values()):
+        return mine
+    if is_global_admin(user):  # a sys_admin is an admin of every project, member or not
+        return {s: ADMIN for s in Project.objects.filter(slug__in=slugs).values_list('slug', flat=True)}
+    return mine
 
 
 def projects_for(user):

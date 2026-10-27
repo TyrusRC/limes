@@ -1,0 +1,82 @@
+{% extends 'base/base.html' %}
+{% block title %}
+Members
+{% endblock title %}
+
+{% block page_title %}Members{% endblock page_title %}
+
+{% block main_content %}
+<p class="l-page-sub">Who can open <strong>{{ project.name }}</strong> and what they can do.
+  Admins manage members, integrations and the project itself. Standard members can do everything else.
+  Read-only members can look and export, nothing more.</p>
+
+<section class="card" aria-label="Add a member">
+  <div class="card-body">
+    <h2 class="l-section-title">Add a member</h2>
+    <form method="post" action="{% url 'project_member_add' project.slug %}" class="l-filter-bar mt-2">
+      {% csrf_token %}
+      <div class="l-field">
+        <label for="m_user">Username or email of an existing user</label>
+        <input id="m_user" name="user" class="form-control" maxlength="254" required>
+      </div>
+      <div class="l-field">
+        <label for="m_role">Role</label>
+        <select id="m_role" name="role" class="form-select">
+          {% for r in roles %}<option value="{{ r }}"{% if r == 'read_only' %} selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="l-form-actions"><button type="submit" class="btn btn-primary">Add</button></div>
+    </form>
+  </div>
+</section>
+
+<section class="card" aria-label="Members">
+  <div class="card-body">
+    <h2 class="l-section-title">Members</h2>
+    <div class="table-responsive">
+      <table class="table table-hover m-0">
+        <thead class="table-light"><tr><th>User</th><th>Email</th><th>Role</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>
+        {% for m in rows %}
+          <tr>
+            <td>{{ m.user.username }}</td>
+            <td>{{ m.user.email }}</td>
+            <td>
+              <form method="post" action="{% url 'project_member_role' project.slug m.pk %}" class="d-flex gap-2">
+                {% csrf_token %}
+                <label class="visually-hidden" for="role_{{ m.pk }}">Role of {{ m.user.username }}</label>
+                <select id="role_{{ m.pk }}" name="role" class="form-select form-select-sm">
+                  {% for r in roles %}<option value="{{ r }}"{% if r == m.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Change</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="{% url 'project_member_remove' project.slug m.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Remove {{ m.user.username }}">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="text-muted">No members yet. Global administrators still have access.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card" aria-label="Recent changes">
+  <div class="card-body">
+    <h2 class="l-section-title">Recent changes</h2>
+    <ul class="list-unstyled m-0">
+    {% for a in audit %}
+      <li>{{ a.created_at|date:"Y-m-d H:i" }} &middot; {{ a.actor_name|default:"(deleted user)" }} &middot; {{ a.action }} &middot; {{ a.subject }}{% if a.detail %} ({{ a.detail }}){% endif %}</li>
+    {% empty %}
+      <li class="text-muted">Nothing yet.</li>
+    {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock main_content %}

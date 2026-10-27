@@ -64,9 +64,9 @@ class AssetListApiTest(TestCase):
         self.assertIn('a.x.com', vals)
         self.assertNotIn('secret.y.com', vals)
 
-    def test_no_or_unknown_project_returns_empty(self):
+    def test_no_project_returns_empty_and_unknown_is_not_found(self):
         self.assertEqual(self._get().json(), [])
-        self.assertEqual(self._get(project='nope').json(), [])
+        self.assertEqual(self._get(project='nope').status_code, 404)
 
     def test_facets(self):
         self.assertEqual(self._vals(project='p1', scope_tier='candidate'), {'b.x.com'})
@@ -170,8 +170,8 @@ class AssetListApiTest(TestCase):
         self.assertEqual(rows['203.0.113.9']['interval'], '30d')
 
     def test_no_n_plus_one(self):
-        # session + user + asset(+parent join, vuln count) + 3 prefetches
-        with self.assertNumQueries(6):
+        # session + user + membership check + asset(+parent join, vuln count) + 3 prefetches
+        with self.assertNumQueries(7):
             self._get(project='p1')
         a = Asset.objects.create(project=self.p, kind='hostname', value='c.x.com',
                                  scope_tier='owned_host', parent=self.root)
@@ -184,7 +184,7 @@ class AssetListApiTest(TestCase):
                                    scope_tier='owned_host', parent=asn)
         Asset.objects.create(project=self.p, kind='ip', value='198.51.100.7', scope_tier='owned_host',
                              parent=rng, sources=[{'source': 'cidr', 'evidence': '198.51.100.0/24'}])
-        with self.assertNumQueries(6):  # same count with more rows: does not scale
+        with self.assertNumQueries(7):  # same count with more rows: does not scale
             rows = self._get(project='p1').json()
         c = next(r for r in rows if r['value'] == 'c.x.com')
         self.assertEqual((c['tags'], c['technologies'], c['ip_addresses'], c['vuln_count']),
@@ -290,7 +290,7 @@ class AddAssetsApiTest(TestCase):
     def test_entries_list_and_unknown_project(self):
         self.assertEqual(self._post(self.admin, project='p1', entries=['d.x.com']).json()['message']['added'], 1)
         r = self._post(self.admin, project='nope', entries=['e.x.com'])
-        self.assertEqual((r.status_code, r.json()['status']), (200, False))
+        self.assertEqual((r.status_code, r.json()['status']), (404, False))
         self.assertFalse(Asset.objects.filter(value='e.x.com').exists())
 
     def test_without_permission_denied(self):
