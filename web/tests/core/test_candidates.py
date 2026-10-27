@@ -25,19 +25,24 @@ class CandidateTest(TestCase):
             self.assertEqual(a.scope_tier, tier)
             self.assertEqual(a.sources[-1]['source'], 'crtsh')
 
-    def test_existing_asset_save_only_touches_sources(self):
+    def test_existing_asset_stamp_never_rewrites_the_tier(self):
         # A concurrent Confirm/Reject must not be overwritten with a stale tier.
         Asset.objects.create(project=self.p, kind='root_domain', value='own.com', scope_tier='owned_root')
         with mock.patch.object(Asset, 'save', autospec=True, side_effect=Asset.save) as save:
             inventory.upsert_candidate(self.p, 'root_domain', 'own.com', 'crtsh', 'cert:3')
-        self.assertEqual(save.call_args.kwargs.get('update_fields'), ['sources'])
+        # the stamp is a single UPDATE of the sources column; no model save can write back a stale tier
+        self.assertEqual(save.call_args_list, [])
+        self.assertEqual(Asset.objects.get(value='own.com').scope_tier, 'owned_root')
+        self.assertEqual(Asset.objects.get(value='own.com').sources[-1]['evidence'], 'cert:3')
 
-    def test_existing_hostname_save_only_touches_sources_and_parent(self):
+    def test_existing_hostname_upsert_never_rewrites_the_tier(self):
         # crt.sh upserts hostnames in bulk; a concurrent Confirm/Reject must not be reverted.
         Asset.objects.create(project=self.p, kind='hostname', value='a.own.com', scope_tier='owned_host')
         with mock.patch.object(Asset, 'save', autospec=True, side_effect=Asset.save) as save:
             inventory.upsert_hostname_asset(self.p, 'a.own.com', source='crtsh', evidence='cert:4')
-        self.assertEqual(save.call_args_list[0].kwargs.get('update_fields'), ['sources', 'parent'])
+        for call in save.call_args_list:
+            self.assertNotIn('scope_tier', call.kwargs.get('update_fields') or ['scope_tier'])
+        self.assertEqual(Asset.objects.get(value='a.own.com').sources[-1]['evidence'], 'cert:4')
 
     def test_owned_root_values(self):
         Asset.objects.create(project=self.p, kind='root_domain', value='own.com', scope_tier='owned_root')

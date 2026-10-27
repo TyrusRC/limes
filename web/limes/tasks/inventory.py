@@ -3,7 +3,9 @@ NOT the migration back-fill (that is startScan/inventory_migrate.py, apps.get_mo
 Keyed by (project, kind, value); value normalized via normalize_host so live and
 migrated rows share identity."""
 import ipaddress
+import json
 
+from django.db import connection
 from django.utils import timezone
 from limes import scope
 from startScan.models import Asset
@@ -26,6 +28,25 @@ def _append_source(asset, source, evidence, confidence=0.5):
         srcs.append({'source': source, 'evidence': evidence,
                      'confidence': confidence, 'seen_at': timezone.now().isoformat()})
         asset.sources = srcs
+    return asset
+
+
+def stamp_source(asset, source, evidence, confidence=0.5):
+    """Append one source entry to the asset's row in a single UPDATE (jsonb ||) unless it is already there.
+
+    _append_source + save() writes back a copy read earlier; two scans stamping the same host at once then
+    overwrite each other and one `scan:<id>` stamp is lost (the host drops out of that scan's hostnames).
+    The row is updated where it lives, so concurrent stamps both survive and a repeat stays one entry."""
+    entry = [{'source': source, 'evidence': evidence, 'confidence': confidence,
+              'seen_at': timezone.now().isoformat()}]
+    key = [{'source': source, 'evidence': evidence}]
+    with connection.cursor() as cur:
+        cur.execute(
+            f'UPDATE {connection.ops.quote_name(Asset._meta.db_table)} '
+            "SET sources = COALESCE(sources, '[]'::jsonb) || %s::jsonb "
+            "WHERE id = %s AND NOT (COALESCE(sources, '[]'::jsonb) @> %s::jsonb)",
+            [json.dumps(entry), asset.pk, json.dumps(key)])
+    asset.sources = Asset.objects.values_list('sources', flat=True).get(pk=asset.pk)
     return asset
 
 
@@ -71,8 +92,8 @@ def upsert_hostname_asset(project, name, parent=None, source='discovery',
         defaults={'scope_tier': scope_tier, 'parent': parent})
     if parent is not None and asset.parent_id is None:
         asset.parent = parent
-    _append_source(asset, source, evidence)
-    asset.save(update_fields=['sources', 'parent'])
+        asset.save(update_fields=['parent'])
+    stamp_source(asset, source, evidence)
     asset.mark_missing_or_seen(True)   # never changes scope_tier -> no promotion
     return asset
 
@@ -108,8 +129,8 @@ def upsert_ip_asset(project, address, source='probe', evidence=''):
     if created:
         # DNS/probe evidence never promotes: owned only inside declared owned space.
         asset.scope_tier = _new_ip_tier(project, address)
-    _append_source(asset, source, evidence)
-    asset.save()
+        asset.save(update_fields=['scope_tier'])
+    stamp_source(asset, source, evidence)
     asset.mark_missing_or_seen(True)
     return asset
 
@@ -202,6 +223,4 @@ def upsert_candidate(project, kind, value, source, evidence):
         return None
     asset, _ = Asset.objects.get_or_create(project=project, kind=kind, value=value,
                                            defaults={'scope_tier': 'candidate'})
-    _append_source(asset, source, evidence)
-    asset.save(update_fields=['sources'])
-    return asset
+    return stamp_source(asset, source, evidence)

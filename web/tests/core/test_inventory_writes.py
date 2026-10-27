@@ -1,3 +1,5 @@
+from unittest import mock
+
 from django.test import TestCase
 from django.utils import timezone
 from dashboard.models import Project
@@ -98,6 +100,38 @@ class SaveHostTest(TestCase):
         for name in ('not a host!', 'skip.x.com', 'a.other.org'):
             self.assertIsNone(save_host(name, ctx=ctx), name)
         self.assertFalse(Asset.objects.filter(kind='hostname').exists())
+
+    def test_only_the_root_or_a_real_subdomain_is_a_host_of_the_scan(self):
+        for name in ('x.com.evil.org', 'notx.com', 'evilx.com', 'x.com.edgekey.net', 'a.x.com.evil.org', 'x.comx'):
+            self.assertIsNone(save_host(name, ctx=self.ctx), name)
+        for name in ('x.com', 'a.x.com', 'a.b.x.com'):
+            self.assertIsNotNone(save_host(name, ctx=self.ctx), name)
+        self.assertEqual(sorted(Asset.objects.filter(kind='hostname').values_list('value', flat=True)),
+                         ['a.b.x.com', 'a.x.com', 'x.com'])
+
+    def test_a_root_spelled_with_case_or_a_trailing_dot_still_owns_its_subdomains(self):
+        self.domain.name = 'X.com.'
+        self.domain.save()
+        self.assertIsNotNone(save_host('a.x.com', ctx=self.ctx))
+
+    def test_stamps_from_two_interleaved_scans_both_survive(self):
+        other = ScanHistory.objects.create(domain=self.domain, scan_type=self.scan.scan_type,
+                                           start_scan_date=timezone.now())
+        save_host('a.x.com', ctx=self.ctx)
+        stale = Asset.objects.get(value='a.x.com', kind='hostname')  # scan B read the row here ...
+        save_host('a.x.com', ctx=dict(self.ctx, scan_history_id=other.id))  # ... scan C stamps it ...
+        with mock.patch.object(Asset.objects, 'get_or_create', side_effect=lambda **kw: (stale, False)):
+            third = ScanHistory.objects.create(domain=self.domain, scan_type=self.scan.scan_type,
+                                               start_scan_date=timezone.now())
+            save_host('a.x.com', ctx=dict(self.ctx, scan_history_id=third.id))  # ... and B writes from its stale copy
+        for scan in (self.scan, other, third):
+            self.assertEqual(inv.run_hostnames(self.p, scan.id), ['a.x.com'], scan.id)
+
+    def test_the_same_stamp_twice_is_one_entry(self):
+        save_host('a.x.com', ctx=self.ctx)
+        save_host('a.x.com', ctx=self.ctx)
+        a = Asset.objects.get(value='a.x.com', kind='hostname')
+        self.assertEqual([s['evidence'] for s in a.sources].count(f'scan:{self.scan.id}'), 1)
 
     def test_a_domain_without_a_project_saves_nothing(self):
         orphan = Domain.objects.create(name='y.com', project=None, insert_date=timezone.now())

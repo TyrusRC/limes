@@ -86,3 +86,14 @@ class StageCommandsTest(TestCase):
             stages.http_crawl(urls=[url], ctx=self.ctx())
         argv = shlex.split(seen[0])
         self.assertEqual(argv[argv.index('-u') + 1], url)
+
+
+class AmassWordlistTest(TestCase):
+    def test_only_a_plain_name_of_an_existing_wordlist_is_used(self):
+        from limes.pipeline import amass
+        d = tempfile.mkdtemp()
+        open(os.path.join(d, 'good-list.txt'), 'w').close()
+        os.mkdir(os.path.join(d, 'sub.txt'))
+        self.assertEqual(amass.wordlist_path('good-list', d), os.path.join(d, 'good-list.txt'))
+        for name in ('../good-list', 'a/b', '/etc/passwd', '..', '', 'missing', 'sub', 'good-list\n', 'good list', None, 5):
+            self.assertIsNone(amass.wordlist_path(name, d), repr(name))

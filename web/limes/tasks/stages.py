@@ -89,7 +89,9 @@ def subdomain_discovery(
 				# amass v5: names live in an asset DB under -dir, read back with `amass subs`.
 				active = tool == 'amass-active' or bool(config.get(AMASS_ACTIVE, False))
 				brute = bool(config.get(AMASS_BRUTE, active))
-				wordlist = f"/usr/src/wordlist/{config.get(AMASS_WORDLIST, 'deepmagic.com-prefixes-top50000')}.txt"
+				wordlist = amass.wordlist_path(config.get(AMASS_WORDLIST, 'deepmagic.com-prefixes-top50000'))
+				if brute and not wordlist:
+					logger.warning('amass wordlist from the engine is not a plain name of an installed list; using amass default')
 				amass_dir = f'{self.results_dir}/amass'
 				try:
 					commands.run(amass.build_enum_argv(host, amass_dir, active, brute, wordlist))
