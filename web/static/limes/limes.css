@@ -367,9 +367,12 @@ mark, .mark { background: var(--sev-medium-bg); color: var(--sev-medium-ink); pa
 }
 .table > tbody > tr > td, .table > tbody > tr > th, .table > tfoot > tr > td, .table > tfoot > tr > th {
   padding: 12px var(--space-4); font-size: var(--text-sm); border-bottom: 1px solid var(--border); vertical-align: middle;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
-.table td { overflow-wrap: anywhere; }
+/* break-word, not anywhere: anywhere shrinks a column's min width to one letter, so narrow cards cut words into
+   slivers ("Vulnerabiliti es"). Tables sit in .table-responsive and scroll instead; long tokens still wrap. */
+.table td { overflow-wrap: break-word; }
+.table .badge, .table [class^="sev-"], .table .ov-delta { white-space: nowrap; }
 /* DataTables headers may wrap: with the sidebar, wide scan tables (10+ columns) must still fit at 1440px */
 table.dataTable > thead > tr > th { white-space: normal; }
 .table > tbody > tr { border-bottom: 0; transition: none; }
@@ -1264,8 +1267,9 @@ a.ov-stat:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px;
 .lk-report { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-xs); width: 100%; min-height: 260px; resize: vertical; }
 .lk-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); width: 200px; }
 .lk-col-actions { min-width: 210px; }
-.lk-registrar { min-width: 150px; overflow-wrap: anywhere; }
-.lk-col-domain { min-width: 190px; }
+.lk-registrar { min-width: 100px; overflow-wrap: anywhere; }
+.lk-col-domain { min-width: 170px; }
 .lk-how { display: block; font-size: var(--text-xs); }
 #lk_table th, #lk_table td { padding-left: 8px; padding-right: 8px; }
 .lk-actions .btn { padding: 2px 8px; font-size: var(--text-xs); white-space: nowrap; }
+#lk_table > thead > tr > th:is(.sorting, .sorting_asc, .sorting_desc) { padding-right: 22px; }  /* room for the sort arrows */
