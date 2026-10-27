@@ -201,8 +201,8 @@ def _netloc(ip, port):
     return f'{addr}:{port}' if port else addr
 
 
-def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
-    """A requests.get stand-in that only fetches URLs on `host`, always from `ip`, never following redirects.
+def pinned_get(host, ip, session_factory=requests.Session, deadline=None, method='get'):
+    """A requests.get stand-in (any other requests verb via `method`) that only reaches URLs on `host`, always at `ip`, never following redirects.
     NOTE: one session (and its pool) per call of pinned_get, i.e. per host check; it is left to the garbage
     collector. Upgrade path: close it explicitly if host checks ever run in a long-lived loop."""
     host = host.rstrip('.').lower()
@@ -239,7 +239,7 @@ def pinned_get(host, ip, session_factory=requests.Session, deadline=None):
         kw['allow_redirects'] = False  # callers follow same-host hops themselves (collect._fetch_https)
         pinned = urlunsplit((scheme, _netloc(ip, port), parts.path or '/', parts.query, ''))
         try:
-            resp = session.get(pinned, headers=headers, **kw)
+            resp = getattr(session, method)(pinned, headers=headers, **kw)
         except requests.exceptions.RequestException as e:
             raise _timeout_if_expired(e, deadline)
         if hasattr(resp, 'iter_content'):  # a streamed body read later is held to the same rule

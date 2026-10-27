@@ -34,6 +34,14 @@ ATTRIBUTION_AUTO_CONFIRM = env.bool('LIMES_ATTRIBUTION_AUTO_CONFIRM', default=Tr
 ALERT_WEBHOOK_URL = env('LIMES_ALERT_WEBHOOK_URL', default='')
 ALERT_WEBHOOK_SECRET = env('LIMES_ALERT_WEBHOOK_SECRET', default='')
 ALERT_WEBHOOK_ALLOW_HTTP = env.bool('LIMES_ALERT_WEBHOOK_ALLOW_HTTP', default=False)
+# Email channel of the alert rules (Django SMTP backend). No host = the channel reports 'not configured'.
+EMAIL_HOST = env('LIMES_EMAIL_HOST', default='')
+EMAIL_PORT = env.int('LIMES_EMAIL_PORT', default=587)
+EMAIL_HOST_USER = env('LIMES_EMAIL_USER', default='')
+EMAIL_HOST_PASSWORD = env('LIMES_EMAIL_PASSWORD', default='')
+EMAIL_USE_TLS = env.bool('LIMES_EMAIL_USE_TLS', default=True)
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = env('LIMES_EMAIL_FROM', default='limes@localhost')
 # Rediscover owned roots on their cadence_tier (limes.continuous); false stops all automatic scans
 CONTINUOUS_SCANS = env.bool('LIMES_CONTINUOUS_SCANS', default=True)
 # MCP server (limes.mcp): off by default; writes need their own switch
@@ -278,7 +286,7 @@ CELERY_TIMEZONE = 'UTC'
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.owned_ranges', 'limes.monitor',
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.alerts.rule_tasks', 'limes.owned_ranges', 'limes.monitor',
                   'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks', 'limes.ct.api', 'reporting.tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},

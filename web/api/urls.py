@@ -3,6 +3,7 @@ from django.urls import path
 from rest_framework import routers
 
 from .views import *
+from .alert_rules import Integration, JiraTest, RuleDetail, RuleList, RuleTest
 from .lookalikes import DecideLookalike, LookalikeList, LookalikeReport
 
 app_name = 'api'
@@ -26,6 +27,11 @@ urlpatterns = [
     path('tag_scores/', TagScores.as_view(), name='tag_scores'),
     path('asset_score/', AssetScore.as_view(), name='asset_score'),
     path('issues/', IssueList.as_view(), name='issues'),
+    path('alert_rules/', RuleList.as_view(), name='alert_rules'),
+    path('alert_rules/<int:pk>/', RuleDetail.as_view(), name='alert_rule'),
+    path('alert_rules/<int:pk>/test/', RuleTest.as_view(), name='alert_rule_test'),
+    path('alert_integration/', Integration.as_view(), name='alert_integration'),
+    path('alert_integration/jira_test/', JiraTest.as_view(), name='alert_jira_test'),
     path('lookalikes/', LookalikeList.as_view(), name='lookalikes'),
     path('action/lookalike/decide/', DecideLookalike.as_view(), name='decide_lookalike'),
     path('action/lookalike/report/', LookalikeReport.as_view(), name='lookalike_report'),

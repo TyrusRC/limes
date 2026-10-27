@@ -1,0 +1,105 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}
+Alert rules
+{% endblock title %}
+
+{% block page_title %}Alert rules{% endblock page_title %}
+
+{% block main_content %}
+<p class="l-page-sub">Send the changes you care about to more places. Default alerts keep working as before; a rule adds to them.
+  See <code>docs/alerting.md</code>.</p>
+
+<div class="l-banner" id="ar_email_off" role="status" hidden>
+  <span class="l-banner-icon" aria-hidden="true"><i class="fe-info"></i></span>
+  <div class="l-banner-text"><strong>Email is not configured on this server.</strong>
+    <div>The operator can set LIMES_EMAIL_HOST. Rules with the email channel report "not configured" until then.</div></div>
+</div>
+
+<section class="card l-table-card" aria-label="Alert rules" id="ar_root" data-project="{{ current_project.slug }}">
+  <div class="card-body d-flex justify-content-between align-items-center">
+    <h2 class="l-section-title m-0">Rules</h2>
+    <button type="button" class="btn btn-primary" id="ar_new"><i class="fe-plus" aria-hidden="true"></i>New rule</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table w-100" id="ar_table">
+      <thead><tr><th>Name</th><th>Events</th><th>Conditions</th><th>Channels</th><th>Last result</th><th>Enabled</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody id="ar_rows"><tr><td colspan="7" class="l-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" aria-label="Integrations">
+  <div class="card-body">
+    <h2 class="l-section-title">Integrations</h2>
+    <p class="l-hint">Secrets are stored encrypted and are never shown again: a saved one shows only its last four characters.
+      Leave a field empty to keep it; tick Clear to remove it. URLs must be public https addresses.</p>
+    <form id="ar_integ" autocomplete="off" class="mt-2">
+      <div class="row g-3">
+        <div class="col-md-6 l-field"><label for="i_webhook_url">Webhook URL</label>
+          <input id="i_webhook_url" data-f="webhook_url" data-secret="1" type="password" autocomplete="new-password" class="form-control" maxlength="500">
+          <span class="l-hint" data-state="webhook_url"></span><label class="l-hint"><input type="checkbox" data-clear="webhook_url"> Clear</label></div>
+        <div class="col-md-6 l-field"><label for="i_webhook_secret">Webhook signing secret</label>
+          <input id="i_webhook_secret" data-f="webhook_secret" data-secret="1" type="password" autocomplete="new-password" class="form-control" maxlength="200">
+          <span class="l-hint" data-state="webhook_secret"></span><label class="l-hint"><input type="checkbox" data-clear="webhook_secret"> Clear</label></div>
+        <div class="col-md-12 l-field"><label for="i_slack_url">Slack incoming webhook URL</label>
+          <input id="i_slack_url" data-f="slack_url" data-secret="1" type="password" autocomplete="new-password" class="form-control" maxlength="500">
+          <span class="l-hint" data-state="slack_url"></span><label class="l-hint"><input type="checkbox" data-clear="slack_url"> Clear</label></div>
+        <div class="col-md-6 l-field"><label for="i_jira_base_url">Jira Cloud base URL</label>
+          <input id="i_jira_base_url" data-f="jira_base_url" class="form-control" maxlength="300" placeholder="https://yourcompany.atlassian.net"></div>
+        <div class="col-md-6 l-field"><label for="i_jira_email">Jira account email</label>
+          <input id="i_jira_email" data-f="jira_email" class="form-control" maxlength="200"></div>
+        <div class="col-md-6 l-field"><label for="i_jira_token">Jira API token</label>
+          <input id="i_jira_token" data-f="jira_token" data-secret="1" type="password" autocomplete="new-password" class="form-control" maxlength="500">
+          <span class="l-hint" data-state="jira_token"></span><label class="l-hint"><input type="checkbox" data-clear="jira_token"> Clear</label></div>
+        <div class="col-md-2 l-field"><label for="i_jira_project_key">Project key</label>
+          <input id="i_jira_project_key" data-f="jira_project_key" class="form-control" maxlength="20" placeholder="SEC"></div>
+        <div class="col-md-2 l-field"><label for="i_jira_issue_type">Issue type</label>
+          <input id="i_jira_issue_type" data-f="jira_issue_type" class="form-control" maxlength="60" placeholder="Task"></div>
+        <div class="col-md-2 l-field"><label for="i_jira_labels">Labels</label>
+          <input id="i_jira_labels" data-f="jira_labels" class="form-control" placeholder="limes, security"></div>
+      </div>
+      <div class="l-form-actions mt-3">
+        <button type="submit" class="btn btn-primary">Save integrations</button>
+        <button type="button" class="btn btn-light" id="ar_jira_test">Test create issue</button>
+        <span class="l-hint align-self-center" id="ar_integ_state" role="status"></span>
+      </div>
+    </form>
+  </div>
+</section>
+
+<div class="modal fade" id="ar_modal" tabindex="-1" aria-labelledby="ar_modal_title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <form class="modal-content" id="ar_form" autocomplete="off">
+      <div class="modal-header"><h2 class="modal-title" id="ar_modal_title">Alert rule</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p class="l-form-error text-danger" id="ar_error" role="alert" hidden></p>
+        <div class="l-field"><label for="r_name">Name</label><input id="r_name" class="form-control" maxlength="100" required></div>
+        <fieldset class="l-field mt-2"><legend class="l-label">Events</legend><div id="r_kinds"></div></fieldset>
+        <div class="l-field mt-2"><label for="r_min_severity">Minimum severity (events that have one)</label>
+          <select id="r_min_severity" class="form-select"><option value="">Any</option><option value="1">Low</option><option value="2">Medium</option>
+            <option value="3">High</option><option value="4">Critical</option></select></div>
+        <div class="l-field mt-2"><label for="r_tags">Only assets tagged (any of, comma separated)</label>
+          <input id="r_tags" class="form-control" placeholder="prod, payments"><span class="l-hint">Project-wide events (the score) never match a tag condition.</span></div>
+        <div class="row g-2 mt-1">
+          <div class="col-6 l-field"><label for="r_points">Score fell by (points, optional)</label><input id="r_points" type="number" min="1" max="1000" class="form-control"></div>
+          <div class="col-6 l-field"><label for="r_window">within (days)</label><input id="r_window" type="number" min="1" max="90" class="form-control" placeholder="7"></div>
+        </div>
+        <fieldset class="l-field mt-2"><legend class="l-label">Send to</legend><div id="r_channels"></div></fieldset>
+        <div class="l-field mt-2"><label for="r_email_to">Email recipients (comma separated)</label><input id="r_email_to" class="form-control"></div>
+        <div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" id="r_enabled" checked><label class="form-check-label" for="r_enabled">Enabled</label></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save rule</button></div>
+    </form>
+  </div>
+</div>
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'custom/alert_rules.js' %}"></script>
+<script type="text/javascript">
+$(document).ready(function() { alert_rules_init(); });
+</script>
+{% endblock page_level_script %}

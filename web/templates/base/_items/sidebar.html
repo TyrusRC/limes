@@ -36,6 +36,7 @@
       {% endif %}
       {% if user|can:'modify_scan_configurations' %}
       <li><a class="l-nav-link" href="{% url 'notification_settings' slug %}"{% if cur == 'notification_settings' %} aria-current="page"{% endif %}><i class="fe-bell" aria-hidden="true"></i>Notification Settings</a></li>
+      <li><a class="l-nav-link" href="{% url 'alert_rules_page' slug %}"{% if cur == 'alert_rules_page' %} aria-current="page"{% endif %}><i class="fe-zap" aria-hidden="true"></i>Alert rules</a></li>
       {% endif %}
       {% if user|can:'modify_system_configurations' %}
       <li><a class="l-nav-link" href="{% url 'limes_settings' slug %}"{% if cur == 'limes_settings' %} aria-current="page"{% endif %}><i class="fe-settings" aria-hidden="true"></i>Limes Settings</a></li>

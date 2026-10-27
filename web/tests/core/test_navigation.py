@@ -22,6 +22,7 @@ NAV = {
     'tool_settings': 'modify_scan_configurations',
     'limes_settings': 'modify_system_configurations',
     'notification_settings': 'modify_scan_configurations',
+    'alert_rules_page': 'modify_scan_configurations',
 }
 
 

@@ -194,6 +194,7 @@ class TrackedIssue(models.Model):
     fixed_at = models.DateTimeField(null=True, blank=True)
     reopened = models.IntegerField(default=0)
     reopened_at = models.DateTimeField(null=True, blank=True)  # when it last came back; first_seen is the first detection
+    jira_key = models.CharField(max_length=40, blank=True, default='')  # Jira issue made for it ('pending' while being made): one issue per tracked issue
 
     class Meta:
         unique_together = ('asset', 'key')
@@ -236,6 +237,7 @@ class ChangeEvent(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     notified_at = models.DateTimeField(null=True, blank=True)
     digested_at = models.DateTimeField(null=True, blank=True)
+    rules_dispatched_at = models.DateTimeField(null=True, blank=True)  # claimed by the alert rules (limes.alerts.rules)
 
     class Meta:
         indexes = [models.Index(fields=['project', 'created_at'])]

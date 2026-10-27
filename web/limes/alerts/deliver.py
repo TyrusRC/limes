@@ -65,6 +65,16 @@ def _webhook(event, post):
 
 
 def deliver_immediate(project, now=None, chat=None, post=None):
+    """The default delivery (_deliver_defaults), then the project's alert rules (limes.alerts.rules) on top; returns how
+    many events the default delivery sent."""
+    from limes.alerts import rules
+    try:
+        return _deliver_defaults(project, now, chat, post)
+    finally:  # rules see events the hourly cap held back, and run even when the default delivery failed
+        rules.dispatch(project, now)
+
+
+def _deliver_defaults(project, now=None, chat=None, post=None):
     """Send undelivered, undigested immediate events from the last ALERT_WINDOW (oldest first) up to the hourly cap;
     returns how many."""
     if chat is None:  # queued, so a slow chat endpoint never holds up report() or the webhook

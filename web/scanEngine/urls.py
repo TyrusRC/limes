@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from . import views
+from . import alert_rules_page, views
 
 urlpatterns = [
     path(
@@ -32,6 +32,10 @@ urlpatterns = [
         '<slug:slug>/notification_settings',
         views.notification_settings,
         name='notification_settings'),
+    path(
+        '<slug:slug>/alert_rules',
+        alert_rules_page.alert_rules_page,
+        name='alert_rules_page'),
     path(
         '<slug:slug>/proxy_settings',
         views.proxy_settings,

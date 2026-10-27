@@ -512,3 +512,4 @@ class Port(models.Model):
 
 from startScan.asset_models import *  # noqa: E402,F401,F403
 from startScan.intel_models import *  # noqa: E402,F401,F403
+from startScan.alert_models import *  # noqa: E402,F401,F403

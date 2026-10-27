@@ -19,7 +19,7 @@ TASK_PLAN = {
     'code_audit': (SCAN, 2 * HOUR),
     # parsing, enrichment, notifications 15 min
     'send_notif': (IO, 15 * MIN), 'send_scan_notif': (IO, 15 * MIN), 'send_task_notif': (IO, 15 * MIN),
-    'send_file_to_discord': (IO, 15 * MIN),
+    'send_file_to_discord': (IO, 15 * MIN), 'send_rule_alert': (IO, 15 * MIN),  # alert-rule channels, via limes.alerts.outbound
     'parse_nmap_results': (IO, 15 * MIN),
     'enumerate_ranges': (IO, 15 * MIN),  # network-bound; a 60 s beat tick that holds its own Redis tick lock
     'poll_ct_api': (IO, 15 * MIN),  # one Cert Spotter request per slot, under its own tick lock
