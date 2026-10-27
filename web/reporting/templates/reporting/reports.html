@@ -3,6 +3,10 @@
 {% load humanize %}
 {% block title %}Reports{% endblock title %}
 {% block page_title %}Reports{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Reports</li>
+{% endblock breadcrumb_title %}
 
 {% block main_content %}
 {% if not reports_enabled %}
@@ -11,7 +15,7 @@
     <div>The operator can turn them on with LIMES_REPORTS_ENABLED. Existing reports stay available.</div></div></div>
 {% endif %}
 <p class="l-page-sub"><span>{{ project.name }}</span><span>Executive summary, printable and exportable</span></p>
-<p>
+<p class="d-flex flex-wrap gap-2">
   <a class="btn btn-primary" href="{% url 'executive_summary' slug=project.slug %}">Open the executive summary</a>
   <a class="btn btn-outline-secondary" href="{% url 'export_issues' slug=project.slug %}">Issues CSV</a>
   <a class="btn btn-outline-secondary" href="{% url 'export_assets' slug=project.slug %}">Assets CSV</a>
@@ -26,7 +30,7 @@
 {% if tab == 'generated' %}
 <section class="card l-table-card" aria-label="Generated reports">
   {% if can_manage %}
-  <form class="rpt-filter" method="post" action="{% url 'report_generate' slug=project.slug %}" style="padding:12px 16px 0">
+  <form class="l-filter-bar border-bottom" method="post" action="{% url 'report_generate' slug=project.slug %}">
     {% csrf_token %}
     <div class="l-field"><label for="g_days">Period</label>
       <select id="g_days" name="days" class="form-select">{% for n in day_options %}<option value="{{ n }}"{% if n == 90 %} selected{% endif %}>Last {{ n }} days</option>{% endfor %}</select></div>
@@ -38,7 +42,7 @@
   </form>
   {% endif %}
   {% if runs %}
-  <table class="table w-100">
+  <div class="table-responsive"><table class="table w-100">
     <thead><tr><th>Report</th><th>Generated</th><th>Scope</th><th>Delivery</th><th>Size</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
     <tbody>
     {% for r in runs %}<tr>
@@ -51,9 +55,9 @@
         {% if can_manage %}<form method="post" action="{% url 'report_run_delete' slug=project.slug run_id=r.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form>{% endif %}</td>
     </tr>{% endfor %}
     </tbody>
-  </table>
-  <p class="l-page-sub" style="padding:0 16px">Reports are HTML files: open one and use the browser's Print, Save as PDF.</p>
-  {% else %}<p style="padding:16px">No reports yet. Generate one now{% if can_manage %} or add a recurring report{% endif %}.</p>{% endif %}
+  </table></div>
+  <p class="l-hint px-4 py-3 mb-0 border-top">Reports are HTML files: open one and use the browser's Print, Save as PDF.</p>
+  {% else %}<div class="lx-state"><i class="fe-file-text" aria-hidden="true"></i><strong>No reports yet</strong><span>Generate one now{% if can_manage %} or add a recurring report{% endif %}.</span></div>{% endif %}
 </section>
 {% elif tab == 'templates' %}
 <section class="card l-table-card" aria-label="Report templates">
@@ -74,9 +78,9 @@
 </section>
 {% else %}
 <section class="card l-table-card" aria-label="Recurring reports">
-  {% if can_manage %}<p style="padding:12px 16px 0"><a class="btn btn-primary" href="{% url 'report_schedule_new' slug=project.slug %}">New recurring report</a></p>{% endif %}
+  {% if can_manage %}<p class="l-filter-bar border-bottom mb-0"><a class="btn btn-primary" href="{% url 'report_schedule_new' slug=project.slug %}">New recurring report</a></p>{% endif %}
   {% if schedules %}
-  <table class="table w-100">
+  <div class="table-responsive"><table class="table w-100">
     <thead><tr><th>Name</th><th>Frequency</th><th>Scope</th><th>Delivery</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
     <tbody>
     {% for s in schedules %}<tr>
@@ -93,9 +97,9 @@
       {% endif %}</td>
     </tr>{% endfor %}
     </tbody>
-  </table>
-  {% else %}<p style="padding:16px">No recurring reports.</p>{% endif %}
-  {% if not email_configured %}<p class="l-page-sub" style="padding:0 16px">Email is not configured on this installation: email delivery will keep the in-platform copy only.</p>{% endif %}
+  </table></div>
+  {% else %}<div class="lx-state"><i class="fe-calendar" aria-hidden="true"></i><strong>No recurring reports</strong></div>{% endif %}
+  {% if not email_configured %}<p class="l-hint px-4 py-3 mb-0 border-top">Email is not configured on this installation: email delivery will keep the in-platform copy only.</p>{% endif %}
 </section>
 {% endif %}
 {% endblock main_content %}
