@@ -67,21 +67,48 @@ def activity(project, now, dismissed):
     return cards[:ACTIVITY_LIMIT]
 
 
-def tasks(project, now, dismissed):
-    from limes.tasks.attribution import REVIEW  # candidates below it stay out of the lists, as on the Assets page
+def _waiver_tasks(project, now, user):
+    """Waivers ending within their own reminder lead time, and the ones waiting for this user to approve."""
     slug = project.slug
     out = []
-    soon = (IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__project=project, issue__status='open',
-                                       expires_at__lte=now + TASK_WINDOW)
-            .select_related('issue', 'issue__asset').order_by('expires_at', 'id')[:TASK_LIMIT])
+    # each waiver has its own lead time (remind_days, at most 90): fetch those ending within the longest, keep the due ones
+    # NOTE: looks at the 200 soonest-ending waivers; more than that ending within 90 days and a later one may wait a day.
+    near = (IssueWaiver.objects.filter(IssueWaiver.active_q(now), expires_at__lte=now + timedelta(days=90))
+            .filter(Q(issue__project=project, issue__status='open') | Q(issue__isnull=True, project=project))
+            .select_related('issue', 'issue__asset').order_by('expires_at', 'id')[:200])
+    soon = [w for w in near if w.expires_at <= now + timedelta(days=w.remind_days)][:TASK_LIMIT]
     for w in soon:
         days = max(0, (w.expires_at - now).days)
-        out.append(_card(f'task:waiver:{w.id}', f'Waiver ends in {days} {"day" if days == 1 else "days"}: {_title(w.issue)}', w.expires_at,
-                         w.issue.asset.value, 'warn', 'fe-clock', 'Review waiver', reverse('issue_detail', args=[slug, w.issue_id]), 'waiver'))
+        what = w.issue if w.issue_id else None
+        out.append(_card(f'task:waiver:{w.id}', f'Waiver ends in {days} {"day" if days == 1 else "days"}: {_title(what) if what else w.key}', w.expires_at,
+                         what.asset.value if what else 'All assets', 'warn', 'fe-clock', 'Review waiver',
+                         reverse('issue_detail', args=[slug, w.issue_id]) if what else reverse('waivers_page', args=[slug]), 'waiver'))
         out[-1]['upcoming'] = True  # its time is in the future: the card says "in 3 days", not "ago"
-    live = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
+    if user is not None and user.is_authenticated:
+        pending = (IssueWaiver.objects.filter(approval_pending=True, revoked_at__isnull=True, approver=user)
+                   .filter(Q(issue__project=project) | Q(issue__isnull=True, project=project))
+                   .exclude(created_by=user).select_related('issue', 'created_by').order_by('-created_at', '-id')[:TASK_LIMIT])
+        for w in pending:
+            who = w.created_by.username if w.created_by else 'someone'
+            out.append(_card(f'task:approve:{w.id}', f'Approve a waiver for {w.key or w.issue.key}', w.created_at, f'Requested by {who}',
+                             'warn', 'fe-user-check', 'Review waiver', reverse('waivers_page', args=[slug]), 'approval'))
+    return out
+
+
+def _remediation_tasks(project, now):
+    from remediation.models import RemediationRequest
+    late = (RemediationRequest.objects.filter(project=project, status='active', due_date__lt=timezone.localdate(now))
+            .order_by('due_date', 'id')[:TASK_LIMIT])
+    return [_card(f'task:remediation:{r.id}', f'Overdue: {r.title}', r.updated_at, f'Due {r.due_date:%Y-%m-%d}', 'bad', 'fe-check-square',
+                  'Open request', reverse('remediation_detail', args=[project.slug, r.id]), 'remediation') for r in late]
+
+
+def tasks(project, now, dismissed, user=None):
+    from limes.tasks.attribution import REVIEW  # candidates below it stay out of the lists, as on the Assets page
+    slug = project.slug
+    out = _waiver_tasks(project, now, user) + _remediation_tasks(project, now)
     fresh = (TrackedIssue.objects.filter(project=project, status='open', severity__gte=3)
-             .exclude(source='check', key__in=PROVISIONAL).exclude(id__in=live).select_related('asset'))
+             .exclude(source='check', key__in=PROVISIONAL).exclude(IssueWaiver.waived_exists(now)).select_related('asset'))
     fresh = [i for i in fresh.order_by('-severity', '-first_seen', 'id')[:TASK_LIMIT * 3] if detected_at(i) >= now - TASK_WINDOW][:TASK_LIMIT]
     for i in fresh:
         sev = 'Critical' if i.severity == 4 else 'High'
@@ -102,4 +129,4 @@ def dismissed_keys(project, user, now):
 def build(project, user, now=None):
     now = now or timezone.now()
     dismissed = dismissed_keys(project, user, now)
-    return {'activity': activity(project, now, dismissed), 'tasks': tasks(project, now, dismissed)}
+    return {'activity': activity(project, now, dismissed), 'tasks': tasks(project, now, dismissed, user)}

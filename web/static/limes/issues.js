@@ -181,6 +181,8 @@
     all.indeterminate = on > 0 && on < cbs.length;
     Array.prototype.forEach.call(cbs, function (c) { c.closest('tr').classList.toggle('l-selected', c.checked); });
     if (!ids.length) { box.hidden = true; return; }
+    var rem = $('fc_remediate');
+    if (rem) rem.href = rem.pathname + '?issues=' + ids.slice(0, 200).join(',');
     LimesUx.post('/api/score_forecast/', {project: project, issues: ids.slice(0, 500)}).then(function (d) {
       if (mine !== fseq) return;
       if (!d.status || d.score === null || d.score === undefined) { box.hidden = true; return; }

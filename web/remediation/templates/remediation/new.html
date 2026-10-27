@@ -1,0 +1,61 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}Request remediation{% endblock title %}
+{% block page_title %}Request remediation{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item"><a href="{% url 'remediation_list_page' current_project.slug %}">Remediation</a></li>
+<li class="breadcrumb-item active" aria-current="page">New request</li>
+{% endblock breadcrumb_title %}
+{% block custom_js_css_link %}<link rel="stylesheet" href="{% static 'limes/remediation.css' %}">{% endblock custom_js_css_link %}
+
+{% block main_content %}
+<div id="rw" data-project="{{ current_project.slug }}" data-max-issues="{{ max_issues }}" data-max-emails="{{ max_emails }}" data-today="{{ today|date:'Y-m-d' }}"
+     data-list="{% url 'remediation_list_page' current_project.slug %}" data-detail="{% url 'remediation_detail' current_project.slug 0 %}">
+  <ol class="rm-steps" aria-label="Steps">
+    <li id="rs1" aria-current="step">1. Select issues</li><li id="rs2">2. Recipients and message</li><li id="rs3">3. Review</li>
+  </ol>
+
+  <section class="rm-step" id="rp1" aria-labelledby="rs1">
+    <div class="card lx-block">
+      <div class="d-flex flex-wrap align-items-end gap-3 mb-3">
+        <div class="l-field"><label for="rw_q">Search</label><input type="search" id="rw_q" class="form-control" placeholder="Issue or asset" maxlength="100" autocomplete="off"></div>
+        <div class="l-field"><label for="rw_cat">Category</label>
+          <select id="rw_cat" class="form-select"><option value="">All categories</option>
+            <option value="web">Website</option><option value="tls">Encryption</option><option value="email">Email</option><option value="dns">DNS</option>
+            <option value="network">Network</option><option value="vulnerabilities">Vulnerabilities</option><option value="reputation">IP Reputation</option><option value="data_leakage">Data Leakage</option></select></div>
+        <p class="mb-0" aria-live="polite"><strong id="rw_count">0</strong> of {{ max_issues }} issues selected</p>
+      </div>
+      <div class="rm-pick" id="rw_list" aria-busy="true"><p class="l-hint">Loading issues</p></div>
+      <div class="rm-actions"><span></span><button type="button" class="btn btn-primary" id="rw_next1" disabled>Next</button></div>
+    </div>
+  </section>
+
+  <section class="rm-step" id="rp2" aria-labelledby="rs2" hidden>
+    <form class="card lx-block" id="rw_form" novalidate>
+      <div class="l-field"><label for="rw_title">Title</label><input id="rw_title" class="form-control" maxlength="200" required></div>
+      <div class="l-form-row">
+        <div class="l-field"><label for="rw_assignee">Assign to a team member (optional)</label><select id="rw_assignee" class="form-select"><option value="">No one</option></select></div>
+        <div class="l-field"><label for="rw_due">Due date</label><input type="date" id="rw_due" class="form-control" min="{{ today|date:'Y-m-d' }}"></div>
+      </div>
+      <div class="l-field"><label for="rw_emails">External recipients by email (optional)</label>
+        <textarea id="rw_emails" class="form-control" rows="2" aria-describedby="rw_emails_hint"></textarea>
+        <span class="l-hint" id="rw_emails_hint">Separate addresses with commas or new lines, at most {{ max_emails }}. They get an email if this server sends mail.</span></div>
+      <div class="l-field"><label for="rw_msg">Message</label><textarea id="rw_msg" class="form-control" rows="4" maxlength="5000"></textarea></div>
+      <p class="l-hint text-danger" id="rw_err2" role="alert" hidden></p>
+      <div class="rm-actions"><button type="button" class="btn btn-light" id="rw_back2">Back</button><button type="submit" class="btn btn-primary">Next</button></div>
+    </form>
+  </section>
+
+  <section class="rm-step" id="rp3" aria-labelledby="rs3" hidden>
+    <div class="lx-detail">
+      <div class="lx-col"><div class="card lx-block"><h3>Review</h3><dl class="lx-kv" id="rw_review"></dl></div></div>
+      <aside class="lx-col"><div class="card lx-block" aria-labelledby="rw_imp_h"><h3 id="rw_imp_h">Potential score impact</h3><div id="rw_impact" aria-live="polite"><p class="l-hint">Calculating</p></div></div></aside>
+    </div>
+    <div class="rm-actions"><button type="button" class="btn btn-light" id="rw_back3">Back</button><button type="button" class="btn btn-primary" id="rw_submit">Submit request</button></div>
+  </section>
+</div>
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'limes/remediation_new.js' %}"></script>
+{% endblock page_level_script %}

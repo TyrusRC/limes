@@ -19,9 +19,16 @@
     var sync = function () { exp.value = kind.value === 'accepted_risk' ? iso(90) : ''; };
     kind.addEventListener('change', sync);
     sync();
+    fetch('/api/members/?project=' + encodeURIComponent(project), {credentials: 'same-origin'}).then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (names) {
+        names.forEach(function (n) { var o = LimesUx.el('option', null, n); o.value = n; document.getElementById('rd_approver').append(o); });
+      }).catch(function () {});
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var body = {project: project, issue_id: issueId, kind: kind.value, reason: document.getElementById('rd_reason').value};
+      var body = {project: project, issue_id: issueId, kind: kind.value, reason: document.getElementById('rd_reason').value,
+        scope: document.getElementById('rd_scope').value, shared: document.getElementById('rd_shared').checked,
+        remind_days: Number(document.getElementById('rd_remind').value) || 7};
+      if (document.getElementById('rd_approver').value) body.approver = document.getElementById('rd_approver').value;
       if (exp.value) body.expires_at = exp.value + 'T00:00:00Z';
       LimesUx.post('/api/action/issue/waive/', body).then(function (d) { done(d, 'Waived.'); }).catch(fail);
     });

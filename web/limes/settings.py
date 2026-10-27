@@ -178,6 +178,7 @@ INSTALLED_APPS = [
     'targetApp.apps.TargetappConfig',
     'scanEngine.apps.ScanengineConfig',
     'startScan.apps.StartscanConfig',
+    'remediation.apps.RemediationConfig',
     'django_ace',
     'django_celery_beat',
     'mathfilters',
@@ -293,7 +294,7 @@ CELERY_TIMEZONE = 'UTC'
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_IMPORTS = ('limes.tasks', 'limes.reaper', 'limes.continuous', 'limes.scoring',
-                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'limes.alerts.rule_tasks', 'limes.owned_ranges', 'limes.monitor',
+                  'limes.alerts.digest', 'limes.alerts.waiver_tasks', 'remediation.tasks', 'limes.alerts.rule_tasks', 'limes.owned_ranges', 'limes.monitor',
                   'limes.mcp.audit', 'limes.feeds.tasks', 'limes.hibp', 'limes.lookalike.tasks', 'limes.ct.api', 'reporting.tasks')
 CELERY_BEAT_SCHEDULE = {
     'reap-stuck-scans': {'task': 'reap_stuck_scans', 'schedule': 300.0},
@@ -312,6 +313,8 @@ CELERY_BEAT_SCHEDULE = {
     'snapshot-scores': {'task': 'snapshot_scores', 'schedule': 86400.0},
     'send-digest': {'task': 'send_digest', 'schedule': 86400.0},
     'expire-waivers': {'task': 'expire_waivers', 'schedule': 86400.0},
+    'remind-waivers': {'task': 'remind_waivers', 'schedule': 86400.0},
+    'remediation-overdue': {'task': 'remediation_overdue', 'schedule': 86400.0},
     'purge-mcp-logs': {'task': 'purge_mcp_logs', 'schedule': 86400.0},
     'generate-due-reports': {'task': 'generate_due_reports', 'schedule': 900.0, 'options': {'expires': 840}},
 }

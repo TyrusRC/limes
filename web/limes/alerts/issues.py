@@ -129,4 +129,10 @@ def sync_issues(project, now=None):
         for ev in out:
             if ev.kind == 'issue_new' and ev.asset.kind == 'ip' and ev.detail['key'].startswith('net.exposed_'):
                 _queue_exposed(project, ev.asset)
+        try:  # the fixes above are saved; a remediation request that has nothing left open completes
+            from remediation import service
+            with transaction.atomic():  # a savepoint: a failure here must not poison the sync's transaction
+                service.complete_finished(project, now)
+        except Exception:
+            logger.exception('Could not complete remediation requests for project %s', project.pk)
         return out

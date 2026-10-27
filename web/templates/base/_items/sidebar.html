@@ -17,6 +17,8 @@
       <li><a class="l-nav-link" href="{% url 'home' slug %}"{% if cur == 'home' %} aria-current="page"{% endif %}><i class="fe-home" aria-hidden="true"></i>Home</a></li>
       <li><a class="l-nav-link" href="{% url 'dashboardIndex' slug %}"{% if cur == 'dashboardIndex' %} aria-current="page"{% endif %}><i class="fe-grid" aria-hidden="true"></i>Overview</a></li>
       <li><a class="l-nav-link" href="{% url 'issues' slug %}"{% if cur == 'issues' %} aria-current="page"{% endif %}><i class="fe-alert-octagon" aria-hidden="true"></i>Issues</a></li>
+      <li><a class="l-nav-link" href="{% url 'remediation_list_page' slug %}"{% if cur == 'remediation_list_page' or cur == 'remediation_new' or cur == 'remediation_detail' %} aria-current="page"{% endif %}><i class="fe-check-square" aria-hidden="true"></i>Remediation</a></li>
+      <li><a class="l-nav-link" href="{% url 'waivers_page' slug %}"{% if cur == 'waivers_page' %} aria-current="page"{% endif %}><i class="fe-slash" aria-hidden="true"></i>Waivers</a></li>
       <li><a class="l-nav-link" href="{% url 'assets' slug %}"{% if cur == 'assets' %} aria-current="page"{% endif %}><i class="fe-box" aria-hidden="true"></i>Assets</a></li>
       <li><a class="l-nav-link" href="{% url 'lookalikes' slug %}"{% if cur == 'lookalikes' %} aria-current="page"{% endif %}><i class="fe-copy" aria-hidden="true"></i>Lookalikes</a></li>
       <li><a class="l-nav-link" href="{% url 'reports' slug %}"{% if cur == 'reports' or cur == 'executive_summary' %} aria-current="page"{% endif %}><i class="fe-file-text" aria-hidden="true"></i>Reports</a></li>

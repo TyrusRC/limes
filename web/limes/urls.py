@@ -21,6 +21,7 @@ urlpatterns = [
     path(
         '',
         include('reporting.urls')),
+    path('remediation/', include('remediation.urls')),
     path(
         'scan/',
         include('startScan.urls')),

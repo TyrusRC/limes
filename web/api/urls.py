@@ -14,6 +14,7 @@ router.register(r'listDatatableAsset', AssetDatatableViewSet, basename='asset')
 router.register(r'notifications', InAppNotificationManagerViewSet, basename='notification')
 
 urlpatterns = [
+    path('', include('remediation.api_urls')),
     url('^', include(router.urls)),
     path(
         'add/assets/',

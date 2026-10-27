@@ -1,0 +1,93 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}{{ req.title }}{% endblock title %}
+{% block page_title %}Remediation request{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item"><a href="{% url 'remediation_list_page' current_project.slug %}">Remediation</a></li>
+<li class="breadcrumb-item active" aria-current="page">Request</li>
+{% endblock breadcrumb_title %}
+{% block custom_js_css_link %}<link rel="stylesheet" href="{% static 'limes/remediation.css' %}">{% endblock custom_js_css_link %}
+
+{% block main_content %}
+{% with can_write=user|can:'modify_targets' %}
+<div class="lx-head">
+  <div>
+    <a class="lx-back" href="{% url 'remediation_list_page' current_project.slug %}"><i class="fe-arrow-left" aria-hidden="true"></i>Back to requests</a>
+    <h2>{{ req.title }}</h2>
+    <div class="lx-meta">
+      <span class="badge {% if s.overdue %}l-badge-expired{% else %}l-badge-open{% endif %}">{% if s.overdue %}Overdue{% else %}{{ req.status|capfirst }}{% endif %}</span>
+      {% if req.due_date %}<span>Due {{ req.due_date|date:'Y-m-d' }}</span>{% endif %}
+      <span>{{ s.open }} of {{ s.total }} issues still open</span>
+      <span>{{ s.assets }} {% if s.assets == 1 %}asset{% else %}assets{% endif %}</span>
+      <span>By {{ req.created_by.username|default:"unknown" }}</span>
+      {% if req.assignee %}<span>Assigned to {{ req.assignee.username }}</span>{% endif %}
+    </div>
+  </div>
+  {% if can_write %}
+  <div class="d-flex gap-2 flex-wrap" id="rm_actions">
+    {% for st in next_status %}<button type="button" class="btn {% if st == 'completed' %}btn-primary{% else %}btn-light{% endif %}" data-status="{{ st }}">{% if st == 'completed' %}Mark completed{% elif st == 'archived' %}Archive{% else %}Reopen{% endif %}</button>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="lx-detail" id="rm" data-project="{{ current_project.slug }}" data-id="{{ req.id }}">
+  <div class="lx-col">
+    {% if req.message %}<section class="card lx-block" aria-labelledby="rm_msg"><h3 id="rm_msg">Message</h3><p class="rm-text">{{ req.message }}</p></section>{% endif %}
+    <section class="card lx-block" aria-labelledby="rm_items">
+      <h3 id="rm_items">Issues <span class="l-muted">{{ items|length }}</span></h3>
+      <div class="lx-table-wrap"><table class="table table-sm">
+        <thead><tr><th scope="col">Issue</th><th scope="col">Asset</th><th scope="col">Category</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+        {% for it in items %}
+          <tr><td><a href="{% url 'issue_detail' current_project.slug it.i.id %}">{{ it.title }}</a></td><td class="mono">{{ it.i.asset.value }}</td><td>{{ it.category }}</td>
+            <td><span class="badge {% if it.i.status == 'fixed' %}badge-soft-success{% else %}l-badge-open{% endif %}">{{ it.i.status|capfirst }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    <section class="card lx-block" aria-labelledby="rm_timeline">
+      <h3 id="rm_timeline">Timeline</h3>
+      <ul class="lx-history">
+        {% for e in events %}<li>{{ e.text }}{% if e.actor %} <span class="l-muted">by {{ e.actor.username }}</span>{% endif %} <span class="l-muted">{{ e.created_at|date:'Y-m-d H:i' }}</span></li>{% endfor %}
+      </ul>
+    </section>
+  </div>
+  <aside class="lx-col" aria-label="Impact and messages">
+    <section class="card lx-block" aria-labelledby="rm_impact">
+      <h3 id="rm_impact">Potential score impact</h3>
+      {% if impact and impact.score is not None %}
+        <p class="lx-gain">{% if impact.delta and impact.delta > 0 %}+{% endif %}{{ impact.delta|default:0 }}</p>
+        <p>Fixing the {{ s.open }} open {% if s.open == 1 %}issue{% else %}issues{% endif %} moves the score to {{ impact.score }} (grade {{ impact.grade }}).</p>
+      {% else %}<p class="l-hint">Nothing left to fix here, or the project has no score yet.</p>{% endif %}
+    </section>
+    {% if req.external_emails %}
+    <section class="card lx-block" aria-labelledby="rm_ext"><h3 id="rm_ext">External recipients</h3>
+      <ul>{% for a in req.external_emails %}<li class="mono">{{ a }}</li>{% endfor %}</ul>
+      <p class="l-hint mb-0">{% if req.email_status %}Email: {{ req.email_status }}.{% endif %}</p></section>
+    {% endif %}
+    <section class="card lx-block" aria-labelledby="rm_notes">
+      <h3 id="rm_notes">Messages <span class="l-muted">{{ messages_|length }}</span></h3>
+      <ul class="l-notes rm-thread">
+        {% for m in messages_ %}
+        <li class="l-note"><span class="l-note-avatar" aria-hidden="true">{{ m.author.username|default:"?"|slice:":2"|upper }}</span>
+          <div class="l-note-bubble"><div class="l-note-meta"><strong>{{ m.author.username|default:"unknown" }}</strong><span>{{ m.created_at|date:'Y-m-d H:i' }}</span></div>
+          <div class="l-note-text rm-text">{{ m.text }}</div></div></li>
+        {% empty %}<li class="l-hint">No messages yet.</li>{% endfor %}
+      </ul>
+      {% if can_write %}
+      <form class="l-field" id="rm_msg_form" novalidate>
+        <label for="rm_msg_text">Add a message</label>
+        <textarea id="rm_msg_text" class="form-control" rows="3" maxlength="5000"></textarea>
+        <div class="l-form-actions"><button class="btn btn-light" type="submit"><i class="fe-message-square" aria-hidden="true"></i>Send</button></div>
+      </form>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endwith %}
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'limes/remediation_detail.js' %}"></script>
+{% endblock page_level_script %}

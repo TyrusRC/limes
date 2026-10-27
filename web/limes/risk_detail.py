@@ -105,6 +105,7 @@ def build(issue, now=None):
     out['notes'] = list(issue.notes.select_related('author').order_by('created_at', 'id')[:NOTE_LIMIT])
 
     fixable = [a['id'] for a in out['affected'] if not a['waived']] if issue.status == 'open' else []
+    out['remediate_ids'] = ','.join(str(i) for i in fixable[:200])  # the wizard's cap
     out['impact'] = None
     if fixable and issue.key not in PROVISIONAL:
         out['impact'] = scoring.forecast(issue.project, fixable, now)

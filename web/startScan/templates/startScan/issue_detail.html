@@ -23,6 +23,7 @@
       <span class="mono">{{ issue.asset.value }}</span>
     </div>
   </div>
+  {% if can_write and d.remediate_ids %}<a class="btn btn-primary" href="{% url 'remediation_new' current_project.slug %}?issues={{ d.remediate_ids }}"><i class="fe-check-square" aria-hidden="true"></i> Request remediation</a>{% endif %}
 </div>
 
 <div class="lx-detail" id="rd" data-project="{{ current_project.slug }}" data-issue="{{ issue.id }}">
@@ -97,12 +98,14 @@
         <div class="l-current-waiver{% if w.kind == 'false_positive' %} is-fp{% endif %}">
           <div class="l-current-waiver-top">
             <span class="badge {% if w.kind == 'false_positive' %}l-badge-fp{% else %}l-badge-waived{% endif %}">{% if w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %}{% if w.expires_at %} until {{ w.expires_at|date:'Y-m-d' }}{% endif %}</span>
-            {% if can_write %}<button type="button" class="btn btn-sm btn-danger" id="rd_revoke">Revoke waiver</button>{% endif %}
+            {% if can_write and w.issue_id %}<button type="button" class="btn btn-sm btn-danger" id="rd_revoke">Revoke waiver</button>{% elif can_write %}<a class="btn btn-sm btn-light" href="{% url 'waivers_page' current_project.slug %}">Manage on the Waivers page</a>{% endif %}
           </div>
           <p class="l-waiver-reason">{{ w.reason }}</p>
-          <p class="l-hint">Set by {{ w.created_by.username|default:"unknown" }} on {{ w.created_at|date:'Y-m-d' }}. Excluded from the headline score.</p>
+          <p class="l-hint">Set by {{ w.created_by.username|default:"unknown" }} on {{ w.created_at|date:'Y-m-d' }}{% if not w.issue_id %}, for every asset with this issue{% endif %}. Excluded from the headline score.</p>
         </div>
         {% endwith %}
+      {% elif d.pending_waiver %}
+        <p class="l-hint">A waiver by {{ d.pending_waiver.created_by.username|default:"unknown" }} is waiting for {{ d.pending_waiver.approver.username|default:"its approver" }}. It does not count until approved.</p>
       {% elif d.expired_waiver %}
         <p class="l-hint">The waiver ran out on {{ d.expired_waiver.expires_at|date:'Y-m-d' }}, so this issue counts toward the score again.</p>
       {% elif d.issue.status == 'open' %}
@@ -120,6 +123,25 @@
             <input type="date" id="rd_expiry" class="form-control" aria-describedby="rd_hint">
           </div>
         </div>
+        <div class="l-form-row">
+          <div class="l-field">
+            <label for="rd_scope">Applies to</label>
+            <select id="rd_scope" class="form-select"><option value="issue">This asset only</option><option value="all">Every asset with this issue, future ones included</option></select>
+          </div>
+          <div class="l-field">
+            <label for="rd_approver">Approver (optional)</label>
+            <select id="rd_approver" class="form-select"><option value="">No approval needed</option></select>
+          </div>
+        </div>
+        <div class="l-form-row">
+          <div class="l-field">
+            <label for="rd_remind">Remind me before it ends (days)</label>
+            <input type="number" id="rd_remind" class="form-control" min="1" max="90" value="7">
+          </div>
+          <div class="l-field l-field-check">
+            <label><input type="checkbox" id="rd_shared" class="form-check-input"> Share the reason (otherwise internal only)</label>
+          </div>
+        </div>
         <div class="l-field">
           <label for="rd_reason">Reason</label>
           <textarea id="rd_reason" class="form-control" rows="3" maxlength="5000" required placeholder="Why is this acceptable? Required."></textarea>
@@ -135,7 +157,7 @@
       <ul class="lx-history">
         {% for h in d.waivers %}
         <li>{% if h.w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %} by {{ h.w.created_by.username|default:"unknown" }}, {{ h.w.created_at|date:'Y-m-d' }}
-          <span class="l-muted">({% if h.state == 'active' %}Active{% elif h.state == 'revoked' %}Revoked {{ h.w.revoked_at|date:'Y-m-d' }}{% elif h.state == 'expired' %}Expired {{ h.w.expires_at|date:'Y-m-d' }}{% else %}Replaced{% endif %})</span>
+          <span class="l-muted">({% if h.state == 'active' %}Active{% elif h.state == 'pending' %}Waiting for approval{% elif h.state == 'revoked' %}Revoked {{ h.w.revoked_at|date:'Y-m-d' }}{% elif h.state == 'expired' %}Expired {{ h.w.expires_at|date:'Y-m-d' }}{% else %}Replaced{% endif %})</span>
           <div class="l-waiver-reason l-muted">{{ h.w.reason }}</div></li>
         {% endfor %}
       </ul>

@@ -1,0 +1,54 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}Waivers{% endblock title %}
+{% block page_title %}Waivers{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Waivers</li>
+{% endblock breadcrumb_title %}
+{% block custom_js_css_link %}<link rel="stylesheet" href="{% static 'limes/remediation.css' %}">{% endblock custom_js_css_link %}
+
+{% block main_content %}
+{% with can_write=user|can:'modify_targets' %}
+<div id="wv" data-project="{{ current_project.slug }}">
+<p class="l-hint">Waived issues leave the headline score and stay in the raw score. A waiver waiting for its approver does not count yet.</p>
+{% for title, rows, live in sections %}
+<section class="card l-table-card mb-3" aria-labelledby="wv_{{ forloop.counter }}">
+  <div class="lx-dt-head l-dt-bar"><h3 class="h6 mb-0" id="wv_{{ forloop.counter }}">{{ title }} <span class="l-muted">{{ rows|length }}</span></h3></div>
+  <div class="table-responsive">
+    <table class="table table-hover w-100">
+      <thead><tr><th scope="col">Issue</th><th scope="col">Scope</th><th scope="col">Kind</th><th scope="col" class="lx-hide-sm">Reason</th><th scope="col" class="lx-hide-sm">Set by</th><th scope="col">Expires</th><th scope="col">State</th>{% if live %}<th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}</tr></thead>
+      <tbody>
+      {% for w in rows %}
+        <tr>
+          <td>{% if w.issue_id %}<a href="{% url 'issue_detail' current_project.slug w.issue_id %}">{{ w.key }}</a><div class="mono l-hint">{{ w.asset }}</div>{% else %}<span class="mono">{{ w.key }}</span>{% endif %}</td>
+          <td>{% if w.scope == 'all' %}All assets, future included{% else %}This asset{% endif %}</td>
+          <td>{% if w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %}</td>
+          <td class="lx-hide-sm rm-text">{{ w.reason }}<div class="l-hint">{% if w.shared %}Shared{% else %}Internal only{% endif %}</div></td>
+          <td class="lx-hide-sm">{{ w.created_by|default:"unknown" }}{% if w.approver %}<div class="l-hint">Approver {{ w.approver }}</div>{% endif %}</td>
+          <td class="text-nowrap">{% if w.expires_at %}{{ w.expires_at|date:'Y-m-d' }}{% else %}Never{% endif %}</td>
+          <td><span class="badge {% if w.state == 'active' %}l-badge-waived{% elif w.state == 'pending' %}l-badge-open{% else %}l-badge-expired{% endif %}">{{ w.state|capfirst }}</span></td>
+          {% if live %}<td class="text-nowrap">
+            {% if can_write %}
+              {% if w.state == 'pending' and w.approver == user.username and w.created_by != user.username %}
+              <button type="button" class="btn btn-sm btn-primary" data-act="approve" data-id="{{ w.id }}">Approve</button>
+              <button type="button" class="btn btn-sm btn-light" data-act="reject" data-id="{{ w.id }}">Reject</button>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-danger" data-act="revoke" data-id="{{ w.id }}">Revoke</button>
+            {% endif %}
+          </td>{% endif %}
+        </tr>
+      {% empty %}<tr><td colspan="8" class="l-muted">None.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+</div>
+{% endwith %}
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'limes/waivers.js' %}"></script>
+{% endblock page_level_script %}

@@ -1,0 +1,13 @@
+/* Remediation pages: link tabs, wizard steps and the review panel. Colours come from the shared tokens. */
+a.lx-tab { display: inline-flex; align-items: center; text-decoration: none; }
+.lx-tab[aria-current="page"] { color: var(--brand-ink); border-bottom-color: var(--brand); }
+.rm-steps { display: flex; gap: var(--space-4); list-style: none; padding: 0; margin: 0 0 var(--space-4); flex-wrap: wrap; }
+.rm-steps li { color: var(--ink-3); font-weight: 500; }
+.rm-steps li[aria-current="step"] { color: var(--brand-ink); border-bottom: 2px solid var(--brand); }
+.rm-step[hidden] { display: none; }
+.rm-pick { max-height: 28rem; overflow: auto; }
+.rm-pick .rm-assets { margin: 0 0 var(--space-2) var(--space-5); padding: 0; list-style: none; }
+.rm-pick .rm-assets li { display: flex; gap: var(--space-2); align-items: center; }
+.rm-actions { display: flex; gap: var(--space-2); justify-content: space-between; margin-top: var(--space-4); }
+.rm-thread { list-style: none; padding: 0; margin: 0 0 var(--space-3); }
+.rm-text { white-space: pre-wrap; overflow-wrap: anywhere; }

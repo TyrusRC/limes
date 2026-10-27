@@ -1,0 +1,40 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}Remediation{% endblock title %}
+{% block page_title %}Remediation{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item">Monitor</li>
+<li class="breadcrumb-item active" aria-current="page">Remediation</li>
+{% endblock breadcrumb_title %}
+{% block custom_js_css_link %}<link rel="stylesheet" href="{% static 'limes/remediation.css' %}">{% endblock custom_js_css_link %}
+
+{% block main_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <nav class="lx-tabs" aria-label="Remediation status">
+    {% for t, n in tabs %}<a class="lx-tab" href="?status={{ t }}"{% if t == tab %} aria-current="page"{% endif %}>{{ t|capfirst }}<span class="lx-count">{{ n }}</span></a>{% endfor %}
+  </nav>
+  {% if user|can:'modify_targets' %}<a class="btn btn-primary" href="{% url 'remediation_new' current_project.slug %}"><i class="fe-plus" aria-hidden="true"></i> Request remediation</a>{% endif %}
+</div>
+<section class="card l-table-card" aria-label="Remediation requests">
+  <div class="table-responsive">
+    <table class="table table-hover w-100">
+      <thead><tr><th scope="col">Title</th><th scope="col" class="lx-hide-sm">Categories</th><th scope="col">Open issues</th><th scope="col">Impacted assets</th><th scope="col" class="lx-hide-sm">Last updated</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a class="lx-title" href="{% url 'remediation_detail' current_project.slug r.req.id %}">{{ r.req.title }}</a>{% if r.req.due_date %}<div class="l-hint">Due {{ r.req.due_date|date:'Y-m-d' }}</div>{% endif %}</td>
+          <td class="lx-hide-sm">{{ r.categories|join:", " }}</td>
+          <td>{{ r.open }} of {{ r.total }}</td>
+          <td>{{ r.assets }}</td>
+          <td class="text-nowrap l-muted lx-hide-sm">{{ r.req.updated_at|date:'Y-m-d H:i' }}</td>
+          <td>{% if r.overdue %}<span class="badge l-badge-expired">Overdue</span>{% else %}<span class="badge l-badge-open">{{ r.req.status|capfirst }}</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="l-muted">No {{ tab }} requests.{% if tab == 'active' %} Pick issues on the Issues page, or use Request remediation.{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock main_content %}
