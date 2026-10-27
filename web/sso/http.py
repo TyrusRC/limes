@@ -28,9 +28,9 @@ def fetch(method, url, data=None, headers=None, auth=None, resolve=collect._reso
     ip, reason = safe_fetch.resolve_vetted(host, resolve=resolve)
     if reason:
         raise FetchError('provider host refused: not a public address')
-    get = safe_fetch.pinned_get(host, ip, session_factory=session_factory)
+    get = safe_fetch.pinned_get(host, ip, session_factory=session_factory, method=method)
     resp = None
-    kw = {'method': method, 'stream': True, 'timeout': (5, 10), 'headers': dict(headers or {})}
+    kw = {'stream': True, 'timeout': (5, 10), 'headers': dict(headers or {})}
     if method == 'post':
         kw['data'] = data
     if auth:

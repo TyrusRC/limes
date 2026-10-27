@@ -236,7 +236,6 @@ def pinned_get(host, ip, session_factory=requests.Session, deadline=None, method
         headers = {k: v for k, v in (kw.pop('headers', None) or {}).items() if k.lower() != 'host'}
         name = f'[{host}]' if ':' in host else host  # an IPv6 literal is bracketed in Host
         headers['Host'] = name if port is None else f'{name}:{port}'
-        method = kw.pop('method', 'get')  # a token endpoint is POSTed to; everything else keeps the default
         kw['allow_redirects'] = False  # callers follow same-host hops themselves (collect._fetch_https)
         pinned = urlunsplit((scheme, _netloc(ip, port), parts.path or '/', parts.query, ''))
         try:
