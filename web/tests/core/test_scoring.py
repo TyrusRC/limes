@@ -212,3 +212,53 @@ class SnapshotTest(Base):
         snaps = ScoreSnapshot.objects.filter(project=self.p)
         self.assertEqual(snaps.count(), 1)
         self.assertEqual((snaps[0].score, snaps[0].grade, snaps[0].version), (599, 'C', 'limes-score-v3'))
+
+
+class SubscanActivityMigrationTest(Base):
+    """Tagging subscan stage activities (startScan 0036) must leave every scoring baseline as it was."""
+
+    @staticmethod
+    def old_baselines(project):
+        # the pre-removal rule: a scan whose own (non-subscan) vulnerability stage assessed something
+        out = {}
+        for d in scoring._owned_domains(project):
+            for scan in ScanHistory.objects.filter(domain=d).order_by('-start_scan_date', '-id'):
+                subs = {c for ids in SubScan.objects.filter(scan_history=scan).values_list('celery_ids', flat=True) for c in ids}
+                own = scoring._assessed(ScanActivity.objects.filter(scan_of=scan)).exclude(celery_id__in=subs)
+                if own.exists():
+                    out[d.name] = scan
+                    break
+        return out
+
+    def test_baselines_identical_before_and_after(self):
+        import importlib
+        from django.apps import apps
+        migration = importlib.import_module('startScan.migrations.0036_tag_subscan_activities')
+        a = self.host('a.x.com')
+        real = self.scan(ago=timedelta(days=2))
+        self.vuln(real, a, 4)
+        asm_only = self.scan(ago=timedelta(hours=2), vuln_stage=None)
+        sub = Subdomain.objects.create(scan_history=asm_only, target_domain=asm_only.domain, name='b.x.com')
+        SubScan.objects.create(scan_history=asm_only, subdomain=sub, start_scan_date=self.now, status=SUCCESS_TASK,
+                               celery_ids=['sub-1'])
+        ScanActivity.objects.create(scan_of=asm_only, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK, celery_id='sub-1')
+        # a root scan that also had a subscan: its own stage keeps counting
+        both = self.scan(ago=timedelta(hours=1), vuln_stage=None)
+        ScanActivity.objects.create(scan_of=both, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK, celery_id='root-9')
+        SubScan.objects.create(scan_history=both, subdomain=sub, start_scan_date=self.now, status=SUCCESS_TASK,
+                               celery_ids=['sub-2'])
+        ScanActivity.objects.create(scan_of=both, name='vulnerability_scan', title='v', time=self.now,
+                                    status=SUCCESS_TASK, celery_id='sub-2')
+        before = self.old_baselines(self.p)
+        self.assertEqual(before, {'x.com': both})
+        migration.tag_subscan_activities(apps, None)
+        self.assertEqual(self.old_baselines(self.p), before)
+        self.assertEqual(scoring.baselines(self.p), before)
+        self.assertEqual(ScanActivity.objects.filter(name='subscan_vulnerability_scan').count(), 2)
+        migration.tag_subscan_activities(apps, None)  # idempotent
+        self.assertEqual(ScanActivity.objects.filter(name='subscan_subscan_vulnerability_scan').count(), 0)
+        # without the tagged subscan rows the sub-only scan is still not a baseline
+        ScanActivity.objects.filter(celery_id='root-9').delete()
+        self.assertEqual(scoring.baselines(self.p), {'x.com': real})
