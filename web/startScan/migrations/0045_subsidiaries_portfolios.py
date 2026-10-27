@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('dashboard', '0009_feed_dismissal'),
-        ('startScan', '0043_waiver_scope_approval'),
+        ('startScan', '0044_issue_ignore'),
     ]
 
     operations = [
