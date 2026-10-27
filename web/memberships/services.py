@@ -38,7 +38,10 @@ def find_user(identifier):
     ident = (identifier or '').strip()
     if not ident or len(ident) > 254:
         raise MemberError('enter a username or email address')
-    users = list(get_user_model().objects.filter(Q(username=ident) | Q(email__iexact=ident), is_active=True)[:2])
+    # candidates by the database, then an exact comparison in Python on ASCII only (the database folds some
+    # non-ASCII letters, such as the dotless i, onto ASCII ones)
+    cands = get_user_model().objects.filter(Q(username=ident) | Q(email__iexact=ident), is_active=True)[:20]
+    users = [u for u in cands if u.username == ident or (u.email.isascii() and ident.isascii() and u.email.lower() == ident.lower())][:2]
     if len(users) != 1:
         raise MemberError('no single active user matches that username or email' if users else 'no active user with that username or email', 404)
     return users[0]

@@ -42,6 +42,8 @@ def email_of(claims):
     if not isinstance(email, str) or len(email) > 254:
         return '', False
     email = email.strip()
+    if not email.isascii():
+        return '', False  # no IDN / look-alike letters: a lookalike must never compare equal to a real address
     local, _, domain = email.partition('@')
     if not local or not domain or '@' in domain or any(c.isspace() for c in email):
         return '', False  # one @ and no spaces: anything stranger could make the domain check read the wrong part
@@ -78,7 +80,8 @@ def resolve(claims):
         return link.user
     user = None
     if settings.OIDC_LINK_BY_EMAIL and verified:
-        matches = list(User.objects.filter(email__iexact=email)[:2])
+        # exact comparison in Python on ASCII only: the database folds some non-ASCII letters (dotless i) onto ASCII ones
+        matches = [u for u in User.objects.filter(email__iexact=email)[:20] if u.email.isascii() and u.email.lower() == email.lower()]
         if len(matches) == 1:
             user = matches[0]
             if not user.is_active:
@@ -110,6 +113,8 @@ def _create(issuer, sub, email):
     role = config.default_role()
     assign_role(user, GLOBAL_ROLE[role])
     for project in Project.objects.filter(slug__in=[s.strip() for s in settings.OIDC_DEFAULT_PROJECTS if s.strip()]):
-        ProjectMember.objects.get_or_create(user=user, project=project, defaults={'role': role})
+        member, made = ProjectMember.objects.get_or_create(user=user, project=project, defaults={'role': role})
+        if made:
+            services.audit(None, project, 'member_added', user.username, f'sso default project, role {role}')
     services.audit(None, None, 'sso_user_created', user.username, f'default role {role}')
     return user

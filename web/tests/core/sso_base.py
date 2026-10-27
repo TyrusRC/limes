@@ -133,6 +133,8 @@ class SsoBase(TestCase):
         self.addCleanup(setattr, tests.core, 'ENABLED', True)
         cache.clear()
         self.addCleanup(cache.clear)
+        self.clear_rate()
+        self.addCleanup(self.clear_rate)
         self.idp = FakeProvider()
         patch = mock.patch('sso.http.fetch', side_effect=self.idp.fetch)
         patch.start()
@@ -140,11 +142,17 @@ class SsoBase(TestCase):
         ov = override_settings(OIDC_ENABLED=True, OIDC_ISSUER=ISSUER, OIDC_CLIENT_ID=CLIENT, OIDC_CLIENT_SECRET=SECRET,
                                OIDC_REDIRECT_BASE=BASE, OIDC_SCOPES='openid email profile', OIDC_ALLOWED_DOMAINS=[],
                                OIDC_AUTO_CREATE=False, OIDC_DEFAULT_ROLE='read_only', OIDC_DEFAULT_PROJECTS=[],
-                               OIDC_LINK_BY_EMAIL=False, LOCAL_LOGIN=True)
+                               OIDC_LINK_BY_EMAIL=False, LOCAL_LOGIN=True, SSO_RATE_PER_MIN=1000)
         ov.enable()
         self.addCleanup(ov.disable)
         self.p1 = Project.objects.create(name='p1', slug='p1', insert_date=timezone.now())
         self.c = Client()
+
+    def clear_rate(self):
+        from django_redis import get_redis_connection
+        conn = get_redis_connection('default')
+        for k in conn.scan_iter('limes:sso:rate:*'):
+            conn.delete(k)
 
     def start(self, c=None, **query):
         r = (c or self.c).get('/sso/login/', query)

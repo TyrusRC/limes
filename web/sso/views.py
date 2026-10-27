@@ -17,12 +17,17 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login
 from django.contrib.auth.views import LoginView
-from django.http import Http404, HttpResponseForbidden
+from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from django_redis import get_redis_connection
+from ipaddress import ip_address
+from redis.exceptions import RedisError
+
+from limes.mcp import ratelimit
 from sso import accounts, config, provider
 from sso.jwt import TokenError
 
@@ -50,11 +55,46 @@ def _fail(request, reason, text=FAILED):
     return redirect('login')
 
 
+def client_ip(request):
+    """The peer address; X-Real-IP (set by the bundled proxy) only when the peer is a private address, i.e. the proxy
+    itself, so a client on the internet cannot pick its own bucket."""
+    peer = request.META.get('REMOTE_ADDR', '')
+    try:
+        private = ip_address(peer).is_private
+    except ValueError:
+        return peer or 'unknown'
+    real = request.META.get('HTTP_X_REAL_IP', '').strip()
+    if private and real:
+        try:
+            return str(ip_address(real))
+        except ValueError:
+            pass
+    return peer
+
+
+def rate_limited(request):
+    """None when allowed, else the response to send. A broken limiter refuses (fail closed)."""
+    try:
+        wait = ratelimit.take(f'limes:sso:rate:{client_ip(request)}', settings.SSO_RATE_PER_MIN, 60,
+                              conn=get_redis_connection('default'))
+    except RedisError:
+        logger.warning('SSO rate limiter unavailable; refusing')
+        return HttpResponse('Try again shortly.', status=503, content_type='text/plain')
+    if wait:
+        resp = HttpResponse('Too many sign-in attempts. Wait a minute.', status=429, content_type='text/plain')
+        resp['Retry-After'] = str(wait)
+        return resp
+    return None
+
+
 @never_cache
 @require_GET
 def sso_login(request):
     if not config.enabled():
         raise Http404
+    limited = rate_limited(request)
+    if limited:
+        return limited
     try:
         doc = provider.discovery()
     except provider.ProviderError as e:
@@ -75,6 +115,9 @@ def sso_login(request):
 def sso_callback(request):
     if not config.enabled():
         raise Http404
+    limited = rate_limited(request)
+    if limited:
+        return limited
     pending = request.session.pop(SESSION_KEY, None)  # one use: a replayed callback finds nothing
     if not isinstance(pending, dict) or pending.get('exp', 0) < time.time():
         return _fail(request, 'no_pending_login')
