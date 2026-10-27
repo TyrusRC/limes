@@ -28,3 +28,12 @@ class AccessAudit(models.Model):
     action = models.CharField(max_length=30)
     subject = models.CharField(max_length=150, blank=True, default='')
     detail = models.CharField(max_length=300, blank=True, default='')
+
+
+class NotificationRead(models.Model):
+    """One user having read one notification. Read state belongs to a person, not to the notification."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    notification = models.ForeignKey('dashboard.InAppNotification', on_delete=models.CASCADE, related_name='+')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'notification'], name='one_read_mark_per_user_notification')]

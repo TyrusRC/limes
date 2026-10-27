@@ -28,105 +28,86 @@ from api.permissions import *
 from api.serializers import *
 
 
+from memberships.models import NotificationRead
 from memberships import rules, services  # last: the star imports above must not shadow them
 logger = logging.getLogger(__name__)
 
 
-class InAppNotificationManagerViewSet(viewsets.ModelViewSet):
+class InAppNotificationManagerViewSet(viewsets.ReadOnlyModelViewSet):
 	"""
-		This class manages the notification model, provided CRUD operation on notif model
-		such as read notif, clear all, fetch all notifications etc
+		Notifications are read-only here: nothing in the API creates, edits or deletes one. What a user can change is
+		their own read state (a NotificationRead row for them), for notifications of projects they belong to and
+		system-wide ones.
 	"""
 	serializer_class = InAppNotificationSerializer
 	pagination_class = None
 
 	def get_queryset(self):
-		# we will see later if user based notif is needed
-		# return InAppNotification.objects.filter(user=self.request.user)
-		project_slug = self.request.query_params.get('project_slug')
 		# only system notifications and those of projects the user is a member of
 		queryset = InAppNotification.objects.filter(
 			Q(project__in=rules.projects_for(self.request.user)) | Q(project__isnull=True))
+		project_slug = self.request.query_params.get('project_slug')
 		if project_slug:
-			queryset = queryset.filter(
-				Q(project__slug=project_slug) | Q(notification_type='system')
-			)
+			queryset = queryset.filter(Q(project__slug=project_slug) | Q(notification_type='system'))
 		return queryset.order_by('-created_at')
+
+	def get_serializer_context(self):
+		ctx = super().get_serializer_context()
+		ctx['read_ids'] = set(NotificationRead.objects.filter(user=self.request.user).values_list('notification_id', flat=True))
+		return ctx
+
+	def _mark(self, queryset):
+		have = set(NotificationRead.objects.filter(user=self.request.user, notification__in=queryset).values_list('notification_id', flat=True))
+		NotificationRead.objects.bulk_create(
+			[NotificationRead(user=self.request.user, notification_id=pk) for pk in queryset.values_list('pk', flat=True) if pk not in have],
+			ignore_conflicts=True)
 
 	@action(detail=False, methods=['post'])
 	def mark_all_read(self, request):
-		# marks all notification read
-		project_slug = self.request.query_params.get('project_slug')
-		queryset = self.get_queryset()
-
-		if project_slug:
-			queryset = queryset.filter(
-				Q(project__slug=project_slug) | Q(notification_type='system')
-			)
-		queryset.update(is_read=True)
+		self._mark(self.get_queryset())
 		return Response(status=HTTP_204_NO_CONTENT)
 
 	@action(detail=True, methods=['post'])
 	def mark_read(self, request, pk=None):
-		# mark individual notification read when cliked
-		notification = self.get_object()
-		notification.is_read = True
-		notification.save()
+		self._mark(InAppNotification.objects.filter(pk=self.get_object().pk))
 		return Response(status=HTTP_204_NO_CONTENT)
 
 	@action(detail=False, methods=['get'])
 	def unread_count(self, request):
-		# this fetches the count for unread notif mainly for the badge
-		project_slug = self.request.query_params.get('project_slug')
-		queryset = self.get_queryset()
-		if project_slug:
-			queryset = queryset.filter(
-				Q(project__slug=project_slug) | Q(notification_type='system')
-			)
-		count = queryset.filter(is_read=False).count()
-		return Response({'count': count})
+		read = NotificationRead.objects.filter(user=request.user).values('notification_id')
+		return Response({'count': self.get_queryset().exclude(pk__in=read).count()})
 
 	@action(detail=False, methods=['post'])
 	def clear_all(self, request):
-		# when clicked on the clear button this must be called to clear all notif
-		project_slug = self.request.query_params.get('project_slug')
-		queryset = self.get_queryset()
-		if project_slug:
-			queryset = queryset.filter(
-				Q(project__slug=project_slug) | Q(notification_type='system')
-			)
-		queryset.delete()
+		# "Clear" hides nothing for anyone else and deletes nothing: it marks everything read for this user.
+		self._mark(self.get_queryset())
 		return Response(status=HTTP_204_NO_CONTENT)
 
 
 class CreateProjectApi(APIView):
+	"""POST only. Creating a project is an instance-level act: a global admin (superuser or sys_admin), enforced by the
+	project-access layer (memberships.policy.GLOBAL_ONLY). Failures say nothing about which projects exist."""
 	permission_classes = [HasPermission]
 	permission_required = PERM_MODIFY_TARGETS
 
-	def get(self, request):
-		req = self.request
-		project_name = req.query_params.get('name')
+	def post(self, request):
+		project_name = request.data.get('name') if hasattr(request.data, 'get') else None
+		if not project_name:
+			project_name = request.query_params.get('name')
+		fail = Response({'status': False, 'error': 'the project could not be created; choose another name'}, status=HTTP_400_BAD_REQUEST)
+		if not isinstance(project_name, str) or not project_name.strip() or len(project_name) > 500:
+			return fail
 		slug = slugify(project_name)
-		insert_date = timezone.now()
-
+		if not slug or len(slug) > 50 or Project.objects.filter(slug=slug).exists():
+			return fail
 		try:
-			project = Project.objects.create(
-				name=project_name,
-				slug=slug,
-				insert_date =insert_date
-			)
-			services.grant_creator(project, request.user)
-			response = {
-				'status': True,
-				'project_name': project_name
-			}
-			return Response(response)
-		except Exception as e:
-			response = {
-				'status': False,
-				'error': str(e)
-			}
-			return Response(response, status=HTTP_400_BAD_REQUEST)
+			with transaction.atomic():
+				project = Project.objects.create(name=project_name.strip(), slug=slug, insert_date=timezone.now())
+				services.grant_creator(project, request.user)
+		except Exception:
+			logger.exception('project creation failed')
+			return fail
+		return Response({'status': True, 'project_name': project.name})
 
 
 class UniversalSearch(APIView):

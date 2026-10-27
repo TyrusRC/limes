@@ -21,6 +21,11 @@ def safe_redirect_link(url):
 
 
 class InAppNotificationSerializer(serializers.ModelSerializer):
+	is_read = serializers.SerializerMethodField()
+
+	def get_is_read(self, obj):
+		return obj.pk in self.context.get('read_ids', ())
+
 	class Meta:
 		model = InAppNotification
 		fields = [

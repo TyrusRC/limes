@@ -214,6 +214,7 @@ def projects(request, slug):
 def delete_project(request, id):
     obj = get_object_or_404(Project, id=id)
     if request.method == "POST":
+        services.audit(request.user, None, 'project_deleted', obj.slug, f'name {obj.name[:100]}')
         obj.delete()
         responseData = {
             'status': 'true'

@@ -36,7 +36,7 @@ function add_project_modal(){
 		confirmButtonText: 'Create Project',
 		showLoaderOnConfirm: true,
 		preConfirm: (name) => {
-			return fetch(`/api/action/create/project?name=${encodeURIComponent(name)}`)
+			return fetch('/api/action/create/project', {method: 'POST', credentials: 'same-origin', headers: {'X-CSRFToken': getCookie('csrftoken'), 'Content-Type': 'application/json'}, body: JSON.stringify({name: name})})
 				.then(response => {
 					if (!response.ok) {
 						throw new Error(response.error)
