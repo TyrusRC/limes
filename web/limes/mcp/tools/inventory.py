@@ -58,7 +58,7 @@ def issue_title(source, key):
 
 
 def waived_exists(now):
-    return Exists(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk')))
+    return IssueWaiver.waived_exists(now)
 
 
 @tool(title='List projects')

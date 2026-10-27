@@ -374,7 +374,7 @@ def _load_issue(request, data):
 
 
 def _waiver_json(w):
-	return {'kind': w.kind, 'reason': w.reason, 'expires_at': w.expires_at, 'created_by': w.created_by.username if w.created_by else None, 'created_at': w.created_at}
+	return {'id': w.id, 'scope': 'all' if w.issue_id is None else 'issue', 'kind': w.kind, 'reason': w.reason, 'expires_at': w.expires_at, 'created_by': w.created_by.username if w.created_by else None, 'created_at': w.created_at}
 
 
 class IssueList(APIView):
@@ -398,14 +398,17 @@ class IssueList(APIView):
 		now = timezone.now()
 		kev_only = q.get('kev') == 'true'
 		if q.get('waived') in ('true', 'false'):
-			ids = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).values('issue_id')
-			issues = issues.filter(id__in=ids) if q['waived'] == 'true' else issues.exclude(id__in=ids)
+			issues = issues.filter(IssueWaiver.waived_exists(now)) if q['waived'] == 'true' else issues.exclude(IssueWaiver.waived_exists(now))
 		out = []
 		live = IssueWaiver.objects.filter(IssueWaiver.active_q(now))
-		live = live.select_related('created_by').order_by('-created_at', '-id')
+		live = live.filter(issue__isnull=False).select_related('created_by').order_by('-created_at', '-id')
+		wide = {}  # project-wide waivers in force, newest wins
+		for ww in IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__isnull=True, project__slug=q.get('project') or '') \
+				.select_related('created_by').order_by('created_at', 'id'):
+			wide[ww.key] = ww
 		# NOTE: loads every waiver an issue ever had, to read the newest one. Waivers are hand-made, so the history
 		# per issue stays small; if it grows, filter this to the newest per issue with a Subquery on OuterRef('issue_id').
-		latest = IssueWaiver.objects.select_related('created_by').order_by('-created_at', '-id')
+		latest = IssueWaiver.objects.filter(issue__isnull=False).select_related('created_by').order_by('-created_at', '-id')
 		issues = issues.annotate(note_count=Count('notes', distinct=True)).prefetch_related(
 			Prefetch('waivers', queryset=live, to_attr='live_waivers'),
 			Prefetch('waivers', queryset=latest, to_attr='all_waivers'))
@@ -419,9 +422,10 @@ class IssueList(APIView):
 			hit = exploit.summary(found, marks)
 			if kev_only and not hit['kev']:
 				continue
-			w = i.live_waivers[0] if i.live_waivers else None
+			w = (i.live_waivers[0] if i.live_waivers else None) or wide.get(i.key)
 			# the newest waiver ran out (not revoked, not replaced): the issue counts again, say so
 			last = i.all_waivers[0] if i.all_waivers else None
+			last = last if last and not last.approval_pending else None
 			expired = last if not w and last and not last.revoked_at and last.expires_at and last.expires_at <= now else None
 			check = CHECKS.get(i.key) if i.source == 'check' else None
 			out.append({'id': i.id, 'asset': i.asset.value, 'key': i.key, 'title': check.title if check else i.key,
@@ -463,11 +467,24 @@ class WaiveIssue(APIView):
 				return Response({'status': False, 'message': 'expires_at must be an ISO-8601 datetime'})
 			if timezone.is_naive(expires_at):
 				expires_at = timezone.make_aware(expires_at)
+		from django.contrib.auth.models import User
+		extra = {}
+		if data.get('scope') is not None:
+			extra['scope'] = data['scope']
+		if data.get('shared') is not None:
+			extra['shared'] = data['shared'] is True
+		if data.get('remind_days') is not None:
+			extra['remind_days'] = data['remind_days']
+		if data.get('approver') not in (None, ''):
+			who = data['approver'] if isinstance(data['approver'], str) else ''
+			extra['approver'] = User.objects.filter(username=who).first()
+			if extra['approver'] is None:
+				return Response({'status': False, 'message': 'the approver must be a member of this project'})
 		try:
-			w = waivers.create_waiver(issue, data['kind'], data['reason'], request.user, expires_at)
+			w = waivers.create_waiver(issue, data['kind'], data['reason'], request.user, expires_at, **extra)
 		except waivers.WaiverError as e:
 			return Response({'status': False, 'message': str(e)})
-		return Response({'status': True, 'message': 'waived', 'waiver': _waiver_json(w)})
+		return Response({'status': True, 'message': 'waiting for approval' if w.approval_pending else 'waived', 'waiver': _waiver_json(w)})
 
 
 class RevokeIssueWaiver(APIView):

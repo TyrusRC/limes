@@ -81,17 +81,24 @@ def build(issue, now=None):
                     .select_related('asset').order_by('first_seen', 'id')[:AFFECTED_LIMIT])
     if issue.status == 'open' and all(s.id != issue.id for s in siblings):
         siblings.append(issue)
-    live = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue_id__in=[s.id for s in siblings] + [issue.id])
-               .values_list('issue_id', flat=True))
+    live = set(issue.__class__.objects.filter(id__in=[s.id for s in siblings] + [issue.id])
+               .filter(IssueWaiver.waived_exists(now)).values_list('id', flat=True))
     out['affected'] = [{'id': s.id, 'asset': s.asset.value, 'kind': s.asset.kind, 'detected': detected_at(s),
                         'waived': s.id in live, 'current': s.id == issue.id} for s in siblings]
 
-    waivers = list(issue.waivers.select_related('created_by', 'revoked_by').order_by('-created_at', '-id')[:WAIVER_LIMIT])
-    active = next((w for w in waivers if w.revoked_at is None and (w.expires_at is None or w.expires_at > now)), None)
-    out['waivers'] = [{'w': w, 'state': 'active' if w is active else 'revoked' if w.revoked_at else
+    # the issue's own waivers and the project-wide ones for its key, newest first
+    waivers = list(IssueWaiver.objects.filter(Q(issue=issue) | Q(issue__isnull=True, project_id=issue.project_id, key=issue.key))
+                   .select_related('created_by', 'revoked_by', 'approver').order_by('-created_at', '-id')[:WAIVER_LIMIT])
+
+    def in_force(w):
+        return w.revoked_at is None and not w.approval_pending and (w.expires_at is None or w.expires_at > now)
+
+    active = next((w for w in waivers if in_force(w)), None)
+    out['waivers'] = [{'w': w, 'state': 'active' if in_force(w) else 'revoked' if w.revoked_at else 'pending' if w.approval_pending else
                        'expired' if w.expires_at and w.expires_at <= now else 'replaced'} for w in waivers]
     out['active_waiver'] = active
-    newest = waivers[0] if waivers else None
+    out['pending_waiver'] = next((w for w in waivers if w.approval_pending and w.revoked_at is None), None)
+    newest = next((w for w in waivers if not w.approval_pending), None)
     out['expired_waiver'] = newest if not active and newest and not newest.revoked_at and newest.expires_at and newest.expires_at <= now else None
     out['status'] = ('Fixed' if issue.status == 'fixed' else 'Waived' if active else
                      'Open, waiver expired' if out['expired_waiver'] else 'Open')

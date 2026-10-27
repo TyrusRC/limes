@@ -1,4 +1,6 @@
 """Diff the current issues against TrackedIssue rows and record an event per change."""
+import logging
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -8,6 +10,7 @@ from limes.alerts import events
 from limes.checks.catalogue import CHECKS, PROVISIONAL
 from startScan.models import Asset, IssueSyncState, IssueWaiver, TrackedIssue
 
+logger = logging.getLogger(__name__)
 WORDS = {1: 'low', 2: 'medium', 3: 'high', 4: 'critical'}
 IP_BUCKET = '#ips'
 EXPOSED_HOSTS = 20  # owned hostnames re-checked per newly exposed IP
@@ -71,6 +74,8 @@ def sync_issues(project, now=None):
         synced = set(state.roots)
         waived = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__project=project)
                      .values_list('issue_id', flat=True))
+        wide = set(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__isnull=True, project=project)
+                   .values_list('key', flat=True))
         out = []
         for asset_id, keys in issues.items():
             asset = assets.get(asset_id)
@@ -85,7 +90,7 @@ def sync_issues(project, now=None):
                     # NOTE: so an owned cidr/asn added later is silent on its first listing too (its own bucket is not
                     # in state.roots yet), and the IPs it covers raise no IP-level alert either.
                     baseline = key in PROVISIONAL and f'check:{key}' not in synced
-                    if not first and not baseline and buckets[asset_id] in synced:  # a root's first sync is silent too
+                    if not first and not baseline and key not in wide and buckets[asset_id] in synced:  # a root's first sync is silent too
                         out.append(_event(project, 'issue_new', row, asset))
                     continue
                 kind = None
@@ -96,7 +101,7 @@ def sync_issues(project, now=None):
                     kind = 'issue_new'
                 row.severity, row.last_seen = sev, now
                 row.save()
-                if kind and row.id not in waived:  # state still moves; only the announcement is silenced
+                if kind and row.id not in waived and row.key not in wide:  # state still moves; only the announcement is silenced
                     out.append(_event(project, kind, row, asset))
         for (asset_id, key), row in rows.items():
             if row.status == 'open' and (asset_id, key) in covered and key not in issues.get(asset_id, {}):

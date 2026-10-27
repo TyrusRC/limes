@@ -54,11 +54,28 @@ def issue_key(key):
     return key[:190] + '#' + hashlib.sha256(key.encode()).hexdigest()[:64]
 
 
+class WaivedKeys(set):
+    """{(asset_id, normalized key)} of waived issues, plus `wide`: keys under a project-wide waiver, which also cover
+    assets and issues that do not exist yet (so a later-created asset is waived without copying rows)."""
+    wide = frozenset()
+
+    def __contains__(self, pair):
+        return set.__contains__(self, pair) or pair[1] in self.wide
+
+    def __or__(self, other):
+        out = WaivedKeys(set.__or__(self, other))
+        out.wide = self.wide
+        return out
+
+
 def waived_keys(project, now=None):
-    """{(asset_id, normalized key)} of issues with an active waiver; expires_at is honoured at read time."""
+    """Waived (asset_id, normalized key) pairs; expires_at is honoured at read time."""
     now = now or timezone.now()
     active = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
-    return set(TrackedIssue.objects.filter(project=project).filter(Exists(active)).values_list('asset_id', 'key'))
+    out = WaivedKeys(TrackedIssue.objects.filter(project=project).filter(Exists(active)).values_list('asset_id', 'key'))
+    out.wide = frozenset(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__isnull=True, project=project)
+                         .values_list('key', flat=True))
+    return out
 
 
 def grade(score):
@@ -304,7 +321,7 @@ def tag_scores(project, now=None, name=None):
     assets = assessed_assets(project, base, now)
     penalties = {a: c for a, c in _penalties(project, base=base, now=now).items() if a in assets}
     waived = waived_keys(project, now)
-    live_issue = ~Exists(IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk')))
+    live_issue = ~IssueWaiver.waived_exists(now)
     open_by_asset = dict(TrackedIssue.objects.filter(project=project, status='open', asset_id__in=set().union(*members.values()))
                          .filter(live_issue).values_list('asset_id').annotate(n=Count('id')))
     out = []
@@ -321,7 +338,7 @@ def tag_scores(project, now=None, name=None):
 def category_issue_counts(project, now=None):
     """{category: {open, waived}} from the project's open TrackedIssue rows (what the Issues page lists)."""
     now = now or timezone.now()
-    active = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
+    active = IssueWaiver.covering(now)
     agg = {}
     for c in CATEGORIES:
         q = category_q(c)

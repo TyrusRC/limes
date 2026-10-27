@@ -17,8 +17,8 @@ TEXT_CAP = 1000
 FORECAST_MAX = 500
 
 
-def _issue_item(i):
-    w = i.live_waivers[0] if i.live_waivers else None
+def _issue_item(i, wide=None):
+    w = (i.live_waivers[0] if i.live_waivers else None) or (wide or {}).get(i.key)
     return {'id': i.id, 'asset_id': i.asset_id, 'asset': untrusted(i.asset.value), 'key': untrusted(i.key),
             'title': issue_title(i.source, i.key), 'source': i.source, 'severity': i.severity, 'status': i.status,
             'first_seen': iso(i.first_seen), 'last_seen': iso(i.last_seen), 'fixed_at': iso(i.fixed_at),
@@ -31,6 +31,11 @@ def _with_extras(qs, now):
     live = IssueWaiver.objects.filter(IssueWaiver.active_q(now)).select_related('created_by').order_by('-created_at', '-id')
     return (qs.select_related('asset').annotate(note_count=Count('notes', distinct=True))
             .prefetch_related(Prefetch('waivers', queryset=live, to_attr='live_waivers')))
+
+
+def _wide(project, now):
+    return {w.key: w for w in IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue__isnull=True, project=project)
+            .select_related('created_by').order_by('created_at', 'id')}
 
 
 @tool(title='List issues')
@@ -52,7 +57,8 @@ def list_issues(caller, project: Slug, status: Literal['open', 'fixed'] = 'open'
         qs = qs.filter(asset__tags__name=tags.lookup(tag)) if tags.lookup(tag) else qs.none()
     if waived is not None:
         qs = qs.filter(waived_exists(now)) if waived else qs.exclude(waived_exists(now))
-    return page(_with_extras(qs, now).order_by('-severity', 'first_seen', 'id'), cursor, limit, _issue_item)
+    wide = _wide(p, now)
+    return page(_with_extras(qs, now).order_by('-severity', 'first_seen', 'id'), cursor, limit, lambda i: _issue_item(i, wide))
 
 
 @tool(title='Issue detail')
@@ -67,7 +73,7 @@ def get_issue(caller, project: Slug, issue_id: RowId):
                .order_by('-created_at', '-id')[:DETAIL_CAP])
     notes = IssueNote.objects.filter(issue=issue).select_related('author').order_by('created_at', 'id')[:DETAIL_CAP]
     active = {w.id for w in issue.live_waivers}
-    return {**_issue_item(issue),
+    return {**_issue_item(issue, _wide(p, now)),
             'waivers': [{'kind': w.kind, 'reason': untrusted(w.reason, TEXT_CAP),
                          'created_by': w.created_by.username if w.created_by else None,
                          'created_at': iso(w.created_at), 'expires_at': iso(w.expires_at),

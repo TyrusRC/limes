@@ -201,8 +201,12 @@ class TrackedIssue(models.Model):
 
 
 class IssueWaiver(models.Model):
-    """A decision to stop counting an issue: accepted_risk | false_positive. Active = not revoked and not past expires_at."""
-    issue = models.ForeignKey(TrackedIssue, on_delete=models.CASCADE, related_name='waivers')
+    """A decision to stop counting an issue: accepted_risk | false_positive. Active = not revoked, not past expires_at
+    and not waiting for its approver. issue is NULL for a project-wide waiver, which covers every TrackedIssue of
+    the project with this key, assets created later included (see covering)."""
+    issue = models.ForeignKey(TrackedIssue, null=True, blank=True, on_delete=models.CASCADE, related_name='waivers')
+    project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE, related_name='+')  # project-wide only
+    key = models.CharField(max_length=255, blank=True, default='')  # project-wide only: the TrackedIssue.key it covers
     kind = models.CharField(max_length=16)
     reason = models.TextField()
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
@@ -211,11 +215,33 @@ class IssueWaiver(models.Model):
     revoked_at = models.DateTimeField(null=True, blank=True)
     revoked_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     expiry_notified = models.BooleanField(default=False)
+    approver = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    approval_pending = models.BooleanField(default=False)  # waits for the approver: does not count until approved
+    approved_at = models.DateTimeField(null=True, blank=True)
+    shared = models.BooleanField(default=False)  # False: the reason is internal-only
+    remind_days = models.IntegerField(default=7)  # reminder this many days before expires_at
+    reminded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['project', 'key'], name='waiver_proj_key_idx')]
 
     @staticmethod
     def active_q(now):
-        """The one definition of active: not revoked and (open-ended or expires_at > now)."""
-        return models.Q(revoked_at__isnull=True) & (models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        """The one definition of active: approved, not revoked and (open-ended or expires_at > now)."""
+        return (models.Q(revoked_at__isnull=True, approval_pending=False)
+                & (models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)))
+
+    @staticmethod
+    def covering(now):
+        """Active waivers that cover the outer TrackedIssue: its own, or a project-wide one for its key."""
+        return IssueWaiver.objects.filter(IssueWaiver.active_q(now)).filter(
+            models.Q(issue=models.OuterRef('pk'))
+            | models.Q(issue__isnull=True, project=models.OuterRef('project'), key=models.OuterRef('key')))
+
+    @staticmethod
+    def waived_exists(now):
+        """Exists() for TrackedIssue querysets: the issue is waived."""
+        return models.Exists(IssueWaiver.covering(now))
 
 
 class IssueNote(models.Model):

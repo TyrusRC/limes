@@ -51,8 +51,7 @@ def _respond(filename, header, rows, total_hint=None):
 
 def issues_csv(project, members=None):
     """members: asset ids to keep (a tag filter), or None."""
-    active = IssueWaiver.objects.filter(IssueWaiver.active_q(timezone.now()), issue=OuterRef('pk'))
-    qs = TrackedIssue.objects.filter(project=project).select_related('asset').annotate(waived=Exists(active))
+    qs = TrackedIssue.objects.filter(project=project).select_related('asset').annotate(waived=IssueWaiver.waived_exists(timezone.now()))
     if members is not None:
         qs = qs.filter(asset_id__in=members)
     qs = list(qs.order_by('-status', '-severity', 'asset__value', 'key')[:EXPORT_CAP + 1])

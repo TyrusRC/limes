@@ -46,8 +46,7 @@ def remediation(project, now):
     out = issues.aggregate(**counts)
     out['tiles'] = [('Fixed · 7 days', out['fixed_7']), ('Fixed · 30 days', out['fixed_30']),
                     ('Opened · 7 days', out['opened_7']), ('Opened · 30 days', out['opened_30'])]
-    waived = IssueWaiver.objects.filter(IssueWaiver.active_q(now), issue=OuterRef('pk'))
-    oldest = (issues.filter(status='open', severity__gte=3).exclude(Exists(waived)).select_related('asset')
+    oldest = (issues.filter(status='open', severity__gte=3).exclude(IssueWaiver.waived_exists(now)).select_related('asset')
               .order_by('detected', 'asset__value', 'key')[:OLDEST_LIMIT])
     out['oldest'] = [{'id': i.id, 'asset': i.asset.value, 'title': CHECKS[i.key].title if i.key in CHECKS else i.key,
                       'category': scoring.category_of(i.key), 'severity': scoring.SEVERITY_NAMES.get(i.severity, 'unrated'),
