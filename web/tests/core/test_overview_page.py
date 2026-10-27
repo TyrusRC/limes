@@ -132,6 +132,13 @@ class OverviewPageTest(Base):
         self.assertEqual(section(html, 'dash_categories').count('Not assessed'), 6)
         self.assertNotIn('ov-gauge-value', html)
 
+    def test_top_risks_link_to_the_risk_detail(self):
+        a = self.asset('a.x.com', last_resolved_at=self.now)
+        self.check(a, 'web.hsts_missing', 'fail')
+        sync_issues(self.p, now=self.now)
+        issue = TrackedIssue.objects.get(asset=a, key='web.hsts_missing')
+        self.assertIn(f'href="/scan/p/issues/{issue.id}/"', section(self.page('p'), 'dash_top_risks'))
+
     def test_risky_ports_link_to_network_issues(self):
         self.ip('203.0.113.9', [3389])
         html = section(self.page('p'), 'dash_exposure')

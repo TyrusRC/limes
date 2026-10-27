@@ -343,7 +343,7 @@ Overview
         <tbody>
         {% for r in top_risks %}
           <tr>
-            <td class="ov-asset"><a href="{{ issues_url }}?category={{ r.category }}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}EPSS {{ r.epss_label }}{% endif %}</span>{% endif %}</td>
+            <td class="ov-asset"><a href="{% if r.id %}{% url 'issue_detail' current_project.slug r.id %}{% else %}{{ issues_url }}?category={{ r.category }}{% endif %}">{{ r.title }}</a><span class="ov-list-sub">{{ r.asset }}</span>{% if r.kev or r.epss is not None %}<span class="ov-list-sub">{% if r.kev %}<span class="ov-tag ov-kev">KEV</span> {% endif %}{% if r.epss is not None %}EPSS {{ r.epss_label }}{% endif %}</span>{% endif %}</td>
             <td class="ov-hide-sm"><span class="ov-tag">{{ r.category_label }}</span></td>
             <td><span class="sev-{{ r.severity }}">{{ r.severity|capfirst }}</span></td>
             <td class="ov-num">{% if r.provisional %}<span class="ov-tag">Provisional</span>{% else %}−{{ r.points }}{% endif %}</td>

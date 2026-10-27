@@ -1,0 +1,167 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load permission_tags %}
+{% block title %}{{ d.title }}{% endblock title %}
+{% block page_title %}Risk detail{% endblock page_title %}
+{% block breadcrumb_title %}
+<li class="breadcrumb-item"><a href="{% url 'issues' current_project.slug %}">Issues</a></li>
+<li class="breadcrumb-item active" aria-current="page">Risk detail</li>
+{% endblock breadcrumb_title %}
+
+{% block main_content %}
+{% with can_write=user|can:'modify_targets' issue=d.issue %}
+<div class="lx-head">
+  <div>
+    <a class="lx-back" href="{% url 'issues' current_project.slug %}"><i class="fe-arrow-left" aria-hidden="true"></i>Back to issues</a>
+    <h2>{{ d.title }}</h2>
+    <div class="lx-meta">
+      <span class="sev-{{ d.severity_name }}">{{ d.severity_label }}</span>
+      {% if d.provisional %}<span class="badge lx-info">Provisional, not scored</span>{% endif %}
+      <span>{{ d.category_label }}</span>
+      <span class="badge {% if d.active_waiver %}l-badge-waived{% elif d.status == 'Fixed' %}badge-soft-success{% else %}l-badge-open{% endif %}">{{ d.status }}</span>
+      <span>First detected <time datetime="{{ d.detected|date:'c' }}">{{ d.detected|date:'Y-m-d' }}</time></span>
+      <span class="mono">{{ issue.asset.value }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="lx-detail" id="rd" data-project="{{ current_project.slug }}" data-issue="{{ issue.id }}">
+  <div class="lx-col">
+    <section class="card lx-block" aria-labelledby="rd_detected">
+      <h3 id="rd_detected">What was detected</h3>
+      <p>{{ d.detected_text }}</p>
+      {% if d.finding_url %}<dl class="lx-kv"><dt>URL</dt><dd class="mono">{{ d.finding_url }}</dd></dl>{% endif %}
+      {% if d.expected_actual %}
+      <div class="lx-compare">
+        {% for label, value in d.expected_actual %}<div class="lx-{{ label|lower }}"><b>{{ label }}</b><span class="mono">{{ value }}</span></div>{% endfor %}
+      </div>
+      {% endif %}
+      {% if d.evidence %}
+      <dl class="lx-kv">{% for k, v in d.evidence %}<dt>{{ k }}</dt><dd class="mono">{{ v }}</dd>{% endfor %}</dl>
+      {% endif %}
+    </section>
+
+    <section class="card lx-block" aria-labelledby="rd_why">
+      <h3 id="rd_why">Why it matters</h3>
+      <p>{{ d.why }}</p>
+    </section>
+
+    <section class="card lx-block" aria-labelledby="rd_action">
+      <h3 id="rd_action">Recommended action</h3>
+      <p>{{ d.action }}</p>
+    </section>
+
+    <section class="card lx-block" aria-labelledby="rd_assets">
+      <h3 id="rd_assets">Affected assets <span class="l-muted">{{ d.affected|length }}</span></h3>
+      <div class="lx-table-wrap">
+        <table class="table table-sm">
+          <thead><tr><th scope="col">Asset</th><th scope="col">Kind</th><th scope="col">First detected</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            {% for a in d.affected %}
+            <tr{% if a.current %} aria-current="true"{% endif %}>
+              <td class="mono">{% if a.current %}{{ a.asset }}{% else %}<a href="{% url 'issue_detail' current_project.slug a.id %}">{{ a.asset }}</a>{% endif %}</td>
+              <td>{{ a.kind }}</td>
+              <td class="text-nowrap">{{ a.detected|date:'Y-m-d' }}</td>
+              <td>{% if a.waived %}<span class="badge l-badge-waived">Waived</span>{% else %}<span class="badge l-badge-open">Open</span>{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="l-muted">This issue is no longer open on any asset.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <aside class="lx-col" aria-label="Status and actions">
+    <section class="card lx-block" aria-labelledby="rd_impact">
+      <h3 id="rd_impact">Score impact</h3>
+      {% if d.provisional %}
+        <p>This is a provisional check: it is listed and tracked but not scored, so fixing it does not change the score.</p>
+      {% elif d.impact and d.impact.score is not None %}
+        <p class="lx-gain">{% if d.impact.delta > 0 %}+{% endif %}{{ d.impact.delta }}</p>
+        <p>Fixing this on every affected asset moves the score to {{ d.impact.score }} (grade {{ d.impact.grade }}).</p>
+      {% else %}
+        <p>No score change to forecast: the issue is waived, fixed, or the project has no score yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card lx-block" aria-labelledby="rd_waiver">
+      <h3 id="rd_waiver">Waiver</h3>
+      {% if d.active_waiver %}
+        {% with w=d.active_waiver %}
+        <div class="l-current-waiver{% if w.kind == 'false_positive' %} is-fp{% endif %}">
+          <div class="l-current-waiver-top">
+            <span class="badge {% if w.kind == 'false_positive' %}l-badge-fp{% else %}l-badge-waived{% endif %}">{% if w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %}{% if w.expires_at %} until {{ w.expires_at|date:'Y-m-d' }}{% endif %}</span>
+            {% if can_write %}<button type="button" class="btn btn-sm btn-danger" id="rd_revoke">Revoke waiver</button>{% endif %}
+          </div>
+          <p class="l-waiver-reason">{{ w.reason }}</p>
+          <p class="l-hint">Set by {{ w.created_by.username|default:"unknown" }} on {{ w.created_at|date:'Y-m-d' }}. Excluded from the headline score.</p>
+        </div>
+        {% endwith %}
+      {% elif d.expired_waiver %}
+        <p class="l-hint">The waiver ran out on {{ d.expired_waiver.expires_at|date:'Y-m-d' }}, so this issue counts toward the score again.</p>
+      {% elif d.issue.status == 'open' %}
+        <p class="l-hint">Not waived: this issue counts toward the headline score.</p>
+      {% endif %}
+      {% if can_write and issue.status == 'open' %}
+      <form class="l-issue-form" id="rd_waive_form" novalidate>
+        <div class="l-form-row">
+          <div class="l-field">
+            <label for="rd_kind">Kind</label>
+            <select id="rd_kind" class="form-select"><option value="accepted_risk">Accepted risk</option><option value="false_positive">False positive</option></select>
+          </div>
+          <div class="l-field">
+            <label for="rd_expiry">Expires on</label>
+            <input type="date" id="rd_expiry" class="form-control" aria-describedby="rd_hint">
+          </div>
+        </div>
+        <div class="l-field">
+          <label for="rd_reason">Reason</label>
+          <textarea id="rd_reason" class="form-control" rows="3" maxlength="5000" required placeholder="Why is this acceptable? Required."></textarea>
+          <span class="l-hint" id="rd_hint">Accepted risk needs an expiry within 12 months. A false positive stays open-ended unless you pick a date.</span>
+        </div>
+        <div class="l-form-actions"><button class="btn btn-primary" type="submit">{% if d.active_waiver %}Change waiver{% else %}Save waiver{% endif %}</button></div>
+      </form>
+      {% elif not can_write %}
+      <p class="l-hint mb-0">You can view issues but not change them.</p>
+      {% endif %}
+      {% if d.waivers %}
+      <h4 class="h6 mb-0">History</h4>
+      <ul class="lx-history">
+        {% for h in d.waivers %}
+        <li>{% if h.w.kind == 'false_positive' %}False positive{% else %}Accepted risk{% endif %} by {{ h.w.created_by.username|default:"unknown" }}, {{ h.w.created_at|date:'Y-m-d' }}
+          <span class="l-muted">({% if h.state == 'active' %}Active{% elif h.state == 'revoked' %}Revoked {{ h.w.revoked_at|date:'Y-m-d' }}{% elif h.state == 'expired' %}Expired {{ h.w.expires_at|date:'Y-m-d' }}{% else %}Replaced{% endif %})</span>
+          <div class="l-waiver-reason l-muted">{{ h.w.reason }}</div></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+
+    <section class="card lx-block" aria-labelledby="rd_notes">
+      <h3 id="rd_notes">Notes <span class="l-muted">{{ d.notes|length }}</span></h3>
+      <ul class="l-notes">
+        {% for n in d.notes %}
+        <li class="l-note">
+          <span class="l-note-avatar" aria-hidden="true">{{ n.author.username|default:"?"|slice:":2"|upper }}</span>
+          <div class="l-note-bubble"><div class="l-note-meta"><strong>{{ n.author.username|default:"unknown" }}</strong><span>{{ n.created_at|date:'Y-m-d H:i' }}</span></div>
+          <div class="l-note-text">{{ n.text }}</div></div>
+        </li>
+        {% empty %}<li class="l-hint">No notes yet.</li>{% endfor %}
+      </ul>
+      {% if can_write %}
+      <form class="l-field" id="rd_note_form" novalidate>
+        <label for="rd_note_text">Add a note</label>
+        <textarea id="rd_note_text" class="form-control" rows="3" maxlength="5000" placeholder="Context for your team. Visible to everyone on this project."></textarea>
+        <div class="l-form-actions"><button class="btn btn-light" type="submit"><i class="fe-message-square" aria-hidden="true"></i>Add note</button></div>
+      </form>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endwith %}
+{% endblock main_content %}
+
+{% block page_level_script %}
+<script src="{% static 'limes/risk.js' %}"></script>
+{% endblock page_level_script %}
