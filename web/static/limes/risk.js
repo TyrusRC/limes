@@ -36,4 +36,31 @@
     var box = document.getElementById('rd_note_text');
     LimesUx.post('/api/issue/notes/', {project: project, issue_id: issueId, text: box.value}).then(function (d) { done(d, 'Note added.'); }).catch(fail);
   });
+  // Scanner evidence for a finding, from the same project-scoped endpoint the API serves; scanner output only ever becomes textContent.
+  var evBox = document.getElementById('rd_evidence');
+  if (evBox) {
+    var el = LimesUx.el;
+    var item = function (e) {
+      var box = el('div', 'mb-3');
+      box.append(el('div', 'fw-semibold text-break', e.name));
+      var facts = [e.http_url, e.matcher_name, e.cvss_score !== null && e.cvss_score !== undefined ? 'CVSS ' + e.cvss_score : '',
+        (e.cves || []).join(', ')].filter(Boolean);
+      if (facts.length) box.append(el('div', 'small l-muted text-break', facts.join(' \u00b7 ')));
+      [['Description', e.description], ['Impact', e.impact], ['Remediation', e.remediation], ['Request', e.request],
+        ['Response', e.response], ['Reproduce', e.curl_command], ['Extracted', (e.extracted_results || []).join('\n')],
+        ['References', (e.references || []).join('\n')]].forEach(function (f) {
+        if (!f[1]) return;
+        var d = document.createElement('details');
+        d.append(el('summary', null, f[0]), el('pre', 'small text-break', f[1]));
+        box.append(d);
+      });
+      return box;
+    };
+    fetch('/api/issue/evidence/?project=' + encodeURIComponent(project) + '&issue_id=' + issueId, {credentials: 'same-origin'})
+      .then(function (r) { if (!r.ok) throw new Error('evidence'); return r.json(); })
+      .then(function (rows) {
+        evBox.replaceChildren.apply(evBox, rows.length ? rows.map(item) : [el('p', 'l-hint', 'No open scanner evidence.')]);
+      })
+      .catch(function () { evBox.replaceChildren(el('p', 'l-hint', 'Evidence unavailable.')); });
+  }
 })();

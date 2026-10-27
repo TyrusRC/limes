@@ -131,3 +131,14 @@ class IssueDetailPageTest(TestCase):
         with CaptureQueriesContext(connection) as big:
             self.get(self.i1)
         self.assertEqual(len(small), len(big))
+
+    def test_finding_shows_evidence_box_and_check_does_not(self):
+        f = TrackedIssue.objects.create(project=self.p, asset=self.a, key='panel-1', source='finding', severity=3)
+        self.assertIn('id="rd_evidence"', self.get(f).content.decode())
+        self.assertNotIn('id="rd_evidence"', self.get(self.i1).content.decode())
+
+    def test_evidence_endpoint_the_page_reads_is_project_scoped(self):
+        f = TrackedIssue.objects.create(project=self.p, asset=self.a, key='panel-1', source='finding', severity=3)
+        url = '/api/issue/evidence/'
+        self.assertEqual(self.client.get(url, {'project': 'p1', 'issue_id': f.id}).status_code, 200)
+        self.assertEqual(self.client.get(url, {'project': 'p2', 'issue_id': f.id}).status_code, 404)

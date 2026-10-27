@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('dashboard', '0006_drop_llm_and_api_key_tables'),
+        ('dashboard', '0008_scan_notification_links'),
     ]
 
     operations = [

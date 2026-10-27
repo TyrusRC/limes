@@ -142,6 +142,13 @@
       {% endif %}
     </section>
 
+    {% if d.issue.source == 'finding' %}
+    <section class="card lx-block" aria-labelledby="rd_evidence_h">
+      <h3 id="rd_evidence_h">Scanner evidence</h3>
+      <div id="rd_evidence" aria-live="polite"><p class="l-hint">Loading evidence...</p></div>
+    </section>
+    {% endif %}
+
     <section class="card lx-block" aria-labelledby="rd_notes">
       <h3 id="rd_notes">Notes <span class="l-muted">{{ d.notes|length }}</span></h3>
       <ul class="l-notes">
