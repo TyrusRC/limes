@@ -45,6 +45,12 @@ class HitsTest(Base):
         self.assertEqual(out, [{'repo': 'a/b', 'path': 'cfg.js', 'shape': 'sb_secret_…' + KEY[-4:]}])
         self.assertNotIn(KEY, repr(out))
 
+    def test_domain_is_matched_at_a_hostname_boundary(self):
+        for line, want in [(f'fox.com {KEY}', 0), (f'x.com {KEY}', 1), (f'https://api.x.com/v1 {KEY}', 1),
+                           (f'x.com.evil.org {KEY}', 0), (f'my-x.com {KEY}', 0), (f'visit X.COM. {KEY}', 1),
+                           (f'x.com.au {KEY}', 0)]:
+            self.assertEqual(len(code_search.hits_in([item('o/r', 'a', line)], 'x.com')), want, line)
+
     def test_hostile_items_are_dropped_or_clipped(self):
         bad = [item('../etc/passwd', 'a.js', LEAK), item('a b/c', 'a.js', LEAK), item('a/b', '', LEAK), 'str', None,
                {'path': 'p', 'repository': 'nope', 'text_matches': [{'fragment': LEAK}]},
@@ -103,8 +109,30 @@ class SearchTest(Base):
             self.assertTrue(url.startswith('https://api.github.com/search/code?q=%22x.com%22'))
             self.assertNotIn(TOKEN, url)
             self.assertEqual(headers['Authorization'], f'Bearer {TOKEN}')
-        self.assertEqual(self.row().status, 'pass')
+        self.assertEqual(self.row().status, 'error')  # 90 of possibly more results read: inconclusive, never a pass
+        self.assertEqual(self.row().evidence['reason'], 'more results than the page cap')
         self.assertNotIn(TOKEN, repr(self.row().evidence))
+
+    @override_settings(CODE_SEARCH_TOKEN=TOKEN)
+    def test_short_complete_result_passes_and_incomplete_results_do_not(self):
+        self.gh.pages = [page(item('o/r', 'f.js', 'x.com'))]
+        self.run_search()
+        self.assertEqual(self.row().status, 'pass')
+        RiskCheck.objects.all().delete()
+        self.gh.pages = [(200, json.dumps({'incomplete_results': True, 'items': []}).encode())]
+        self.run_search()
+        self.assertEqual(self.row().status, 'error')
+
+    @override_settings(CODE_SEARCH_TOKEN=TOKEN)
+    def test_common_credentials_next_to_the_domain_are_flagged_masked(self):
+        line = 'endpoint = "https://api.x.com"; aws = "AKIAIOSFODNN7ABCDEFG"; gh = "ghp_' + 'a1B2' * 9 + '"'
+        self.gh.pages = [page(item('o/r', 'c.py', line))]
+        self.run_search()
+        row = self.row()
+        self.assertEqual(row.status, 'fail')
+        self.assertEqual(row.evidence['hits'][0]['shape'], 'aws_access_key…DEFG')
+        self.assertNotIn('AKIAIOSFODNN7ABCDEFG', repr(row.evidence))
+        self.assertNotIn('a1B2a1B2', repr(row.evidence))
 
     @override_settings(CODE_SEARCH_TOKEN=TOKEN)
     def test_refused_or_broken_search_is_an_error_never_a_pass(self):
@@ -139,6 +167,20 @@ class SearchTest(Base):
         code_search.discover(self.p, self.root, self.now, make_get=lambda: get, sleep=lambda s: None)
         self.assertEqual(len(session.requests), 1)
         self.assertIn(PUBLIC, session.requests[0][0])
+
+    @override_settings(CODE_SEARCH_TOKEN=TOKEN)
+    def test_error_rows_wait_six_hours_and_a_project_has_a_quarter_of_the_budget(self):
+        self.gh.pages = [(403, b'{}')]
+        self.run_search()
+        RiskCheck.objects.update(last_checked=self.now - code_search.ERROR_RETRY / 2)
+        self.run_search()
+        self.assertEqual(len(self.gh.calls), 1)
+        RiskCheck.objects.update(last_checked=self.now - code_search.ERROR_RETRY)
+        cache.clear()
+        with mock.patch.object(code_search, 'DAILY_BUDGET', 4):  # a project's share is 1
+            self.gh.pages = [page(), page()]
+            self.run_search()
+        self.assertEqual(len(self.gh.calls), 2)
 
     @override_settings(CODE_SEARCH_TOKEN=TOKEN)
     def test_fresh_row_and_non_roots_are_left_alone(self):

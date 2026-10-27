@@ -7,8 +7,8 @@ budget that fails closed. The matched text fragments GitHub returns are UNTRUSTE
 through the shape detectors of limes.checks.leak.scan_text, and only a hit keeps anything, and only the repository name,
 the path (both validated or clipped) and a masked shape. Fragments and files are never stored or logged; the token
 travels in one header and appears in no log line, URL, exception message or evidence. Provisional (0 points).
-NOTE: the detectors are the Supabase key shapes of checks/leak.py. Upgrade path: more provider shapes there, with a
-test per shape."""
+NOTE: the detectors are the Supabase keys and a bounded set of well-known shapes (AWS, GitHub, Slack, Stripe, Google, a
+private-key header) in checks/leak.py. Upgrade path: more provider shapes there, with a test per shape."""
 import json
 import logging
 import re
@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from limes import safe_fetch
 from limes.checks.catalogue import Result
-from limes.checks.leak import scan_text
+from limes.checks.leak import credential_shapes
 from limes.checks.run import _write
 from limes.intel import ratelimit
 from startScan.models import RiskCheck
@@ -45,6 +45,7 @@ INTERVAL = 7.0
 MAX_WAIT = 30
 DAILY_BUDGET = 60
 REFRESH = timedelta(hours=23)
+ERROR_RETRY = timedelta(hours=6)
 REPO_RE = re.compile(r'[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}')
 
 
@@ -56,9 +57,14 @@ def clip(value, n=200):
     return ''.join(c for c in value if c.isprintable())[:n] if isinstance(value, str) else None
 
 
+def domain_re(root):
+    """The root at a hostname boundary: fox.com is not x.com, api.x.com is, and x.com.au is not."""
+    return re.compile(r'(?<![a-z0-9-])' + re.escape(root.lower()) + r'(?![a-z0-9-]|\.[a-z0-9])')
+
+
 def hits_in(items, root):
     """[{'repo', 'path', 'shape'}] for search items whose matched text has the root and a credential on one line."""
-    needle, out = root.lower(), []
+    needle, out = domain_re(root), []
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
@@ -70,8 +76,8 @@ def hits_in(items, root):
             fragment = match.get('fragment') if isinstance(match, dict) else None
             shape = None
             for line in (fragment if isinstance(fragment, str) else '').splitlines():
-                if needle in line.lower() and len(line) <= MAX_LINE:
-                    found = scan_text(line)['secrets']
+                if len(line) <= MAX_LINE and needle.search(line.lower()):
+                    found = credential_shapes(line)
                     if found:
                         shape = found[0]['shape']
                         break
@@ -81,8 +87,8 @@ def hits_in(items, root):
     return out
 
 
-def _page(get, root, page, token, ua, sleep, clock=time.time):
-    if not ratelimit.take_daily(PROVIDER, DAILY_BUDGET):
+def _page(get, root, page, token, ua, sleep, project_id=0, clock=time.time):
+    if not ratelimit.take_shared(PROVIDER, DAILY_BUDGET, project_id):
         raise Stop('budget')
     wait = ratelimit.reserve(PROVIDER, INTERVAL, clock())
     if wait is None or wait > MAX_WAIT:
@@ -113,15 +119,18 @@ def _page(get, root, page, token, ua, sleep, clock=time.time):
 
 def search_root(root, token, now, get, ua, sleep=time.sleep):
     """Search one root and write its leak.public_code row. Returns {'pages', 'hits'}."""
-    hits, pages, complete = [], 0, True
+    hits, pages, complete, more = [], 0, True, False
     try:
         for page in range(1, MAX_PAGES + 1):
-            body = _page(get, root.value, page, token, ua, sleep)
+            body = _page(get, root.value, page, token, ua, sleep, root.project_id)
             pages += 1
             items = body.get('items') if isinstance(body, dict) else None
             hits += hits_in(items, root.value)
+            if isinstance(body, dict) and body.get('incomplete_results') is True:
+                more = True  # GitHub gave up part of the search
             if not isinstance(items, list) or len(items) < PER_PAGE:
                 break
+            more = more or page == MAX_PAGES  # a full last page: there may be more than we read
     except Stop as e:
         complete = False
         log.warning('code search: stopped for a root (%s)', e)
@@ -132,10 +141,11 @@ def search_root(root, token, now, get, ua, sleep=time.sleep):
             unique.append(h)
     if unique:
         result = Result(CHECK, 'fail', {'hits': unique[:MAX_HITS], 'count': len(unique)})
-    elif complete:
+    elif complete and not more:
         result = Result(CHECK, 'pass', {'pages': pages})
     else:
-        result = Result(CHECK, 'error', {'reason': 'search cut short', 'pages': pages})
+        result = Result(CHECK, 'error', {'reason': 'search cut short' if not complete else 'more results than the page cap',
+                                         'pages': pages})  # inconclusive: never a pass
     _write(root, [result], now)
     return {'pages': pages, 'hits': len(unique)}
 
@@ -149,7 +159,7 @@ def discover(project, root, now=None, make_get=None, sleep=time.sleep):
         return {'reason': 'not an owned root'}
     now = now or timezone.now()
     row = RiskCheck.objects.filter(asset=root, check_id=CHECK).first()
-    if row and row.status != 'error' and now - row.last_checked < REFRESH:
+    if row and now - row.last_checked < (ERROR_RETRY if row.status == 'error' else REFRESH):
         return {'reason': 'fresh'}
     get = (make_get or (lambda: safe_fetch.allowlisted_get((HOST,))))()
     try:

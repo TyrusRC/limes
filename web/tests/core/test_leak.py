@@ -344,3 +344,30 @@ class BreachApiTest(TestCase):
         r = c.get(f'/api/listDatatableAsset/{root.pk}/?project=p')
         self.assertEqual(r.status_code, 200, r.content[:200])
         self.assertEqual(r.json()['breaches'], [{'name': 'Adobe', 'addresses': 3, 'breach_date': None, 'published': None}])
+
+
+class CredentialShapesTest(SimpleTestCase):
+    def test_each_shape_is_found_and_masked(self):
+        from limes.checks.leak import credential_shapes
+        cases = {
+            'aws_access_key': 'AKIAIOSFODNN7ABCDEFG', 'github_token': 'ghp_' + 'a1B2c3D4' * 5, 'slack_token': 'xoxb-1234567890-abcdefABCDEF',
+            'stripe_key': 'sk_live_' + 'a1B2c3D4e5F6g7H8', 'google_api_key': 'AIza' + 'Sy' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q',
+        }
+        for kind, token in cases.items():
+            found = credential_shapes(f'key = "{token}" # x.com')
+            self.assertEqual([f['kind'] for f in found], [kind], kind)
+            self.assertEqual(found[0]['shape'], f'{kind}…{token[-4:]}')
+            self.assertNotIn(token, found[0]['shape'])
+        found = credential_shapes('-----BEGIN OPENSSH PRIVATE KEY-----')
+        self.assertEqual(found, [{'kind': 'private_key', 'shape': 'private_key_header'}])
+        self.assertEqual(credential_shapes('-----BEGIN PUBLIC KEY-----'), [])
+
+    def test_lookalikes_and_placeholders_are_not_credentials(self):
+        from limes.checks.leak import credential_shapes
+        for text in ('AKIAIOSFODNN7EXAMPLE', 'AKIA' + 'A' * 16, 'xAKIAIOSFODNN7ABCDEFG', 'ghp_short', 'sk_test_' + 'a1B2c3D4e5F6g7H8',
+                     'sk_live_xxxxxxxxxxxxxxxxxxxx', 'AIza' + 'short', 'plain prose about api keys'):
+            self.assertEqual(credential_shapes(text), [], text)
+
+    def test_hostile_long_lines_stay_fast(self):
+        from limes.checks.leak import credential_shapes
+        credential_shapes('AKIA' * 5000 + 'xox' * 5000 + 'gh_' * 5000)

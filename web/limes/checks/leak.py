@@ -44,6 +44,32 @@ def shape(token, kind):
     return ('sb_secret_…' if kind == 'sb_secret' else 'JWT(service_role)…') + token[-4:]
 
 
+# Well-known credential shapes for the public-code search (limes.code_search). Bounded quantifiers only; the shape kept is
+# the kind plus the last 4 characters, never the token. A placeholder-looking body (EXAMPLE, xxxx, ...) is not a hit.
+CREDENTIAL_RES = (
+    ('aws_access_key', re.compile(r'(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])')),
+    ('github_token', re.compile(r'(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{36,255}(?![A-Za-z0-9_])')),
+    ('slack_token', re.compile(r'(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,200}')),
+    ('stripe_key', re.compile(r'(?<![A-Za-z0-9_])[sr]k_live_[A-Za-z0-9]{16,200}')),
+    ('google_api_key', re.compile(r'(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])')),
+)
+PRIVATE_KEY_RE = re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----')
+
+
+def credential_shapes(text):
+    """[{'kind', 'shape'}] for every credential in one line of text: the Supabase detectors of scan_text plus the shapes
+    above. Nothing but the kind and the last 4 characters leaves this function."""
+    out = list(scan_text(text)['secrets'])
+    for kind, rx in CREDENTIAL_RES:
+        for m in rx.finditer(text):
+            token = m.group(0)
+            if len(set(token)) >= 8 and not PLACEHOLDER_RE.search(token):
+                out.append({'kind': kind, 'shape': f'{kind}…{token[-4:]}'})
+    if PRIVATE_KEY_RE.search(text):
+        out.append({'kind': 'private_key', 'shape': 'private_key_header'})
+    return out
+
+
 def _service_role(token):
     try:
         payload = token.split('.')[1]
