@@ -10,7 +10,9 @@ or the `sys_admin` role) are admins of every project.
 |---|---|
 | **Read-only** | Open every page of the project, use the search and the read APIs, download exports and reports. Every change is refused with 403: adding or confirming assets, scans, tags, waivers, notes, report schedules, generating a report. |
 | **Standard** | Everything read-only may do, plus every change in the project. Not: members and roles, integrations and secrets (notification settings, proxies, tool configuration and the keys in it, user administration), deleting the project. |
-| **Admin** | Everything, including the Members page. |
+| **Admin** | Everything in the project, including the Members page. |
+
+Instance-wide settings are not part of any project role: scan engines, notification settings, proxies, tool configuration, user administration, creating projects and the first-run setup need a global administrator. Scan result files (`/media/<target>_<scan id>/`) follow the project of the scan.
 
 A project always keeps at least one admin: the last one cannot be demoted or removed. The creator of a project
 becomes its admin. These roles sit on top of the older global roles (sys admin, penetration tester, auditor): a

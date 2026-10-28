@@ -14,7 +14,7 @@ UNSCOPED = {
     'four_oh_four': 'static page',
     'sso_login': 'anonymous start of SSO; no project data', 'sso_callback': 'anonymous end of SSO; no project data',
     'login': 'anonymous', 'logout': 'own session', 'healthz': 'anonymous health probe',
-    'serve_protected_media': 'login only: files are not project-addressed',
+    'serve_protected_media': 'authorised per file: reports/<project id>/ and <target>_<scan id>/ need membership of that project',
     'delete_project': 'resolved to its project by id (policy.EXTRA_RESOLVERS)',
     'api:stop_scan': 'resolved to its projects by scan id (policy.EXTRA_RESOLVERS)',
     'api:getFileContents': 'global tool configs: global admin only (policy.GLOBAL_ONLY)',
