@@ -5,6 +5,7 @@ import shutil
 
 from django import http
 from django.contrib import messages
+from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from rolepermissions.decorators import has_permission_decorator
@@ -49,7 +50,10 @@ def add_engine(request, slug):
 def delete_engine(request, slug, id):
     obj = get_object_or_404(EngineType, id=id)
     if request.method == "POST":
-        obj.delete()
+        try:
+            obj.delete()
+        except ProtectedError:  # scans were run with it: their history stays
+            return http.JsonResponse({'status': 'false'})
         responseData = {'status': 'true'}
         messages.add_message(
             request,

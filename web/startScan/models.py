@@ -16,7 +16,7 @@ class ScanHistory(models.Model):
 	scan_status = models.IntegerField(choices=CELERY_TASK_STATUSES, default=-1)
 	results_dir = models.CharField(max_length=100, blank=True)
 	domain = models.ForeignKey(Domain, on_delete=models.CASCADE)
-	scan_type = models.ForeignKey(EngineType, on_delete=models.CASCADE)
+	scan_type = models.ForeignKey(EngineType, on_delete=models.PROTECT)  # an engine delete must never erase scan history
 	celery_ids = ArrayField(models.CharField(max_length=100), blank=True, default=list)
 	tasks = ArrayField(models.CharField(max_length=200), null=True)
 	stop_scan_date = models.DateTimeField(null=True, blank=True)

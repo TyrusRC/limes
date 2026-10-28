@@ -11,15 +11,18 @@ ADMIN_ONLY = frozenset({
     'project_members_api', 'project_member_api',
     'delete_project',
 })
-# Instance-wide, not per project: notification webhooks, proxy, tool configuration (and the keys in it), user
+# Instance-wide, not per project: scan engines (every project's scans run on them), notification webhooks, proxy, tool
+# configuration (and the keys in it), user
 # administration, and creating projects. Only a global admin (superuser or sys_admin); being admin of a project, even
 # one you just created, never unlocks them.
 GLOBAL_ONLY = frozenset({
     'notification_settings', 'proxy_settings', 'tool_settings', 'admin_interface', 'admin_interface_update',
     'api:getFileContents', 'api:create_project',
+    'add_engine', 'update_engine', 'delete_engine_url',
 })
-# POST endpoints that only read (the body carries the question, nothing is stored).
-READ_ONLY_POST_OK = frozenset({'api:score_forecast'})
+# POST endpoints that only read (the body carries the question, nothing is stored), or only set the caller's own view
+# (the portfolio picked in their session).
+READ_ONLY_POST_OK = frozenset({'api:score_forecast', 'api:select_portfolio'})
 # A user's own password and personal tokens: allowed to every role. A token is bounded by its owner's project role
 # in the MCP server, so a read-only user's token cannot write.
 SELF_SERVICE = frozenset({'profile', 'api_tokens', 'api:notification-mark-read', 'api:notification-mark-all-read',
