@@ -110,7 +110,7 @@ def create_request(project, user, title, message, due_date, issue_ids, assignee=
             raise RemediationError('due date must be a date')
         if due_date < today:
             raise RemediationError('due date cannot be in the past')
-    if assignee is not None and not waivers.is_member(assignee):
+    if assignee is not None and not waivers.is_member(assignee, project.id):
         raise RemediationError('the assignee must be a member of this project')
     found = issues_of(project, issue_ids)
     now = timezone.now()

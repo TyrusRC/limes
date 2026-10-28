@@ -157,10 +157,12 @@ class Members(APIView):
     """Users who can be named as an approver or assignee (see limes.waivers.is_member)."""
 
     def get(self, request):
-        if _project(request.query_params) is None:
+        project = _project(request.query_params)
+        if project is None:
             return _missing('project not found')
-        users = [u.username for u in User.objects.filter(is_active=True).order_by('username')[:MEMBER_CAP * 5]
-                 if has_permission(u, PERM_MODIFY_TARGETS)][:MEMBER_CAP]
+        # only people who are members of this project, never the instance's other users
+        users = [u.username for u in User.objects.filter(is_active=True, project_memberships__project=project).distinct().order_by('username')[:MEMBER_CAP * 5]
+                 if waivers.is_member(u, project.id)][:MEMBER_CAP]
         return Response(users)
 
 

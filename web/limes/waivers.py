@@ -47,10 +47,13 @@ def _invalidate(project_id):
         logger.exception('Could not invalidate the dashboard cache for project %s', project_id)
 
 
-def is_member(user):
-    """May this user act on a project's waivers? Limes has no per-project membership, so a member is an active
-    user allowed to change targets (the permission waiving needs). The one place to tighten when ACLs arrive."""
-    return bool(user and user.is_active and has_permission(user, PERM_MODIFY_TARGETS))
+def is_member(user, project_id):
+    """May this user act on a project's waivers, or be named its approver or assignee? An active user allowed to change
+    targets who is a standard-or-better member of that project (a global admin counts as its admin). Fails closed."""
+    from memberships import rules
+    from memberships.models import STANDARD
+    return bool(user and user.is_active and has_permission(user, PERM_MODIFY_TARGETS)
+                and rules.at_least(rules.role_for(user, project_id), STANDARD))
 
 
 def create_waiver(issue, kind, reason, user, expires_at=None, now=None, scope='issue', approver=None, shared=False,
@@ -70,7 +73,7 @@ def create_waiver(issue, kind, reason, user, expires_at=None, now=None, scope='i
     if approver is not None:
         if approver == user:
             raise WaiverError('you cannot approve your own waiver')
-        if not is_member(approver):
+        if not is_member(approver, issue.project_id):
             raise WaiverError('the approver must be a member of this project')
     if expires_at is None and kind == 'accepted_risk':
         expires_at = now + timedelta(days=DEFAULT_DAYS)
@@ -117,7 +120,7 @@ def decide_waiver(project, waiver_id, user, approve, now=None):
         w = IssueWaiver.objects.select_for_update().get(pk=w.pk)
         if not w.approval_pending or w.revoked_at is not None:
             raise WaiverError('this waiver is not waiting for approval')
-        if w.approver_id != user.pk or not is_member(user):
+        if w.approver_id != user.pk or not is_member(user, project.id):
             raise WaiverError('only the named approver can decide this waiver')
         if w.created_by_id == user.pk:
             raise WaiverError('you cannot approve your own waiver')
