@@ -232,6 +232,9 @@ def delete_project(request, id):
     return JsonResponse(responseData)
 
 
+ONBOARDING_ROLES = ('penetration_tester', 'auditor')
+
+
 def onboarding(request):
     context = {}
     error = ''
@@ -245,6 +248,10 @@ def onboarding(request):
     if Project.objects.exists():
         context['error'] = 'You are not a member of any project. Ask a project admin to add you.'
         return render(request, 'dashboard/onboarding.html', context)
+
+    if not rules.is_global_admin(request.user):  # first-run setup is for an instance admin, not any signed-in user
+        context['error'] = 'No project exists yet. Ask an administrator to set the instance up.'
+        return render(request, 'dashboard/onboarding.html', context, status=403)
 
     if request.method == "POST":
         project_name = request.POST.get('project_name')
@@ -266,7 +273,7 @@ def onboarding(request):
 
 
         try:
-            if create_username and create_password and create_user_role:
+            if create_username and create_password and create_user_role in ONBOARDING_ROLES:  # never another admin from here
                 UserModel = get_user_model()
                 new_user = UserModel.objects.create_user(
                     username=create_username,

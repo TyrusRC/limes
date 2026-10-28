@@ -6,8 +6,8 @@ from tests.core.test_access_matrix import all_routes, send
 ADMIN_ONLY = {'project_members', 'project_member_add', 'project_member_role', 'project_member_remove',
               'project_members_api', 'project_member_api', 'delete_project'}
 GLOBAL_ONLY = {'notification_settings', 'proxy_settings', 'tool_settings', 'admin_interface', 'admin_interface_update',
-               'api:getFileContents', 'api:create_project'}
-READS_VIA_POST = {'api:score_forecast'}
+               'api:getFileContents', 'api:create_project', 'add_engine', 'update_engine', 'delete_engine_url'}
+READS_VIA_POST = {'api:score_forecast', 'api:select_portfolio'}  # the second only sets the caller's own session view
 OWN_THINGS = {'profile', 'api_tokens', 'api:notification-mark-read', 'api:notification-mark-all-read',
               'api:notification-clear-all'}
 GET_THAT_WRITES = set()
